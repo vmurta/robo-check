@@ -7,27 +7,27 @@ int main()
     // in .g format, which is BYU format meshes. 
     // We could either try to manually convert our meshes into obj format, or find 
     // some tool to automatically convert them in here.
-    //************************************************************************//
-    // // Load mesh 1 into BVHModel
-    // fcl::BVHModel<fcl::OBBRSS<double>> mesh1;
-    // if (!fcl::loadOBJ("mesh1.obj", mesh1)) {
-    //     std::cerr << "Failed to load mesh1.obj" << std::endl;
-    //     return 1;
-    // }
+    // ************************************************************************//
+    // Load mesh 1 into BVHModel
+    fcl::BVHModel<fcl::OBBRSS<double>> robot;
+    if (!fcl::loadOBJ("./models/robot.obj", robot)) {
+        std::cerr << "Failed to load robot.obj" << std::endl;
+        return 1;
+    }
 
-    // // Create CollisionObject for mesh1
-    // fcl::CollisionObject<fcl::OBBRSS<double>> co1(&mesh1);
+    // Create CollisionObject for robot
+    fcl::CollisionObject<fcl::OBBRSS<double>> co1(&robot);
 
-    // // Load mesh 2 into BVHModel
-    // fcl::BVHModel<fcl::OBBRSS<double>> mesh2;
-    // if (!fcl::loadOBJ("mesh2.obj", mesh2)) {
-    //     std::cerr << "Failed to load mesh2.obj" << std::endl;
-    //     return 1;
-    // }
-    //************************************************************************//
+    // Load mesh 2 into BVHModel
+    fcl::BVHModel<fcl::OBBRSS<double>> obstacle;
+    if (!fcl::loadOBJ("obstacle.obj", obstacle)) {
+        std::cerr << "Failed to load obstacle.obj" << std::endl;
+        return 1;
+    }
+    // ************************************************************************//
 
-    // Create CollisionObject for mesh2
-    fcl::CollisionObject<fcl::OBBRSS<double>> co2(&mesh2);
+    // Create CollisionObject for obstacle
+    fcl::CollisionObject<fcl::OBBRSS<double>> co2(&obstacle);
 
     // Set transformation matrices if necessary
     fcl::Transform3<double> tf1;

@@ -47,3 +47,9 @@ cd into there, then
     cmake ..
     make -j4
     sudo make install
+
+I had issues with actually linking against the libary, so I needed to throw a 
+
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/lib
+
+In my .bashrc as well, make sure that path is where libfcl.so.0.7 is
