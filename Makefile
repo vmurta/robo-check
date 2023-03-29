@@ -1,5 +1,5 @@
 CXX=g++
-CXXFLAGS=-Wall -Wextra -Wpedantic -std=c++11 -O3
+CXXFLAGS=-Wall -Wextra -Wpedantic -std=c++11 -Wno-deprecated-declarations
 LDFLAGS=-lfcl -lccd
 
 all: CPU-Sphere-Test 
