@@ -10,8 +10,6 @@ CPU-Mesh-Test: CPU-Mesh-Test.o
 CPU-Sphere-Test: CPU-Sphere-Test.o
 	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o $@
 
-# CPU-Sphere-Test.o: CPU-Sphere-Test.cpp
-# 	$(CXX) $(CXXFLAGS) -c $< -o $@
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
