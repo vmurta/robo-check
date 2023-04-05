@@ -2,12 +2,15 @@ CXX=g++
 CXXFLAGS=-Wall -Wextra -Wpedantic -std=c++11 -Wno-deprecated-declarations
 LDFLAGS=-lfcl -lccd
 
-all: CPU-Sphere-Test 
+all: CPU-Sphere-Test
 
 CPU-Mesh-Test: CPU-Mesh-Test.o
 	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o $@
 
 CPU-Sphere-Test: CPU-Sphere-Test.o
+	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o $@
+
+generate-test: generate-test.o
 	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o $@
 
 # CPU-Sphere-Test.o: CPU-Sphere-Test.cpp
