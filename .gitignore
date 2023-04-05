@@ -1,2 +1,13 @@
 
 *.o
+
+# Generated binaries
+CPU-Sphere-Test
+CPU-Mesh-Test
+generate-test
+
+# Test files
+tmp/*
+
+# Vim files
+*.swp
