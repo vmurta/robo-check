@@ -1,0 +1,41 @@
+Misc. notes
+https://developer.mozilla.org/en-US/docs/Games/Techniques/3D_collision_detection
+
+Check for these optimizations:
+- In broad phase, load AABB of obstacles onto constant memory
+
+==============
+Design 1:
+==============
+
+Copy robot mesh to GPU constant memory.
+
+===kernel 1===
+Generate AABB for all obstacles.
+Parallelize over obstacles - each thread generates AABB for one obstacle
+Outputs stored in global memory
+Notes: May be too little work per thread. Coarsen? Will that lead to low occupancy?
+==============
+
+Optional: Get AABBs and load it onto constant memory on the GPU.
+Notes: Is it possble to write to constant memory within the kernel? AFAIK, I dont think so.
+
+===kernel 2===
+Generate AABB for each robot configuration.
+Parallelize over configurations - each thread generates AABB for one configuration
+Outputs stored in global memory
+
+Fork to kernel 3
+    ===kernel 3===
+    Parallelize over obstacles.
+    Collaboratively load obstacles to shared memory if they're in global memory.
+    Each thread checks for collision between one configuration (from kernel 2) and one obstacle
+    ==============
+==============
+
+
+Issues with design 1:
+---------------------
+- Every configuration has to be checked against every other obstacle. So each of the blocks in kernel 3 will have
+the same data replicated in shared memory.
+    - Would it even be possible to load all the obstacles into shared memory in all the blocks?
