@@ -11,3 +11,7 @@ tmp/*
 
 # Vim files
 *.swp
+
+# Python files
+python/env/*
+python/__pycache__/*
