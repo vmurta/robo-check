@@ -1,0 +1,17 @@
+# project
+rai:
+  version: 0.2
+  image: raiproject/pumps2018:amd64-cuda100
+resources:
+  cpu:
+    architecture: ppc64le
+  gpu:
+    count: 1
+  network: false
+  cache: false
+commands:
+  build:
+    - cp -r /src .
+    - nvcc -c /src/GPU-Mesh-Test.cu -o GPU-Mesh-Test.o
+    - nvcc GPU-Mesh-Test.o -o GPU-Mesh-Test
+    - ./GPU-Mesh-Test
