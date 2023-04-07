@@ -13,3 +13,5 @@ Run the tests with
 ```
 python3 -m pytest .
 ```
+
+The algorithm described is adapted from [here](https://web.stanford.edu/class/cs277/resources/papers/Moller1997b.pdf).
