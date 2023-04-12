@@ -23,6 +23,8 @@ void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_con
 
 }
 
+//TODO: move robot to constant memory
+//TODO: refactor code to minimize loads by interleaving file reads and device memory operations
 int main()
 {
     int device_count;
@@ -30,7 +32,7 @@ int main()
     // load configurations, should have 6990 valids and 3010 invalids
     std::vector<Configuration> confs;
     readConfigurationFromFile("/src/10,000samples.conf", confs);
-    createAlphaBotConfigurations(confs, 10000);
+    // createAlphaBotConfigurations(confs, 10000);
 
     //Load Robot
     std::vector<Vector3f> rob_vertices;
@@ -38,16 +40,33 @@ int main()
     loadOBJFile("/src/models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
     std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
 
-    /*std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
-    rob_mesh->beginModel(rob_triangles.size(), rob_vertices.size());
-    rob_mesh->addSubModel(rob_vertices, rob_triangles);
-    rob_mesh->endModel();
-    std::cout << "loaded robot" <<std::endl;*/
-
     // Load Obstacle
     std::vector<Vector3f> obs_vertices;
     std::vector<Triangle> obs_triangles;
     loadOBJFile("/src/models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
     std::cout << "obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
-    return 0;
+
+    Vector3f *d_rob_vertices;
+    cudaMalloc(&d_rob_vertices, rob_vertices.size() * sizeof(Vector3f));
+    cudaMemcpy(&d_rob_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice);
+
+    Vector3f *d_transformed_vertices;
+    cudaMalloc(&d_transformed_vertices, rob_vertices.size() * sizeof(Vector3f) * confs.size());
+
+    Triangle *d_rob_triangles;
+    cudaMalloc(&d_rob_triangles, rob_vertices.size() * sizeof(Triangle));
+    cudaMemcpy(&d_rob_triangles, rob_vertices.data(), rob_vertices.size() * sizeof(Triangle), cudaMemcpyHostToDevice);
+
+    Configuration *d_confs;
+    cudaMalloc(&d_confs, confs.size() * sizeof(Configuration));
+    cudaMemcpy(&d_confs, confs.data(), confs.size() * sizeof(Configuration), cudaMemcpyHostToDevice);
+
+    cudaDeviceSynchronize();
+    // bitshifting right by 5 is the same as dividing by 2^5 (which is 32) and rounding up
+    // also technically faster not that it matters very much
+    genTransformedCopies<<<confs.size() >> 5, 32>>>(d_confs, d_rob_vertices, d_transformed_vertices, 
+                                                    confs.size(), rob_vertices.size());
+    cudaFree(d_confs);
+    cudaFree(d_rob_triangles);
+    cudaFree(d_rob_vertices);
 }
