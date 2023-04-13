@@ -18,6 +18,16 @@ struct Matrix4f {
     float m[4][4];
 };
 
+struct AABB
+{
+    float x_min;
+    float y_min;
+    float z_min;
+    float x_max;
+    float y_max;
+    float z_max;
+};
+
 void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename) {
     std::ofstream file(filename);
     if (file.is_open()) {
@@ -290,5 +300,31 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
       }
       // increment to the next transformation
       transformed_vertices_offset += num_robot_vertices;
+    }
+}
+
+// generate_AABB- Generate AABBs for all configurations
+void generate_AABB(Vector3f* vertices, unsigned int num_vertices, 
+                    unsigned int num_configs, AABB* bot_bounds) {
+    // Loop over every configuration
+    for(int i = 0; i < num_configs; ++i)
+    {
+        // Loop over every vertex in each configuration
+        unsigned int config_ofset = i * num_vertices;
+        bot_bounds[i].x_min = vertices[config_ofset].x;
+        bot_bounds[i].y_min = vertices[config_ofset].y;
+        bot_bounds[i].z_min = vertices[config_ofset].z;
+        bot_bounds[i].x_max = vertices[config_ofset].x;
+        bot_bounds[i].y_max = vertices[config_ofset].y;
+        bot_bounds[i].z_max = vertices[config_ofset].z;
+        for(int j = 0; j < num_vertices; ++j)
+        {
+            bot_bounds[i].x_min = min(bot_bounds[i].x_min, vertices[config_ofset].x);
+            bot_bounds[i].y_min = min(bot_bounds[i].y_min, vertices[config_ofset].y);
+            bot_bounds[i].z_min = min(bot_bounds[i].z_min, vertices[config_ofset].z);
+            bot_bounds[i].x_max = max(bot_bounds[i].x_max, vertices[config_ofset].x);
+            bot_bounds[i].y_max = max(bot_bounds[i].y_max, vertices[config_ofset].y);
+            bot_bounds[i].z_max = max(bot_bounds[i].z_max, vertices[config_ofset].z);
+        }
     }
 }
