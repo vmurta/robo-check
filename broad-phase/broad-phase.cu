@@ -2,7 +2,7 @@
 #include "../Utils_rai.h"
 
 // Check if two objects are colliding along a certain dimension
-inline __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax) {
+inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax) {
     // Done without any control divergence!
     return sndMin > fstMax || sndMax < fstMin;
 }
@@ -36,4 +36,17 @@ void broadPhase(int num_confs, const AABB *robots, const AABB *obstacle, bool *v
     int blockDim = 256;
     broadPhaseKernel<<<gridDim, blockDim>>>(num_confs, robots, obstacle, valid_conf);
     cudaDeviceSynchronize();
+}
+
+void broadPhaseBaseline(int num_confs, const AABB *robots, const AABB *obstacle, bool *valid_conf) {
+    for (int i = 0; i < num_confs; i++) {
+        AABB current = robots[i];
+        
+        // We can avoid ANY control divergence here!
+        bool isNotValid = 
+            dimensionCollides(obstacle.x_min, obstacle.x_max, cuurent.x_min, current.x_max) &&
+            dimensionCollides(obstacle.y_min, obstacle.y_max, cuurent.y_min, current.y_max) &&
+            dimensionCollides(obstacle.z_min, obstacle.z_max, cuurent.z_min, current.z_max);
+        valid_conf[i] = !isNotValid;
+    }
 }
