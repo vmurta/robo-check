@@ -1,6 +1,8 @@
 #include "broad-phase.hu"
 #include "../Utils_rai.h"
 
+#define BROAD_PHASE_TILE_SIZE 256
+
 // Check if two objects are colliding along a certain dimension
 inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax) {
     // Done without any control divergence!
@@ -8,17 +10,18 @@ inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, fl
 }
 
 __global__ void broadPhaseKernel(int num_confs, const AABB *robots, const AABB *obstacle, bool *valid_conf) {  
-    int numConfsPerThread = num_confs / (gridDim.x * blockDim.x);
+    int numConfsPerThread = ceil((num_confs * 1.0) / (gridDim.x * blockDim.x));
     int threadNo = blockIdx.x * blockDim.x + threadIdx.x;
 
     // FIXME - Build a shared memory version
-    __shared__ AABB robotTile[sizeof(AABB) * 256];
+    __shared__ AABB robotTile[sizeof(AABB) * BROAD_PHASE_TILE_SIZE];
 
     // Due to the massive reuse it's fastest to store the obstacle AABB in registers
     AABB obstacleReg = *obstacle;
 
     // FIXME - Shared memory loading and usage (will need to coalesce as well)
     for (int i = threadNo * numConfsPerThread; i < min(num_confs, (threadNo + 1) * numConfsPerThread); i++) {
+        // FIXME - Switch to direct tile loading
         AABB current = robots[i];
         
         // We can avoid ANY control divergence here!
@@ -33,7 +36,7 @@ __global__ void broadPhaseKernel(int num_confs, const AABB *robots, const AABB *
 
 void broadPhase(int num_confs, const AABB *robots, const AABB *obstacle, bool *valid_conf) {
     int gridDim = 100;
-    int blockDim = 256;
+    int blockDim = BROAD_PHASE_TILE_SIZE;
     broadPhaseKernel<<<gridDim, blockDim>>>(num_confs, robots, obstacle, valid_conf);
     cudaDeviceSynchronize();
 }
