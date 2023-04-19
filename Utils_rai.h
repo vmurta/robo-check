@@ -4,6 +4,25 @@
 #include <string.h>
 // #include <transform.h>
 
+#define checkCudaCall(status) \
+    do { \
+        cudaError_t err = status; \
+        if(err != cudaSuccess) { \
+            fprintf(stderr, "CUDA Error in %s:%d at line %d: %s\n", \
+                __FILE__, __LINE__, err, cudaGetErrorString(err)); \
+        } \
+    } while(0)
+
+#define checkCudaMem(error) \
+    do { \
+        cudaError_t err = error; \
+        if (err != cudaSuccess) { \
+            fprintf(stderr, "CUDA error at %s:%d: %s\n", \
+                __FILE__, __LINE__, cudaGetErrorString(err)); \
+            exit(1); \
+        } \
+    } while (0)
+
 struct Configuration {
     float x;
     float y;
@@ -16,6 +35,16 @@ struct Configuration {
 
 struct Matrix4f {
     float m[4][4];
+};
+
+struct Vector3f {
+  float x, y, z;
+  __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}\
+  __device__ __host__ Vector3f() : x(0), y(0), z(0) {};
+};
+
+struct Triangle {
+  int v1, v2, v3;
 };
 
 void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename) {
@@ -48,14 +77,6 @@ void readConfigurationFromFile(const std::string& filename, std::vector<Configur
     file.close();
 }
 
-struct Vector3f {
-  float x, y, z;
-  __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
-};
-
-struct Triangle {
-  int v1, v2, v3;
-};
 
 //TODO: modify this to directly write to device memory
 void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vector<Triangle>& triangles){
@@ -114,7 +135,9 @@ void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vecto
         }
 
         for(int t = 0; t < (n - 2); ++t)
-        {
+        {struct Matrix4f {
+    float m[4][4];
+};
           if((!has_texture) && (!has_normal))
           {
             tri.v1 = atoi(data[0]) - 1;
@@ -180,11 +203,11 @@ void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
     fcl::Transform3f out;
     out.setIdentity();
     fcl::Vector3f translation(config.x, config.y, config.z);
-    
+
     fcl::Quaternionf rotation = Eigen::AngleAxisf(config.roll, Eigen::Vector3f::UnitX())
                               * Eigen::AngleAxisf(config.pitch, Eigen::Vector3f::UnitY())
                               * Eigen::AngleAxisf(config.yaw, Eigen::Vector3f::UnitZ());
-    
+
     out.translation() = translation;
     out.rotate(rotation);
     return out;
@@ -204,7 +227,7 @@ void printConfiguration(const Configuration& conf) {
 // TODO: Make this part run in parallel
 // IDEA: could have each block do blockDim.x number of transformations
 // Have each thread precompute the transformationMatrix at start of block
-// Then, the block loops through the list of transformation matrix, computing each 
+// Then, the block loops through the list of transformation matrix, computing each
 // in parallel
 __device__ Matrix4f createTransformationMatrix(Configuration config) {
     float x = config.x;
@@ -212,32 +235,49 @@ __device__ Matrix4f createTransformationMatrix(Configuration config) {
     float z = config.z;
     float pitch = config.pitch;
     float yaw = config.yaw;
-    float roll = config.roll;
+    float roll= config.roll;
 
-    float cosPitch = cos(pitch);
-    float sinPitch = sin(pitch);
-    float cosYaw = cos(yaw);
-    float sinYaw = sin(yaw);
-    float cosRoll = cos(roll);
-    float sinRoll = sin(roll);
+    float cosB = cos(pitch);
+    float sinB = sin(pitch);
+    float cosA = cos(yaw);
+    float sinA = sin(yaw);
+    float cosC = cos(roll);
+    float sinC = sin(roll);
 
     Matrix4f transform;
-    transform.m[0][0] = cosYaw * cosRoll + sinYaw * sinPitch * sinRoll;
-    transform.m[0][1] = -cosYaw * sinRoll + sinYaw * sinPitch * cosRoll;
-    transform.m[0][2] = sinYaw * cosPitch;
+    transform.m[0][0] = cosA * cosB;
+    transform.m[0][1] = cosA * sinB * sinC - sinA * cosC;
+    transform.m[0][2] = cosA * sinB * cosC + sinA * sinC;
     transform.m[0][3] = x;
-    transform.m[1][0] = cosPitch * sinRoll;
-    transform.m[1][1] = cosPitch * cosRoll;
-    transform.m[1][2] = -sinPitch;
+    transform.m[1][0] = sinA * cosB;
+    transform.m[1][1] = sinA * sinB * sinC + cosA * cosC;
+    transform.m[1][2] = sinA * sinB * cosC - cosA * sinC;
     transform.m[1][3] = y;
-    transform.m[2][0] = -sinYaw * cosRoll + cosYaw * sinPitch * sinRoll;
-    transform.m[2][1] = sinYaw * sinRoll + cosYaw * sinPitch * cosRoll;
-    transform.m[2][2] = cosYaw * cosPitch;
+    transform.m[2][0] = -sinB;
+    transform.m[2][1] = cosB * sinC;
+    transform.m[2][2] = cosB * cosC;
     transform.m[2][3] = z;
     transform.m[3][0] = 0;
     transform.m[3][1] = 0;
     transform.m[3][2] = 0;
     transform.m[3][3] = 1;
+    // Matrix4f transform;
+    // transform.m[0][0] = cosYaw * cosRoll + sinYaw * sinPitch * sinRoll;
+    // transform.m[0][1] = -cosYaw * sinRoll + sinYaw * sinPitch * cosRoll;
+    // transform.m[0][2] = sinYaw * cosPitch;
+    // transform.m[0][3] = x;
+    // transform.m[1][0] = cosPitch * sinRoll;
+    // transform.m[1][1] = cosPitch * cosRoll;
+    // transform.m[1][2] = -sinPitch;
+    // transform.m[1][3] = y;
+    // transform.m[2][0] = -sinYaw * cosRoll + cosYaw * sinPitch * sinRoll;
+    // transform.m[2][1] = sinYaw * sinRoll + cosYaw * sinPitch * cosRoll;
+    // transform.m[2][2] = cosYaw * cosPitch;
+    // transform.m[2][3] = z;
+    // transform.m[3][0] = 0;
+    // transform.m[3][1] = 0;
+    // transform.m[3][2] = 0;
+    // transform.m[3][3] = 1;
 
     return transform;
 }
@@ -263,9 +303,9 @@ __device__ Vector3f transformVector(Vector3f v, Matrix4f M) {
 
     return v_prime;
 }
-  
+
 __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot_vertices,
-                                     Vector3f* transformed_robot_vertices, int num_confs, 
+                                     Vector3f* transformed_robot_vertices, int num_confs,
                                     int num_robot_vertices){
     size_t conf_ind = blockIdx.x * blockDim.x + threadIdx.x;
     #define TRANS_SIZE 32
@@ -274,8 +314,9 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
     if (conf_ind < num_confs){
       transforms[threadIdx.x] = createTransformationMatrix(confs[conf_ind]);
     }
+    __syncthreads();
     // do TRANS_SIZE number of configurations, unless that would put us out of bounds
-    size_t num_confs_to_do = blockIdx.x * blockDim.x + TRANS_SIZE < num_confs ? TRANS_SIZE 
+    size_t num_confs_to_do = blockIdx.x * blockDim.x + TRANS_SIZE < num_confs ? TRANS_SIZE
                               : num_confs -  blockIdx.x * blockDim.x;
 
     size_t transformed_vertices_offset = num_robot_vertices * TRANS_SIZE * blockIdx.x;
@@ -285,10 +326,20 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
       //each thread computes a portion of the current transformation and writes it to global
       // TODO: do this in shared memory, tile and flush
       for(int rob_ind = threadIdx.x; rob_ind < num_robot_vertices; rob_ind += blockDim.x){
-        transformed_robot_vertices[rob_ind + transformed_vertices_offset] = 
+        transformed_robot_vertices[rob_ind + transformed_vertices_offset] =
           transformVector(base_robot_vertices[rob_ind], transforms[i]);
       }
       // increment to the next transformation
       transformed_vertices_offset += num_robot_vertices;
+    }
+    if (conf_ind < 1){
+      printf("transforms[%i] = [\n%f, %f, %f, %f\n%f, %f, %f, %f\n%f, %f, %f, %f\n%f, %f, %f, %f\n]\n", threadIdx.x,
+       transforms[threadIdx.x].m[0][0], transforms[threadIdx.x].m[0][1], transforms[threadIdx.x].m[0][2], transforms[threadIdx.x].m[0][3],
+       transforms[threadIdx.x].m[1][0], transforms[threadIdx.x].m[1][1], transforms[threadIdx.x].m[1][2], transforms[threadIdx.x].m[1][3],
+       transforms[threadIdx.x].m[2][0], transforms[threadIdx.x].m[2][1], transforms[threadIdx.x].m[2][2], transforms[threadIdx.x].m[2][3],
+       transforms[threadIdx.x].m[3][0], transforms[threadIdx.x].m[3][1], transforms[threadIdx.x].m[3][2], transforms[threadIdx.x].m[3][3]);
+      // printf("config = [x=%f, y=%f, z=%f, pitch=%f, yaw=%f, roll=%f]\n",
+      //  confs[conf_ind].x, confs[conf_ind].y, confs[conf_ind].z, confs[conf_ind].pitch, confs[conf_ind].yaw, confs[conf_ind].roll);
+
     }
 }
