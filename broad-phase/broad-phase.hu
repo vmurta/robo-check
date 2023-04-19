@@ -4,7 +4,7 @@ Function signatures and support for the broad-phase kernel
 
 #pragma once
 
-#include "../utils/aabb.hu"
+#include "../Utils_rai.h"
 
 // This assumes all data is already copied to the device and pre-allocated
 // It's basically just a wrapper for the CUDA kernel

@@ -1,5 +1,6 @@
 #pragma once
 #include <fstream>
+#include <iostream>
 #include <random>
 #include <string.h>
 // #include <transform.h>

@@ -26,9 +26,9 @@ __global__ void broadPhaseKernel(int num_confs, const AABB *robots, const AABB *
         
         // We can avoid ANY control divergence here!
         bool isNotValid = 
-            dimensionCollides(obstacleReg.x_min, obstacleReg.x_max, cuurent.x_min, current.x_max) &&
-            dimensionCollides(obstacleReg.y_min, obstacleReg.y_max, cuurent.y_min, current.y_max) &&
-            dimensionCollides(obstacleReg.z_min, obstacleReg.z_max, cuurent.z_min, current.z_max);
+            dimensionCollides(obstacleReg.x_min, obstacleReg.x_max, current.x_min, current.x_max) &&
+            dimensionCollides(obstacleReg.y_min, obstacleReg.y_max, current.y_min, current.y_max) &&
+            dimensionCollides(obstacleReg.z_min, obstacleReg.z_max, current.z_min, current.z_max);
         valid_conf[i] = !isNotValid;
     }
 
@@ -46,10 +46,9 @@ void broadPhaseBaseline(int num_confs, const AABB *robots, const AABB *obstacle,
         AABB current = robots[i];
         
         // We can avoid ANY control divergence here!
-        bool isNotValid = 
-            dimensionCollides(obstacle.x_min, obstacle.x_max, cuurent.x_min, current.x_max) &&
-            dimensionCollides(obstacle.y_min, obstacle.y_max, cuurent.y_min, current.y_max) &&
-            dimensionCollides(obstacle.z_min, obstacle.z_max, cuurent.z_min, current.z_max);
+        bool isNotValid = dimensionCollides(obstacle.x_min, obstacle.x_max, current.x_min, current.x_max) &&
+            dimensionCollides(obstacle.y_min, obstacle.y_max, current.y_min, current.y_max) &&
+            dimensionCollides(obstacle.z_min, obstacle.z_max, current.z_min, current.z_max);
         valid_conf[i] = !isNotValid;
     }
 }
