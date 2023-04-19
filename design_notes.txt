@@ -4,9 +4,9 @@ https://developer.mozilla.org/en-US/docs/Games/Techniques/3D_collision_detection
 Check for these optimizations:
 - In broad phase, load AABB of obstacles onto constant memory
 
-==============
-Design 1:
-==============
+=================================
+Design 1: Initial mock-up
+=================================
 
 Copy robot mesh to GPU constant memory.
 
@@ -39,3 +39,39 @@ Issues with design 1:
 - Every configuration has to be checked against every other obstacle. So each of the blocks in kernel 3 will have
 the same data replicated in shared memory.
     - Would it even be possible to load all the obstacles into shared memory in all the blocks?
+
+---------------------------------------------------------------------------------------------------
+===================================================================================================
+---------------------------------------------------------------------------------------------------
+
+=================================
+Design 2: Post team-discussion 
+=================================
+
+4 kernels.
+Copy robot mesh to GPU constant memory.
+
+===kernel 1===
+Transform robot mesh -- apply the configurations to the robot mesh and generate transformations.
+For each configuration, write a transformed copy of the robot into global memory.
+Each thread computes a portion of the current transformation and writes it to global
+Idea: use shared memory, tile and flush.
+==============
+
+===kernel 2===
+Generate AABB from transformed mesh.
+Idea: use reduction techniques.
+==============
+
+===kernel 3===
+Perform broad phase collision detection.
+==============
+
+===kernel 4===
+For all configurations that collide in the broad phase, perform narrow phase collision detection.
+Notes: Computationally intesnsive operation.
+==============
+
+---------------------------------------------------------------------------------------------------
+===================================================================================================
+---------------------------------------------------------------------------------------------------

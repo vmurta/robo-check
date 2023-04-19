@@ -1,0 +1,15 @@
+/**
+Function signatures and support for the broad-phase kernel
+*/
+
+#pragma once
+
+#include "../utils/aabb.hu"
+
+// This assumes all data is already copied to the device and pre-allocated
+// It's basically just a wrapper for the CUDA kernel
+void broadPhase(int num_confs, const AABB *robots, const AABB *obstacle, bool *valid_conf);
+
+// CPU baseline version
+// Requires all data to be on the host and pre-allocated
+void broadPhaseBaseline(int num_confs, const AABB *robots, const AABB *obstacle, bool *valid_conf);

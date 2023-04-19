@@ -47,6 +47,16 @@ struct Triangle {
   int v1, v2, v3;
 };
 
+struct AABB
+{
+    float x_min;
+    float y_min;
+    float z_min;
+    float x_max;
+    float y_max;
+    float z_max;
+};
+
 void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename) {
     std::ofstream file(filename);
     if (file.is_open()) {
@@ -332,14 +342,30 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
       // increment to the next transformation
       transformed_vertices_offset += num_robot_vertices;
     }
-    if (conf_ind < 1){
-      printf("transforms[%i] = [\n%f, %f, %f, %f\n%f, %f, %f, %f\n%f, %f, %f, %f\n%f, %f, %f, %f\n]\n", threadIdx.x,
-       transforms[threadIdx.x].m[0][0], transforms[threadIdx.x].m[0][1], transforms[threadIdx.x].m[0][2], transforms[threadIdx.x].m[0][3],
-       transforms[threadIdx.x].m[1][0], transforms[threadIdx.x].m[1][1], transforms[threadIdx.x].m[1][2], transforms[threadIdx.x].m[1][3],
-       transforms[threadIdx.x].m[2][0], transforms[threadIdx.x].m[2][1], transforms[threadIdx.x].m[2][2], transforms[threadIdx.x].m[2][3],
-       transforms[threadIdx.x].m[3][0], transforms[threadIdx.x].m[3][1], transforms[threadIdx.x].m[3][2], transforms[threadIdx.x].m[3][3]);
-      // printf("config = [x=%f, y=%f, z=%f, pitch=%f, yaw=%f, roll=%f]\n",
-      //  confs[conf_ind].x, confs[conf_ind].y, confs[conf_ind].z, confs[conf_ind].pitch, confs[conf_ind].yaw, confs[conf_ind].roll);
+}
 
+// generate_AABB- Generate AABBs for all configurations
+void generate_AABB(Vector3f* vertices, unsigned int num_vertices, 
+                    unsigned int num_configs, AABB* bot_bounds) {
+    // Loop over every configuration
+    for(int i = 0; i < num_configs; ++i)
+    {
+        // Loop over every vertex in each configuration
+        unsigned int config_ofset = i * num_vertices;
+        bot_bounds[i].x_min = vertices[config_ofset].x;
+        bot_bounds[i].y_min = vertices[config_ofset].y;
+        bot_bounds[i].z_min = vertices[config_ofset].z;
+        bot_bounds[i].x_max = vertices[config_ofset].x;
+        bot_bounds[i].y_max = vertices[config_ofset].y;
+        bot_bounds[i].z_max = vertices[config_ofset].z;
+        for(int j = 0; j < num_vertices; ++j)
+        {
+            bot_bounds[i].x_min = min(bot_bounds[i].x_min, vertices[config_ofset].x);
+            bot_bounds[i].y_min = min(bot_bounds[i].y_min, vertices[config_ofset].y);
+            bot_bounds[i].z_min = min(bot_bounds[i].z_min, vertices[config_ofset].z);
+            bot_bounds[i].x_max = max(bot_bounds[i].x_max, vertices[config_ofset].x);
+            bot_bounds[i].y_max = max(bot_bounds[i].y_max, vertices[config_ofset].y);
+            bot_bounds[i].z_max = max(bot_bounds[i].z_max, vertices[config_ofset].z);
+        }
     }
 }

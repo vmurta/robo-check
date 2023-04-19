@@ -12,6 +12,7 @@ resources:
 commands:
   build:
     - cp -r /src .
+    - nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
     - nvcc -c /src/GPU-Mesh-Test.cu -o GPU-Mesh-Test.o
-    - nvcc GPU-Mesh-Test.o -o GPU-Mesh-Test
+    - nvcc GPU-Mesh-Test.o broad-phase.o -o GPU-Mesh-Test
     - ./GPU-Mesh-Test
