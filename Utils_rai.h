@@ -18,6 +18,15 @@ struct Matrix4f {
     float m[4][4];
 };
 
+struct Vector3f {
+  float x, y, z;
+  __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+};
+
+struct Triangle {
+  int v1, v2, v3;
+};
+
 struct AABB
 {
     float x_min;
@@ -27,6 +36,12 @@ struct AABB
     float y_max;
     float z_max;
 };
+
+// generateAABB- Generate AABBs for all configurations parallelly
+void generateAABB(Vector3f*, unsigned int, unsigned int, AABB*);
+
+// generateAABBBaseline- Generate AABBs for all configurations serially
+void generateAABBBaseline(Vector3f*, unsigned int, unsigned int, AABB*);
 
 void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename) {
     std::ofstream file(filename);
@@ -57,15 +72,6 @@ void readConfigurationFromFile(const std::string& filename, std::vector<Configur
     }
     file.close();
 }
-
-struct Vector3f {
-  float x, y, z;
-  __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
-};
-
-struct Triangle {
-  int v1, v2, v3;
-};
 
 //TODO: modify this to directly write to device memory
 void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vector<Triangle>& triangles){
@@ -300,31 +306,5 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
       }
       // increment to the next transformation
       transformed_vertices_offset += num_robot_vertices;
-    }
-}
-
-// generate_AABB- Generate AABBs for all configurations
-void generate_AABB(Vector3f* vertices, unsigned int num_vertices, 
-                    unsigned int num_configs, AABB* bot_bounds) {
-    // Loop over every configuration
-    for(int i = 0; i < num_configs; ++i)
-    {
-        // Loop over every vertex in each configuration
-        unsigned int config_ofset = i * num_vertices;
-        bot_bounds[i].x_min = vertices[config_ofset].x;
-        bot_bounds[i].y_min = vertices[config_ofset].y;
-        bot_bounds[i].z_min = vertices[config_ofset].z;
-        bot_bounds[i].x_max = vertices[config_ofset].x;
-        bot_bounds[i].y_max = vertices[config_ofset].y;
-        bot_bounds[i].z_max = vertices[config_ofset].z;
-        for(int j = 0; j < num_vertices; ++j)
-        {
-            bot_bounds[i].x_min = min(bot_bounds[i].x_min, vertices[config_ofset].x);
-            bot_bounds[i].y_min = min(bot_bounds[i].y_min, vertices[config_ofset].y);
-            bot_bounds[i].z_min = min(bot_bounds[i].z_min, vertices[config_ofset].z);
-            bot_bounds[i].x_max = max(bot_bounds[i].x_max, vertices[config_ofset].x);
-            bot_bounds[i].y_max = max(bot_bounds[i].y_max, vertices[config_ofset].y);
-            bot_bounds[i].z_max = max(bot_bounds[i].z_max, vertices[config_ofset].z);
-        }
     }
 }
