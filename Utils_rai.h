@@ -21,6 +21,7 @@ struct Matrix4f {
 
 struct Vector3f {
   float x, y, z;
+  __device__ __host__ Vector3f() : x(0), y(0), z(0) {}
   __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
 };
 
@@ -37,12 +38,6 @@ struct AABB
     float y_max;
     float z_max;
 };
-
-// generateAABB- Generate AABBs for all configurations parallelly
-void generateAABB(Vector3f*, unsigned int, unsigned int, AABB*);
-
-// generateAABBBaseline- Generate AABBs for all configurations serially
-void generateAABBBaseline(Vector3f*, unsigned int, unsigned int, AABB*);
 
 void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename) {
     std::ofstream file(filename);

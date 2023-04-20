@@ -12,6 +12,11 @@ resources:
 commands:
   build:
     - cp -r /src .
+    - nvcc -c /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
+    # - nvcc -c /src/generate-AABB/test-generate-AABB.cu -o test-generate-AABB.o
+    # - nvcc generate-AABB.o test-generate-AABB.o -o test-generate-AABB
+    - nvcc generate-AABB.o -o test-generate-AABB
+    - ./test-generate-AABB
     - nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
     - nvcc -c /src/GPU-Mesh-Test.cu -o GPU-Mesh-Test.o
     - nvcc GPU-Mesh-Test.o broad-phase.o -o GPU-Mesh-Test
