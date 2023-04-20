@@ -1,0 +1,24 @@
+/**
+Function signatures and support for the narrow-phase kernel
+*/
+
+#pragma once
+#include "narrow-phase.hu"
+
+// Helper functions
+bool isclose(float v1, float v2);
+bool veq(const Vector3f v1, const Vector3f v2);
+bool teq(const Triangle self_tr, const Vector3f *self_pts,
+        const Triangle other_tr, const Vector3f *other_pts);
+void compute_plane(const Triangle tr, const Vector3f *pts, Vector3f *N,
+    float *d);
+Vector3f compute_signed_dists(const Vector3f N, const float d, const Triangle tr,
+        const Vector3f *pts);
+bool no_overlap(const Vector3f dists);
+bool yes_overlap(const Vector3f dists);
+void la_solve(const float A1, const float A2, const float A3, const float A4,
+        const float b1, const float b2, float *x1, float *x2);
+void compute_intersect_line(const Vector3f N1, const float d1,
+        const Vector3f N2, const float d2, Vector3f *D, Vector3f *O);
+float project_vertex(const Vector3f V, const Vector3f D, const Vector3f O);
+void canonicalize_triangle(const Triangle t, const Vector3f dists, Triangle *new_t, Vector3f *new_dists);

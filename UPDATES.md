@@ -10,3 +10,4 @@
 # April 19th, 2023
 
 - Riley: Broad phase kernel now has a basic implementation (no shared memory is used yet). I will test it once the AABB kernel is working, then optimize.
+- Nandeeka: I am currently working on the C++ implementation of the narrow phase. While LOC is often an unsatisfying metric, I will say that I spent many hours and wrote >750 LOC. Currently, very close to having a working implementation (minus all of the checks necessary if the triangles are coplanar). I think the easiest will be for us to proceed with this implementation now, raising an error if coplanar triangles are encountered.
