@@ -16,10 +16,10 @@ commands:
     #- nvcc -c /src/generate-AABB/test-generate-AABB.cu -o test-generate-AABB.o
     #- nvcc generate-AABB.o -o test-generate-AABB
     #- ./test-generate-AABB
-    - nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
-    - nvcc broad-phase.o -o test-broad-phase
-    - ./test-broad-phase
-    #- nvcc -c /src/narrow-phase/narrow-phase.cu -o narrow-phase.o
-    #- nvcc -c /src/narrow-phase/test-narrow-phase.cu -o test-narrow-phase.o
-    #- nvcc narrow-phase.o test-narrow-phase.o -o test-narrow-phase
-    #- ./test-narrow-phase
+    #- nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
+    #- nvcc broad-phase.o -o test-broad-phase
+    #- ./test-broad-phase
+    - nvcc -c /src/narrow-phase/narrow-phase.cu -o narrow-phase.o
+    - nvcc -c /src/narrow-phase/test-narrow-phase.cu -o test-narrow-phase.o
+    - nvcc narrow-phase.o test-narrow-phase.o -o test-narrow-phase
+    - ./test-narrow-phase
