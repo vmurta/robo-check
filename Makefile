@@ -25,5 +25,11 @@ CPU-Sphere-Test: CPU-Sphere-Test.o
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 %.o: %.cu
 	$(CU) -c $< -o $@
+
+GPU-transform-test.o: transformation/testing/GPU-transform-test.cu
+	$(CU) -c $< -o $@ -I. 
+
+
+
 clean:
 	rm -f *.o CPU-Sphere-Test

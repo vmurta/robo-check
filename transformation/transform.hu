@@ -6,6 +6,6 @@
 
 Matrix4f createTransformationMatrix(Configuration config);
 Vector3f transformVector(Vector3f v, Matrix4f M);
-void genTransformedCopies(Configuration* confs,  Vector3f *base_robot_vertices,
+__global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot_vertices,
                                      Vector3f* transformed_robot_vertices, int num_confs,
                                     int num_robot_vertices);
