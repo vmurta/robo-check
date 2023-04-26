@@ -25,9 +25,9 @@ def main():
     ct1, cdists21 = canonicalize_triangle(t1, dists21)
     print("compute_parametric_variable(ct1.v0, ct1.v1, cdists21[0], cdists21[1], D, O):", compute_parametric_variable(ct1.v0, ct1.v1, cdists21[0], cdists21[1], D, O))
     print("compute_parametric_variable(ct1.v1, ct1.v2, cdists21[1], cdists21[2], D, O):", compute_parametric_variable(ct1.v1, ct1.v2, cdists21[1], cdists21[2], D, O))
-    ct2, cdists12 = canonicalize_triangle(t2, dists21)
+    ct2, cdists12 = canonicalize_triangle(t2, dists12)
     print("compute_parametric_variable(ct2.v0, ct2.v1, cdists12[0], cdists12[1], D, O):", compute_parametric_variable(ct2.v0, ct2.v1, cdists12[0], cdists12[1], D, O))
-    print("compute_parametric_variable(ct2.v1, ct2.v2, cdists12[1], cdists12[2], D, O):", compute_parametric_variable(ct1.v1, ct1.v2, cdists12[1], cdists12[2], D, O))
+    print("compute_parametric_variable(ct2.v1, ct2.v2, cdists12[1], cdists12[2], D, O):", compute_parametric_variable(ct2.v1, ct2.v2, cdists12[1], cdists12[2], D, O))
 
 if __name__ == "__main__":
     main()

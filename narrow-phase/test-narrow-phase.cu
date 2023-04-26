@@ -352,13 +352,75 @@ void unit_tests() {
     }
 
     // Test compute_parametric_variable
-    // float d2;
-    // compute_plane(t2, pts, &N2, &d2);
-    // Vector3f dists21 = compute_signed_dists(N2, d2, t1, pts);
+    float d2;
+    compute_plane(t2, pts, &N2, &d2);
+    Vector3f dists21 = compute_signed_dists(N2, d2, t1, pts);
+    compute_intersect_line(N1, d1, N2, d2, &D, &O);
 
-    // Triangle ct1, ct2;
-    // Vector3f cdists12, cdists21;
-    // canonicalize_triangle(t1, dists21, &ct1, &cdists21);
+    Triangle ct1, ct2;
+    Vector3f cdists12, cdists21;
+    canonicalize_triangle(t1, dists21, &ct1, &cdists21);
+    canonicalize_triangle(t2, dists12, &ct2, &cdists12);
+
+    passed = true;
+    if (!isclose(compute_parametric_variable(pts[ct1.v1], pts[ct1.v2], cdists21.x, cdists21.y, D, O), 108.607147)) {
+        passed = false;
+        printf("Failed compute_parametric_variable(pts[ct1.v1], pts[ct1.v2], cdists21.x, cdists21.y, D, O)\n");
+    }
+
+    if (!isclose(compute_parametric_variable(pts[ct1.v2], pts[ct1.v3], cdists21.y, cdists21.z, D, O), 143.744751)) {
+        passed = false;
+        printf("Failed compute_parametric_variable(pts[ct1.v2], pts[ct1.v3], cdists21.y, cdists21.z, D, O)\n");
+    }
+
+    if (!isclose(compute_parametric_variable(pts[ct2.v1], pts[ct2.v2], cdists12.x, cdists12.y, D, O), 130.328568)) {
+        passed = false;
+        printf("Failed compute_parametric_variable(pts[ct2.v1], pts[ct2.v2], cdists12.x, cdists12.y, D, O)\n");
+    }
+
+    if (!isclose(compute_parametric_variable(pts[ct2.v2], pts[ct2.v3], cdists12.y, cdists12.z, D, O), 88.860390)) {
+        passed = false;
+        printf("Failed compute_parametric_variable(pts[ct2.v2], pts[ct2.v3], cdists12.y, cdists12.z, D, O)\n");
+    }
+
+    if (passed) {
+        printf("All compute_parametric_variable tests passed\n");
+    }
+
+    // Test is_coplanar
+    passed = true;
+
+    if (is_coplanar(N1, d1, N2, d2)) {
+        passed = false;
+        printf("Failed is_coplanar(N1, d1, N2, d2)\n");
+    }
+
+    N3.x = N1.x * 2;
+    N3.y = N1.y * 2;
+    N3.z = N1.z * 2;
+
+    if (!is_coplanar(N1, d1, N3, d1 * 2)) {
+        passed = false;
+        printf("Failed is_coplanar(N1, d1, N3, d1 * 2)\n");
+    }
+
+    if (is_coplanar(N1, d1, N3, 0)) {
+        passed = false;
+        printf("Failed is_coplanar(N1, d1, N3, 0)\n");
+    }
+
+    N3.x = 0;
+
+    Vector3f N4 = {0, N1.y, N1.z};
+    if (!is_coplanar(N4, d1, N3, d1 * 2)) {
+        passed = false;
+        printf("Failed is_coplanar(N4, d1, N3, d1 * 2)\n");
+    }
+
+    if (passed) {
+        printf("All is_coplanar tests passed\n");
+    }
+
 }
 
 void test_baseline() {
@@ -479,7 +541,7 @@ void test_gpu() {
     }
 
     bool res[NUM_NP_TEST_CONFS];
-    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, rob_pts, obs_trs, obs_pts, res);
+    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, real_rob_pts, obs_trs, obs_pts, res);
 
     bool passed = true;
     for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
@@ -496,15 +558,9 @@ void test_gpu() {
 
 }
 
-// __global__ void kern() {
-//     printf("foo ");
-// }
-
 int main() {
-    // kern<<<1, 256>>>();
-    // cudaDeviceSynchronize();
     unit_tests();
-    // test_baseline();
+    test_baseline();
     test_gpu();
     return 0;
 }
