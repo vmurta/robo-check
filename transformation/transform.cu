@@ -1,3 +1,4 @@
+#include "transform.hu"
 // TODO: Make this part run in parallel
 // IDEA: could have each block do blockDim.x number of transformations
 // Have each thread precompute the transformationMatrix at start of block

@@ -5,33 +5,24 @@
 #include "../../Utils.h"
 #include "../transform.hu"
 
-inline bool verticesEqual(const Vector3f &v1, const Vector3f &v2){
-  return (fabs(transformed_vertices[i * fcl_rob_vertices.size() + j].x -transformed_vertex[0]) +
-            fabs(transformed_vertices[i * fcl_rob_vertices.size() + j].y -transformed_vertex[1]) +
-            fabs(transformed_vertices[i * fcl_rob_vertices.size() + j].z -transformed_vertex[2]) < 1e-5);
+inline bool verticesEqual(const Vector3f &v1, const fcl::Vector3f &v2){
+  return (fabs(v1.x -v2[0]) +
+            fabs(v1.y -v2[1]) +
+            fabs(v1.z -v2[2]) < 1e-5);
+  // return false;
 }
 
 //takes in an allocated, empty array of vertices
 // returns a filled one
-void transformGPU(Vector3f* vertices){
+void transformGPU(Vector3f* vertices, std::vector<Configuration> &confs){
   int device_count;
   if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
-  // load configurations, should have 6990 valids and 3010 invalids
-  std::vector<Configuration> confs;
-  readConfigurationFromFile("10,000samples.conf", confs);
-  // createAlphaBotConfigurations(confs, 10000);
 
   //Load Robot
   std::vector<Vector3f> rob_vertices;
   std::vector<Triangle> rob_triangles;
-  loadOBJFile("../../models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
+  loadOBJFile("./models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
   std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
-
-  // Load Obstacle
-  std::vector<Vector3f> obs_vertices;
-  std::vector<Triangle> obs_triangles;
-  loadOBJFile("models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
-  std::cout << "obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
 
   Vector3f *d_rob_vertices;
   checkCudaCall(cudaMalloc(&d_rob_vertices, rob_vertices.size() * sizeof(Vector3f)));
@@ -65,7 +56,7 @@ void transformGPU(Vector3f* vertices){
   std:: cout << "about to synchronize" << std::endl;
   checkCudaCall(cudaDeviceSynchronize());
   std:: cout << "about to copy back vertices" << std::endl;
-  checkCudaMem(cudaMemcpy(transformed_vertices, d_transformed_vertices, rob_vertices.size()* confs.size() * sizeof(Vector3f), cudaMemcpyDeviceToHost));
+  checkCudaMem(cudaMemcpy(vertices, d_transformed_vertices, rob_vertices.size()* confs.size() * sizeof(Vector3f), cudaMemcpyDeviceToHost));
   checkCudaCall(cudaDeviceSynchronize()); 
   checkCudaCall(cudaFree(d_confs));
   checkCudaCall(cudaFree(d_rob_triangles));
@@ -73,14 +64,13 @@ void transformGPU(Vector3f* vertices){
   checkCudaCall(cudaFree(d_transformed_vertices));
   checkCudaCall(cudaDeviceSynchronize());
   std::cout << " copied back memory and synchronized" << std::endl;
-
 }
 
-void transformCPU(Vector3f *vertices){
+void transformCPU(fcl::Vector3f *vertices, std::vector<Configuration> &confs){
   //Load Robot
   std::vector<fcl::Vector3f> fcl_rob_vertices;
   std::vector<fcl::Triangle> fcl_rob_triangles;
-  loadOBJFileFCL("../../models/alpha1.0/robot.obj", fcl_rob_vertices, fcl_rob_triangles);
+  loadOBJFileFCL("./models/alpha1.0/robot.obj", fcl_rob_vertices, fcl_rob_triangles);
   std::cout << "robot has " << fcl_rob_vertices.size() << " vertices " <<std::endl;
 
   std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
@@ -92,7 +82,7 @@ void transformCPU(Vector3f *vertices){
   for (int i = 0; i < confs.size(); i++){
     fcl::Transform3f transform = configurationToTransform(confs[i]);
     for (int j = 0; j < fcl_rob_vertices.size(); j++){
-      vertices[i] = transform * fcl_rob_vertices[j];
+      vertices[i * fcl_rob_vertices.size() + j] = transform * fcl_rob_vertices[j];
     }  
   }
 }
@@ -101,12 +91,15 @@ void transformCPU(Vector3f *vertices){
 //TODO: refactor code to minimize loads by interleaving file reads and device memory operations
 int main()
 {
-    
-    Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
-    Vector3f* cpu_transformed_vertices = new Vector3f[10000 * 792];
+      // load configurations, should have 6990 valids and 3010 invalids
+    std::vector<Configuration> confs;
+    readConfigurationFromFile("10,000samples.conf", confs);
 
-    transformCPU(cpu_transformed_vertices);
-    transformGPU(gpu_transformed_vertices);
+    Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
+    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
+
+    transformCPU(cpu_transformed_vertices, confs);
+    transformGPU(gpu_transformed_vertices, confs);
     
     int num_correct = 0;
     int num_incorrect = 0;
@@ -117,9 +110,6 @@ int main()
           num_correct++;
         } else {
           num_incorrect++;
-          total_error_incorrect += fabs(transformed_vertices[i * fcl_rob_vertices.size() + j].x -transformed_vertex[0]) +
-            fabs(transformed_vertices[i * fcl_rob_vertices.size() + j].y -transformed_vertex[1]) +
-            fabs(transformed_vertices[i * fcl_rob_vertices.size() + j].z -transformed_vertex[2]);
         }
       }  
     }
