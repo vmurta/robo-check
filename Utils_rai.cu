@@ -1,11 +1,8 @@
-
-#pragma once
-
 #include <fstream>
 #include <iostream>
 #include <random>
 #include <string.h>
-#include <Utils_rai.h>
+#include "Utils_rai.h"
 
 void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename) {
     std::ofstream file(filename);

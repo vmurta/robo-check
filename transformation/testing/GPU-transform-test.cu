@@ -6,10 +6,10 @@
 #include "../transform.hu"
 
 inline bool verticesEqual(const Vector3f &v1, const fcl::Vector3f &v2){
-  // return (fabs(v1.x -v2[0]) +
-  //           fabs(v1.y -v2[1]) +
-  //           fabs(v1.z -v2[2]) < 1e-5);
-  return false;
+  return (fabs(v1.x -v2[0]) +
+            fabs(v1.y -v2[1]) +
+            fabs(v1.z -v2[2]) < 1e-5);
+  // return false;
 }
 
 //takes in an allocated, empty array of vertices
@@ -18,19 +18,11 @@ void transformGPU(Vector3f* vertices, std::vector<Configuration> &confs){
   int device_count;
   if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
 
-  // createAlphaBotConfigurations(confs, 10000);
-
   //Load Robot
   std::vector<Vector3f> rob_vertices;
   std::vector<Triangle> rob_triangles;
-  loadOBJFile("../../models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
+  loadOBJFile("./models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
   std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
-
-  // Load Obstacle
-  std::vector<Vector3f> obs_vertices;
-  std::vector<Triangle> obs_triangles;
-  loadOBJFile("models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
-  std::cout << "obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
 
   Vector3f *d_rob_vertices;
   checkCudaCall(cudaMalloc(&d_rob_vertices, rob_vertices.size() * sizeof(Vector3f)));
@@ -72,14 +64,13 @@ void transformGPU(Vector3f* vertices, std::vector<Configuration> &confs){
   checkCudaCall(cudaFree(d_transformed_vertices));
   checkCudaCall(cudaDeviceSynchronize());
   std::cout << " copied back memory and synchronized" << std::endl;
-
 }
 
 void transformCPU(fcl::Vector3f *vertices, std::vector<Configuration> &confs){
   //Load Robot
   std::vector<fcl::Vector3f> fcl_rob_vertices;
   std::vector<fcl::Triangle> fcl_rob_triangles;
-  loadOBJFileFCL("../../models/alpha1.0/robot.obj", fcl_rob_vertices, fcl_rob_triangles);
+  loadOBJFileFCL("./models/alpha1.0/robot.obj", fcl_rob_vertices, fcl_rob_triangles);
   std::cout << "robot has " << fcl_rob_vertices.size() << " vertices " <<std::endl;
 
   std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
@@ -91,7 +82,7 @@ void transformCPU(fcl::Vector3f *vertices, std::vector<Configuration> &confs){
   for (int i = 0; i < confs.size(); i++){
     fcl::Transform3f transform = configurationToTransform(confs[i]);
     for (int j = 0; j < fcl_rob_vertices.size(); j++){
-      vertices[i] = transform * fcl_rob_vertices[j];
+      vertices[i * fcl_rob_vertices.size() + j] = transform * fcl_rob_vertices[j];
     }  
   }
 }

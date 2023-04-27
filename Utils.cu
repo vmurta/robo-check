@@ -1,5 +1,3 @@
-#pragma once
-
 #include "Utils.h"
 
 // This function taken from https://github.com/flexible-collision-library/fcl/issues/131 Github user dblanm
