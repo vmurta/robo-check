@@ -39,7 +39,14 @@ void test_generateAABBBaseline(AABB* botBounds, const int numConfigs)
 
     generateTestVertices(robPts);
 
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
+    start_time = std::chrono::high_resolution_clock::now();
+
     generateAABBBaseline(robPts, numVertices, numConfigs, botBounds);
+
+    end_time = std::chrono::high_resolution_clock::now();
+    auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    std::cout << "Baseline execution time: " << elapsed_time.count() << " milliseconds" << std::endl;
 
     // for(int i = 0; i < numConfigs; ++i)
     // {
@@ -56,7 +63,14 @@ void test_generateAABB(AABB* botBounds, const int numConfigs)
 
     generateTestVertices(robPts);
 
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
+    start_time = std::chrono::high_resolution_clock::now();
+
     generateAABB(robPts, numVertices, numConfigs, botBounds);
+
+    end_time = std::chrono::high_resolution_clock::now();
+    auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    std::cout << "GPU execution time: " << elapsed_time.count() << " milliseconds" << std::endl;
 
     // for(int i = 0; i < numConfigs; ++i)
     // {

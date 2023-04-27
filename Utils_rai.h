@@ -4,6 +4,7 @@
 #include <iostream>
 #include <random>
 #include <string.h>
+#include <chrono>
 
 #define checkCudaCall(status) \
     do { \

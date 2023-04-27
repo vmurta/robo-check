@@ -1,7 +1,7 @@
 #include <iostream>
-#include <fcl/fcl.h>
+#include <../fcl/fcl.h>
 #include <limits>
-#include "Utils.h"
+#include "../Utils.h"
 
 void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs){
   // these are the max and min values for vertices in alpha1.0/robot.obj

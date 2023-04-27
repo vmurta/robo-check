@@ -1,7 +1,7 @@
 #include <iostream>
 
-#include <fcl/narrowphase/collision.h>
-#include <fcl/geometry/shape/sphere.h>
+#include <../../fcl/narrowphase/collision.h>
+#include <../../fcl/geometry/shape/sphere.h>
 int main()
 {
     // Create two spheres for collision testing
