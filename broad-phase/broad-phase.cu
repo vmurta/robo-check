@@ -6,7 +6,7 @@
 // Check if two objects are colliding along a certain dimension
 inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax) {
     // Done without any control divergence!
-    return !(sndMin > fstMax || sndMax < fstMin);
+    return fstMin <= sndMax && sndMin <= fstMax;
 }
 
 __global__ void broadPhaseKernel(int num_confs, const AABB *robots, const AABB *obstacle, bool *valid_conf) {  
