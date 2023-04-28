@@ -26,7 +26,8 @@ commands:
     # =====
     - nvcc -c /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
     - nvcc -c /src/transformation/transform.cu -o transform.o
-    - nvcc -c /src/test/transform-to-AABB-test.cu -o transform-to-AABB-test.o
+    - nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
+    - nvcc -c /src/test/integration-test.cu -o integration-test.o
     - nvcc -c /src/Utils_rai.cu -o Utils_rai.o
-    - nvcc generate-AABB.o transform-to-AABB-test.o transform.o Utils_rai.o -o transform-to-AABB-test
-    - ./transform-to-AABB-test
+    - nvcc broad-phase.o generate-AABB.o integration-test.o transform.o Utils_rai.o -o integration-test
+    - ./integration-test

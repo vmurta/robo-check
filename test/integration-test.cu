@@ -5,6 +5,7 @@
 #include "../Utils_rai.h"
 #include "../transformation/transform.hu"
 #include "../generate-AABB/generate-AABB.hu"
+#include "../broad-phase/broad-phase.hu"
 
 // inline bool verticesEqual(const Vector3f &v1, const fcl::Vector3f &v2){
 //   return (fabs(v1.x -v2[0]) +
@@ -54,6 +55,16 @@ bool verify_generateAABB(AABB* botBoundsBaseline, AABB* botBoundsParallel, const
     return true;
 }
 
+void verifyConfs(bool *confs, size_t num_confs) {
+    size_t numValidConfs = 0;
+
+    for (size_t i = 0; i < num_confs; i++) {
+        if (confs[i]) numValidConfs++;
+    }
+
+    std::cout << "Valid configurations: " << numValidConfs << " (out of " << num_confs << ")" << std::endl;
+}
+
 //takes in an allocated, empty array of vertices
 // returns a filled one
 void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
@@ -65,6 +76,12 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     std::vector<Triangle> rob_triangles;
     loadOBJFile("src/models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
     std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
+
+
+    std::vector<Vector3f> obs_vertices;
+    std::vector<Triangle> obs_triangles;
+    loadOBJFile("src/models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
+    std::cout << "obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
 
     Vector3f *d_rob_vertices;
     checkCudaCall(cudaMalloc(&d_rob_vertices, rob_vertices.size() * sizeof(Vector3f)));
@@ -109,12 +126,34 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     err = cudaGetLastError();
     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
 
+    checkCudaCall(cudaDeviceSynchronize());
+
+    // Move obstacle to AABB (on CPU since we only have 1)
+    AABB *obstacle_bbox = new AABB();
+    generateAABBBaseline(obs_vertices.data(), obs_vertices.size(), 1, obstacle_bbox);
+
+    bool *valid_conf_d;
+    bool *valid_conf = new bool[confs.size()];
+    AABB *obstacle_bbox_d;
+    checkCudaCall(cudaMalloc(&valid_conf_d, confs.size() * sizeof(bool)));
+    checkCudaCall(cudaMalloc(&obstacle_bbox_d, sizeof(AABB)));
+    checkCudaCall(cudaMemcpy(obstacle_bbox_d, obstacle_bbox, sizeof(AABB), cudaMemcpyHostToDevice));
+    checkCudaCall(cudaDeviceSynchronize());
+
+    broadPhase(confs.size(), d_bot_bounds, obstacle_bbox_d, valid_conf_d);
+
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
     std::cout << "have called kernel " << std::endl;
     std:: cout << "about to synchronize" << std::endl;
     checkCudaCall(cudaDeviceSynchronize());
 
     std:: cout << "about to copy back vertices" << std::endl;
     cudaMemcpy(bot_bounds, d_bot_bounds, confs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
+    cudaMemcpy(valid_conf, valid_conf_d, confs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
+
+    verifyConfs(valid_conf, confs.size());
 
     checkCudaCall(cudaDeviceSynchronize()); 
     checkCudaCall(cudaFree(d_confs));
@@ -122,6 +161,8 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     checkCudaCall(cudaFree(d_rob_vertices));
     checkCudaCall(cudaFree(d_transformed_vertices));
     checkCudaCall(cudaFree(d_bot_bounds));
+    checkCudaCall(cudaFree(obstacle_bbox_d));
+    checkCudaCall(cudaFree(valid_conf_d));
     checkCudaCall(cudaDeviceSynchronize());
     std::cout << "copied back memory and synchronized" << std::endl;
 }
