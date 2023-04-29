@@ -33,11 +33,6 @@ void transformGPU(Vector3f* vertices, std::vector<Configuration> &confs){
   checkCudaCall(cudaMalloc(&d_transformed_vertices, rob_vertices.size() * sizeof(Vector3f) * confs.size()));
   std::cout << "have malloced the transformed vertices " << std::endl;
 
-  Triangle *d_rob_triangles;
-  checkCudaCall(cudaMalloc(&d_rob_triangles, rob_triangles.size() * sizeof(Triangle)));
-  checkCudaMem(cudaMemcpy(d_rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-  std::cout << "have copied the robot triangles" << std::endl;
-
   Configuration *d_confs;
   checkCudaCall(cudaMalloc(&d_confs, confs.size() * sizeof(Configuration)));
   checkCudaMem(cudaMemcpy(d_confs, confs.data(), confs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
@@ -49,17 +44,16 @@ void transformGPU(Vector3f* vertices, std::vector<Configuration> &confs){
 
   // bitshifting right by 5 is the same as dividing by 2^5 (which is 32) and rounding up
   // also technically faster not that it matters very much
-  genTransformedCopies<<<(confs.size() + 31)>> 5, 32>>>(d_confs, d_rob_vertices, d_transformed_vertices, 
+  genTransformedCopies<<<(confs.size() + 31)>> 5, 32>>>(d_confs, d_rob_vertices, d_transformed_vertices,
                                                   confs.size(), rob_vertices.size());
-  
+
   std::cout << "have called kernel " << std::endl;
   std:: cout << "about to synchronize" << std::endl;
   checkCudaCall(cudaDeviceSynchronize());
   std:: cout << "about to copy back vertices" << std::endl;
   checkCudaMem(cudaMemcpy(vertices, d_transformed_vertices, rob_vertices.size()* confs.size() * sizeof(Vector3f), cudaMemcpyDeviceToHost));
-  checkCudaCall(cudaDeviceSynchronize()); 
+  checkCudaCall(cudaDeviceSynchronize());
   checkCudaCall(cudaFree(d_confs));
-  checkCudaCall(cudaFree(d_rob_triangles));
   checkCudaCall(cudaFree(d_rob_vertices));
   checkCudaCall(cudaFree(d_transformed_vertices));
   checkCudaCall(cudaDeviceSynchronize());
@@ -83,7 +77,7 @@ void transformCPU(fcl::Vector3f *vertices, std::vector<Configuration> &confs){
     fcl::Transform3f transform = configurationToTransform(confs[i]);
     for (int j = 0; j < fcl_rob_vertices.size(); j++){
       vertices[i * fcl_rob_vertices.size() + j] = transform * fcl_rob_vertices[j];
-    }  
+    }
   }
 }
 
@@ -99,8 +93,12 @@ int main()
     fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
 
     transformCPU(cpu_transformed_vertices, confs);
+    auto start_time = std::chrono::high_resolution_clock::now();
     transformGPU(gpu_transformed_vertices, confs);
-    
+    auto end_time = std::chrono::high_resolution_clock::now();
+    auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
+    std::cout << "Transformation GPU execution time: " << elapsed_time.count() << " milliseconds" << std::endl;
+
     int num_correct = 0;
     int num_incorrect = 0;
     float total_error_incorrect = 0;
@@ -111,11 +109,11 @@ int main()
         } else {
           num_incorrect++;
         }
-      }  
+      }
     }
 
     std::cout << "num correct is " << num_correct << std::endl;
     std::cout << "num incorrect is " << num_incorrect << std::endl;
-    std::cout << "avg incorrect error is " << total_error_incorrect / num_incorrect << std::endl;
-    
+    // std::cout << "avg incorrect error is " << total_error_incorrect / num_incorrect << std::endl;
+
 }
