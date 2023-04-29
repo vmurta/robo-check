@@ -66,23 +66,22 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
                                      Vector3f* transformed_robot_vertices, int num_confs,
                                     int num_robot_vertices){
     size_t conf_ind = blockIdx.x * blockDim.x + threadIdx.x;
-    #define TRANS_SIZE 32
 
-    __shared__ Matrix4f transforms[TRANS_SIZE];
+    __shared__ Matrix4f transforms[TRANSFORM_SIZE];
     if (conf_ind < num_confs){
       transforms[threadIdx.x] = createTransformationMatrix(confs[conf_ind]);
     }
     __syncthreads();
 
-    size_t transformed_vertices_offset = num_robot_vertices * TRANS_SIZE * blockIdx.x + num_robot_vertices*threadIdx.x;
+    size_t transformed_vertices_offset = num_robot_vertices * TRANSFORM_SIZE * blockIdx.x + num_robot_vertices*threadIdx.x;
 
     // TODO: do this in shared memory, tile and flush
     for(int rob_ind = 0; rob_ind < num_robot_vertices; rob_ind++){
       transformed_robot_vertices[rob_ind + transformed_vertices_offset] =
         transformVector(base_robot_vertices[rob_ind], transforms[threadIdx.x]);
     }
-    // // do TRANS_SIZE number of configurations, unless that would put us out of bounds
-    // size_t num_confs_to_do = blockIdx.x * blockDim.x + TRANS_SIZE < num_confs ? TRANS_SIZE
+    // // do TRANSFORM_SIZE number of configurations, unless that would put us out of bounds
+    // size_t num_confs_to_do = blockIdx.x * blockDim.x + TRANSFORM_SIZE < num_confs ? TRANSFORM_SIZE
                               // : num_confs -  blockIdx.x * blockDim.x;
     // //for each configuration, write a transformed copy of the robot into global memory
     // for (int i = 0; i < num_confs_to_do; ++i){

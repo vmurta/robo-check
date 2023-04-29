@@ -1,9 +1,10 @@
 #include <iostream>
 #include <limits>
 #include <vector>
-#include "../Utils_rai.h"
-#include "../transformation/transform.hu"
-#include "../generate-AABB/generate-AABB.hu"
+// #include "../Utils_rai.h"
+// #include "../transformation/transform.hu"
+// #include "../generate-AABB/generate-AABB.hu"
+#include "../broad-phase/broad-phase-fused.hu"
 #include "../broad-phase/broad-phase.hu"
 
 // Set LOCAL_TESTING to 1 to run CPU tests on local machine (not on rai)
@@ -123,25 +124,29 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs)
     checkCudaCall(cudaDeviceSynchronize());
     std::cout << "have synchronized" << std::endl;
 
-    dim3 dimGrid(ceil((float)(confs.size()) / AABB_BLOCK_SIZE), 1, 1);
-    dim3 dimBlock(AABB_BLOCK_SIZE, 1, 1);
-    // dim3 dimGrid(ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2), ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y), 1);
-    // dim3 dimBlock(AABB_BLOCK_SIZE_X, AABB_BLOCK_SIZE_Y, 1);
-    // std::cout << "GridX: " << ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2) << " GridY: " << ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y) << std::endl;
-    // std::cout << "SharedMemSize: " << 4 * AABB_BLOCK_SIZE_X << std::endl;
+    dim3 dimGridTransformKernel(ceil((float)(confs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
+    dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
+    // dim3 dimGridAABBKernel(ceil((float)(confs.size()) / AABB_BLOCK_SIZE), 1, 1);
+    // dim3 dimBlockAABBKernel(AABB_BLOCK_SIZE, 1, 1);
+    // // dim3 dimGrid(ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2), ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y), 1);
+    // // dim3 dimBlock(AABB_BLOCK_SIZE_X, AABB_BLOCK_SIZE_Y, 1);
+    // // std::cout << "GridX: " << ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2) << " GridY: " << ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y) << std::endl;
+    // // std::cout << "SharedMemSize: " << 4 * AABB_BLOCK_SIZE_X << std::endl;
 
-    // bitshifting right by 5 is the same as dividing by 2^5 (which is 32) and rounding up
-    // also technically faster not that it matters very much
-    genTransformedCopies<<<(confs.size() + 31)>> 5, 32>>>(d_confs, d_rob_vertices, d_transformed_vertices, 
+    // genTransformedCopies<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_confs, d_rob_vertices, d_transformed_vertices, 
+    //                                                 confs.size(), rob_vertices.size());
+
+    // checkCudaCall(cudaDeviceSynchronize());
+
+    // generateAABBPrimitiveKernel<<<dimGridAABBKernel, dimBlockAABBKernel>>>(d_transformed_vertices, rob_vertices.size(), 
+    //                                                     confs.size(), d_bot_bounds);
+    // // generateAABBKernel<<<dimGridAABBKernel, dimBlockAABBKernel, 4 * AABB_BLOCK_SIZE_X>>>(d_transformed_vertices, rob_vertices.size(), 
+    //                                                     // confs.size(), d_bot_bounds);
+
+    // checkCudaCall(cudaDeviceSynchronize());
+
+    transformAndGenerateAABB<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_confs, d_rob_vertices, d_bot_bounds, 
                                                     confs.size(), rob_vertices.size());
-
-    checkCudaCall(cudaDeviceSynchronize());
-
-    generateAABBPrimitiveKernel<<<dimGrid, dimBlock>>>(d_transformed_vertices, rob_vertices.size(), 
-                                                        confs.size(), d_bot_bounds);
-    // generateAABBKernel<<<dimGrid, dimBlock, 4 * AABB_BLOCK_SIZE_X>>>(d_transformed_vertices, rob_vertices.size(), 
-                                                        // confs.size(), d_bot_bounds);
-
     checkCudaCall(cudaDeviceSynchronize());
 
     // Move obstacle to AABB (on CPU since we only have 1)
@@ -156,7 +161,7 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs)
     checkCudaCall(cudaMemcpy(obstacle_bbox_d, obstacle_bbox, sizeof(AABB), cudaMemcpyHostToDevice));
     checkCudaCall(cudaDeviceSynchronize());
 
-    // broadPhase(confs.size(), d_bot_bounds, obstacle_bbox_d, valid_conf_d);
+    broadPhase(confs.size(), d_bot_bounds, obstacle_bbox_d, valid_conf_d);
 
     std::cout << "have called kernel " << std::endl;
     std:: cout << "about to synchronize" << std::endl;

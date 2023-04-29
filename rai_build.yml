@@ -25,10 +25,11 @@ commands:
     # - ./test-narrow-phase
     # =====
     - nvcc -c /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
-    - nvcc -c /src/transformation/transform.cu -o transform.o
+    # - nvcc -c /src/transformation/transform.cu -o transform.o
     - nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
+    - nvcc -c /src/broad-phase/broad-phase-fused.cu -o broad-phase-fused.o
     - nvcc -c /src/test/integration-test.cu -o integration-test.o
     - nvcc -c /src/Utils_rai.cu -o Utils_rai.o
-    - nvcc broad-phase.o generate-AABB.o integration-test.o transform.o Utils_rai.o -o integration-test
+    - nvcc broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
     - ./integration-test
     # - /usr/local/NVIDIA-Nsight-Compute/ncu --export "integration-test" --force-overwrite --target-processes all --kernel-name-base function --kernel-name regex:generateAABB --launch-skip-before-match 0 --section ComputeWorkloadAnalysis --section InstructionStats --section LaunchStats --section MemoryWorkloadAnalysis --section MemoryWorkloadAnalysis_Chart --section MemoryWorkloadAnalysis_Tables --section Occupancy --section SchedulerStats --section SourceCounters --section SpeedOfLight --section SpeedOfLight_HierarchicalSingleRooflineChart --section WarpStateStats --sampling-interval auto --sampling-max-passes 5 --sampling-buffer-size 33554432 --profile-from-start 1 --cache-control all --clock-control base ./integration-test -a
