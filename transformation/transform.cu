@@ -73,9 +73,6 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
       transforms[threadIdx.x] = createTransformationMatrix(confs[conf_ind]);
     }
     __syncthreads();
-    // do TRANS_SIZE number of configurations, unless that would put us out of bounds
-    size_t num_confs_to_do = blockIdx.x * blockDim.x + TRANS_SIZE < num_confs ? TRANS_SIZE
-                              : num_confs -  blockIdx.x * blockDim.x;
 
     size_t transformed_vertices_offset = num_robot_vertices * TRANS_SIZE * blockIdx.x + num_robot_vertices*threadIdx.x;
 
@@ -84,6 +81,9 @@ __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot
       transformed_robot_vertices[rob_ind + transformed_vertices_offset] =
         transformVector(base_robot_vertices[rob_ind], transforms[threadIdx.x]);
     }
+    // // do TRANS_SIZE number of configurations, unless that would put us out of bounds
+    // size_t num_confs_to_do = blockIdx.x * blockDim.x + TRANS_SIZE < num_confs ? TRANS_SIZE
+                              // : num_confs -  blockIdx.x * blockDim.x;
     // //for each configuration, write a transformed copy of the robot into global memory
     // for (int i = 0; i < num_confs_to_do; ++i){
     //   //each thread computes a portion of the current transformation and writes it to global

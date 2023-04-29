@@ -8,24 +8,29 @@ __global__ void generateAABBPrimitiveKernel(Vector3f* vertices, unsigned int num
                     unsigned int numConfigs, AABB* botBounds) 
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    AABB botBoundsLocal;
+    Vector3f vertex;
+
     if(tid < numConfigs)
     {
         unsigned int configOffset = tid * numVertices;
-        botBounds[tid].x_min = vertices[configOffset].x;
-        botBounds[tid].y_min = vertices[configOffset].y;
-        botBounds[tid].z_min = vertices[configOffset].z;
-        botBounds[tid].x_max = vertices[configOffset].x;
-        botBounds[tid].y_max = vertices[configOffset].y;
-        botBounds[tid].z_max = vertices[configOffset].z;
+        botBoundsLocal.x_min = vertices[configOffset].x;
+        botBoundsLocal.y_min = vertices[configOffset].y;
+        botBoundsLocal.z_min = vertices[configOffset].z;
+        botBoundsLocal.x_max = vertices[configOffset].x;
+        botBoundsLocal.y_max = vertices[configOffset].y;
+        botBoundsLocal.z_max = vertices[configOffset].z;
         for(int j = 0; j < numVertices; ++j)
         {
-            botBounds[tid].x_min = min(botBounds[tid].x_min, vertices[configOffset + j].x);
-            botBounds[tid].y_min = min(botBounds[tid].y_min, vertices[configOffset + j].y);
-            botBounds[tid].z_min = min(botBounds[tid].z_min, vertices[configOffset + j].z);
-            botBounds[tid].x_max = max(botBounds[tid].x_max, vertices[configOffset + j].x);
-            botBounds[tid].y_max = max(botBounds[tid].y_max, vertices[configOffset + j].y);
-            botBounds[tid].z_max = max(botBounds[tid].z_max, vertices[configOffset + j].z);
+            vertex = vertices[configOffset + j];
+            botBoundsLocal.x_min = min(botBoundsLocal.x_min, vertex.x);
+            botBoundsLocal.y_min = min(botBoundsLocal.y_min, vertex.y);
+            botBoundsLocal.z_min = min(botBoundsLocal.z_min, vertex.z);
+            botBoundsLocal.x_max = max(botBoundsLocal.x_max, vertex.x);
+            botBoundsLocal.y_max = max(botBoundsLocal.y_max, vertex.y);
+            botBoundsLocal.z_max = max(botBoundsLocal.z_max, vertex.z);
         }
+        botBounds[tid] = botBoundsLocal;
     }
 }
 

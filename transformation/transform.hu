@@ -4,8 +4,8 @@
 
 #define TRANS_SIZE 32
 
-Matrix4f createTransformationMatrix(Configuration config);
-Vector3f transformVector(Vector3f v, Matrix4f M);
+__device__ Matrix4f createTransformationMatrix(Configuration config);
+__device__ Vector3f transformVector(Vector3f v, Matrix4f M);
 __global__ void genTransformedCopies(Configuration* confs,  Vector3f *base_robot_vertices,
                                      Vector3f* transformed_robot_vertices, int num_confs,
                                     int num_robot_vertices);

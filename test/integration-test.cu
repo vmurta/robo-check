@@ -1,16 +1,24 @@
 #include <iostream>
-#include <fcl/fcl.h>
 #include <limits>
 #include <vector>
 #include "../Utils_rai.h"
 #include "../transformation/transform.hu"
 #include "../generate-AABB/generate-AABB.hu"
 #include "../broad-phase/broad-phase.hu"
-#include "../Utils.h"
 
-#define CONF_FILE "./10,000samples.conf"
-#define ROB_FILE "./models/alpha1.0/robot.obj"
-#define OBS_FILE "./models/alpha1.0/obstacle.obj"
+// Set LOCAL_TESTING to 1 to run CPU tests on local machine (not on rai)
+#define LOCAL_TESTING 0
+
+#if(LOCAL_TESTING == 1)
+#include <fcl/fcl.h>
+#include "../Utils.h"
+#endif
+
+#define CONF_FILE "src/10,000samples.conf"
+#define ROB_FILE "src/models/alpha1.0/robot.obj"
+#define OBS_FILE "src/models/alpha1.0/obstacle.obj"
+
+#if(LOCAL_TESTING == 1)
 inline bool verticesEqual(const Vector3f &v1, const fcl::Vector3f &v2){
   return (fabs(v1.x -v2[0]) +
             fabs(v1.y -v2[1]) +
@@ -43,6 +51,7 @@ void generateAABBBaseline_fcl(fcl::Vector3f* vertices, unsigned int numVertices,
         }
     }
 }
+#endif
 
 bool verify_generateAABB(AABB* botBoundsBaseline, AABB* botBoundsParallel, const int numConfigs)
 {
@@ -71,7 +80,8 @@ void verifyConfs(bool *confs, size_t num_confs) {
 
 //takes in an allocated, empty array of vertices
 // returns a filled one
-void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
+void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs)
+{
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
 
@@ -115,22 +125,22 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
 
     dim3 dimGrid(ceil((float)(confs.size()) / AABB_BLOCK_SIZE), 1, 1);
     dim3 dimBlock(AABB_BLOCK_SIZE, 1, 1);
+    // dim3 dimGrid(ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2), ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y), 1);
+    // dim3 dimBlock(AABB_BLOCK_SIZE_X, AABB_BLOCK_SIZE_Y, 1);
+    // std::cout << "GridX: " << ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2) << " GridY: " << ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y) << std::endl;
+    // std::cout << "SharedMemSize: " << 4 * AABB_BLOCK_SIZE_X << std::endl;
 
     // bitshifting right by 5 is the same as dividing by 2^5 (which is 32) and rounding up
     // also technically faster not that it matters very much
     genTransformedCopies<<<(confs.size() + 31)>> 5, 32>>>(d_confs, d_rob_vertices, d_transformed_vertices, 
                                                     confs.size(), rob_vertices.size());
 
-    cudaError_t err = cudaGetLastError();
-    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-
     checkCudaCall(cudaDeviceSynchronize());
 
     generateAABBPrimitiveKernel<<<dimGrid, dimBlock>>>(d_transformed_vertices, rob_vertices.size(), 
                                                         confs.size(), d_bot_bounds);
-
-    err = cudaGetLastError();
-    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // generateAABBKernel<<<dimGrid, dimBlock, 4 * AABB_BLOCK_SIZE_X>>>(d_transformed_vertices, rob_vertices.size(), 
+                                                        // confs.size(), d_bot_bounds);
 
     checkCudaCall(cudaDeviceSynchronize());
 
@@ -147,9 +157,6 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     checkCudaCall(cudaDeviceSynchronize());
 
     // broadPhase(confs.size(), d_bot_bounds, obstacle_bbox_d, valid_conf_d);
-
-    err = cudaGetLastError();
-    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
 
     std::cout << "have called kernel " << std::endl;
     std:: cout << "about to synchronize" << std::endl;
@@ -174,6 +181,7 @@ void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     std::cout << "copied back memory and synchronized" << std::endl;
 }
 
+#if(LOCAL_TESTING == 1)
 void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     //Load Robot
     std::vector<fcl::Vector3f> fcl_rob_vertices;
@@ -198,6 +206,7 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
 
     generateAABBBaseline_fcl(vertices, fcl_rob_vertices.size(), confs.size(), bot_bounds);
 }
+#endif
 
 //TODO: move robot to constant memory
 //TODO: refactor code to minimize loads by interleaving file reads and device memory operations
@@ -208,9 +217,11 @@ int main()
     readConfigurationFromFile(CONF_FILE, confs);
 
     Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
-    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
     AABB* bot_bounds_GPU = new AABB[confs.size()];
     AABB* bot_bounds_CPU = new AABB[confs.size()];
+   
+    #if(LOCAL_TESTING == 1)
+    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
 
     std::chrono::time_point<std::chrono::high_resolution_clock> cpu_start_time, cpu_end_time;
     cpu_start_time = std::chrono::high_resolution_clock::now();
@@ -218,6 +229,7 @@ int main()
     cpu_end_time = std::chrono::high_resolution_clock::now();
     auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
     std::cout << "Transformation cpu execution time: " << cpu_elapsed_time.count() << " milliseconds" << std::endl;
+    #endif
 
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
     start_time = std::chrono::high_resolution_clock::now();
@@ -246,9 +258,10 @@ int main()
     // std::cout << "num incorrect is " << num_incorrect << std::endl;
     // std::cout << "avg incorrect error is " << total_error_incorrect / num_incorrect << std::endl;
 
+    #if(LOCAL_TESTING == 1)
     if(verify_generateAABB(bot_bounds_CPU, bot_bounds_GPU, confs.size()))
         std::cout << "[PASS] Parallel AABB generation matches serial generation." << std::endl;
     else
         std::cout << "[FAIL] Parallel AABB generation does not match serial generation." << std::endl;
-    
+    #endif
 }
