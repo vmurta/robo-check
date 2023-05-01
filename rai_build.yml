@@ -1,7 +1,7 @@
 # project
 rai:
   version: 0.2
-  image: raiproject/pumps2018:amd64-cuda100
+  image: tonywukun/pumps2018:amd64-cuda100-nsighttest
 resources:
   cpu:
     architecture: ppc64le
@@ -32,4 +32,5 @@ commands:
     - nvcc -c /src/Utils_rai.cu -o Utils_rai.o
     - nvcc broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
     - ./integration-test
-    # - /usr/local/NVIDIA-Nsight-Compute/ncu --export "integration-test" --force-overwrite --target-processes all --kernel-name-base function --kernel-name regex:generateAABB --launch-skip-before-match 0 --section ComputeWorkloadAnalysis --section InstructionStats --section LaunchStats --section MemoryWorkloadAnalysis --section MemoryWorkloadAnalysis_Chart --section MemoryWorkloadAnalysis_Tables --section Occupancy --section SchedulerStats --section SourceCounters --section SpeedOfLight --section SpeedOfLight_HierarchicalSingleRooflineChart --section WarpStateStats --sampling-interval auto --sampling-max-passes 5 --sampling-buffer-size 33554432 --profile-from-start 1 --cache-control all --clock-control base ./integration-test -a
+    # Note that you have to submit to the rai_amd64_exclusive queue by adding `--queue=rai_amd64_exclusive` to your RAI invocation.
+    # - /usr/local/NVIDIA-Nsight-Compute/ncu --export "integration-test" --force-overwrite --target-processes all --kernel-name-base function --kernel-name regex:transformAndGenerateAABB --launch-skip-before-match 0 --section ComputeWorkloadAnalysis --section InstructionStats --section LaunchStats --section MemoryWorkloadAnalysis --section MemoryWorkloadAnalysis_Chart --section MemoryWorkloadAnalysis_Tables --section Occupancy --section SchedulerStats --section SourceCounters --section SpeedOfLight --section SpeedOfLight_HierarchicalSingleRooflineChart --section WarpStateStats --sampling-interval auto --sampling-max-passes 5 --sampling-buffer-size 33554432 --profile-from-start 1 --cache-control all --clock-control base ./integration-test -a

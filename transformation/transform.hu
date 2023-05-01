@@ -3,7 +3,7 @@
 #include "../Utils_rai.h"
 
 #define TRANSFORM_SIZE 32
-#define TRANSFORM_BLOCK_SIZE 32
+#define TRANSFORM_BLOCK_SIZE 128
 
 __device__ Matrix4f createTransformationMatrix(Configuration config);
 __device__ Vector3f transformVector(Vector3f v, Matrix4f M);

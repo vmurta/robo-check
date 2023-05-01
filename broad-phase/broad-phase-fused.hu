@@ -3,6 +3,9 @@
 #include "../Utils_rai.h"
 #include "../transformation/transform.hu"
 #include "../generate-AABB/generate-AABB.hu"
+#include "../broad-phase/broad-phase.hu"
 
-__global__ void transformAndGenerateAABB(Configuration* confs,  Vector3f *base_robot_vertices,
-                                     AABB* bot_bounds, int num_confs, int num_robot_vertices);
+void transformAndGenerateAABB(std::vector<Configuration> &confs, AABB* bot_bounds, bool *valid_conf);
+
+__global__ void transformAndGenerateAABBKernel(Configuration* confs, AABB* bot_bounds, 
+                                                int num_confs, int num_robot_vertices);

@@ -5,7 +5,7 @@
 // #include "../transformation/transform.hu"
 // #include "../generate-AABB/generate-AABB.hu"
 #include "../broad-phase/broad-phase-fused.hu"
-#include "../broad-phase/broad-phase.hu"
+// #include "../broad-phase/broad-phase.hu"
 
 // Set LOCAL_TESTING to 1 to run CPU tests on local machine (not on rai)
 #define LOCAL_TESTING 0
@@ -14,10 +14,6 @@
 #include <fcl/fcl.h>
 #include "../Utils.h"
 #endif
-
-#define CONF_FILE "src/10,000samples.conf"
-#define ROB_FILE "src/models/alpha1.0/robot.obj"
-#define OBS_FILE "src/models/alpha1.0/obstacle.obj"
 
 #if(LOCAL_TESTING == 1)
 inline bool verticesEqual(const Vector3f &v1, const fcl::Vector3f &v2){
@@ -79,113 +75,6 @@ void verifyConfs(bool *confs, size_t num_confs) {
     std::cout << "Valid configurations: " << numValidConfs << " (out of " << num_confs << ")" << std::endl;
 }
 
-//takes in an allocated, empty array of vertices
-// returns a filled one
-void transformAndAABBOnGPU(AABB* bot_bounds, std::vector<Configuration> &confs)
-{
-    int device_count;
-    if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
-
-    //Load Robot
-    std::vector<Vector3f> rob_vertices;
-    std::vector<Triangle> rob_triangles;
-    loadOBJFile(ROB_FILE, rob_vertices, rob_triangles);
-    std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
-
-
-    std::vector<Vector3f> obs_vertices;
-    std::vector<Triangle> obs_triangles;
-    loadOBJFile(OBS_FILE, obs_vertices, obs_triangles);
-    std::cout << "obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
-
-    Vector3f *d_rob_vertices;
-    checkCudaCall(cudaMalloc(&d_rob_vertices, rob_vertices.size() * sizeof(Vector3f)));
-    checkCudaMem(cudaMemcpy(d_rob_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
-    std::cout << "have copied the robot vertices " << std::endl;
-
-    Vector3f *d_transformed_vertices;
-    checkCudaCall(cudaMalloc(&d_transformed_vertices, rob_vertices.size() * sizeof(Vector3f) * confs.size()));
-    std::cout << "have malloced the transformed vertices " << std::endl;
-
-    Triangle *d_rob_triangles;
-    checkCudaCall(cudaMalloc(&d_rob_triangles, rob_triangles.size() * sizeof(Triangle)));
-    checkCudaMem(cudaMemcpy(d_rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-    std::cout << "have copied the robot triangles" << std::endl;
-
-    Configuration *d_confs;
-    checkCudaCall(cudaMalloc(&d_confs, confs.size() * sizeof(Configuration)));
-    checkCudaMem(cudaMemcpy(d_confs, confs.data(), confs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
-    std::cout << "have copied the configurations " << std::endl;
-
-    AABB* d_bot_bounds;
-    checkCudaCall(cudaMalloc(&d_bot_bounds, confs.size() * sizeof(AABB)));
-    std::cout << "have malloced the AABBs " << std::endl;
-
-    checkCudaCall(cudaDeviceSynchronize());
-    std::cout << "have synchronized" << std::endl;
-
-    dim3 dimGridTransformKernel(ceil((float)(confs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
-    dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
-    // dim3 dimGridAABBKernel(ceil((float)(confs.size()) / AABB_BLOCK_SIZE), 1, 1);
-    // dim3 dimBlockAABBKernel(AABB_BLOCK_SIZE, 1, 1);
-    // // dim3 dimGrid(ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2), ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y), 1);
-    // // dim3 dimBlock(AABB_BLOCK_SIZE_X, AABB_BLOCK_SIZE_Y, 1);
-    // // std::cout << "GridX: " << ceil((float)(rob_vertices.size()) / AABB_BLOCK_SIZE_X*2) << " GridY: " << ceil((float)(confs.size()) / AABB_BLOCK_SIZE_Y) << std::endl;
-    // // std::cout << "SharedMemSize: " << 4 * AABB_BLOCK_SIZE_X << std::endl;
-
-    // genTransformedCopies<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_confs, d_rob_vertices, d_transformed_vertices, 
-    //                                                 confs.size(), rob_vertices.size());
-
-    // checkCudaCall(cudaDeviceSynchronize());
-
-    // generateAABBPrimitiveKernel<<<dimGridAABBKernel, dimBlockAABBKernel>>>(d_transformed_vertices, rob_vertices.size(), 
-    //                                                     confs.size(), d_bot_bounds);
-    // // generateAABBKernel<<<dimGridAABBKernel, dimBlockAABBKernel, 4 * AABB_BLOCK_SIZE_X>>>(d_transformed_vertices, rob_vertices.size(), 
-    //                                                     // confs.size(), d_bot_bounds);
-
-    // checkCudaCall(cudaDeviceSynchronize());
-
-    transformAndGenerateAABB<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_confs, d_rob_vertices, d_bot_bounds, 
-                                                    confs.size(), rob_vertices.size());
-    checkCudaCall(cudaDeviceSynchronize());
-
-    // Move obstacle to AABB (on CPU since we only have 1)
-    AABB *obstacle_bbox = new AABB();
-    generateAABBBaseline(obs_vertices.data(), obs_vertices.size(), 1, obstacle_bbox);
-
-    bool *valid_conf_d;
-    bool *valid_conf = new bool[confs.size()];
-    AABB *obstacle_bbox_d;
-    checkCudaCall(cudaMalloc(&valid_conf_d, confs.size() * sizeof(bool)));
-    checkCudaCall(cudaMalloc(&obstacle_bbox_d, sizeof(AABB)));
-    checkCudaCall(cudaMemcpy(obstacle_bbox_d, obstacle_bbox, sizeof(AABB), cudaMemcpyHostToDevice));
-    checkCudaCall(cudaDeviceSynchronize());
-
-    broadPhase(confs.size(), d_bot_bounds, obstacle_bbox_d, valid_conf_d);
-
-    std::cout << "have called kernel " << std::endl;
-    std:: cout << "about to synchronize" << std::endl;
-    checkCudaCall(cudaDeviceSynchronize());
-
-    std:: cout << "about to copy back vertices" << std::endl;
-    cudaMemcpy(bot_bounds, d_bot_bounds, confs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
-    cudaMemcpy(valid_conf, valid_conf_d, confs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
-    checkCudaCall(cudaDeviceSynchronize()); 
-
-    verifyConfs(valid_conf, confs.size());
-    checkCudaCall(cudaDeviceSynchronize());
-
-    checkCudaCall(cudaFree(d_confs));
-    checkCudaCall(cudaFree(d_rob_triangles));
-    checkCudaCall(cudaFree(d_rob_vertices));
-    checkCudaCall(cudaFree(d_transformed_vertices));
-    checkCudaCall(cudaFree(d_bot_bounds));
-    checkCudaCall(cudaFree(obstacle_bbox_d));
-    checkCudaCall(cudaFree(valid_conf_d));
-    checkCudaCall(cudaDeviceSynchronize());
-    std::cout << "copied back memory and synchronized" << std::endl;
-}
-
 #if(LOCAL_TESTING == 1)
 void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     //Load Robot
@@ -213,7 +102,6 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
 }
 #endif
 
-//TODO: move robot to constant memory
 //TODO: refactor code to minimize loads by interleaving file reads and device memory operations
 int main()
 {
@@ -224,6 +112,8 @@ int main()
     Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
     AABB* bot_bounds_GPU = new AABB[confs.size()];
     AABB* bot_bounds_CPU = new AABB[confs.size()];
+
+    bool *valid_conf = new bool[confs.size()];
    
     #if(LOCAL_TESTING == 1)
     fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
@@ -239,7 +129,7 @@ int main()
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
     start_time = std::chrono::high_resolution_clock::now();
 
-    transformAndAABBOnGPU(bot_bounds_GPU, confs);
+    transformAndGenerateAABB(confs, bot_bounds_GPU, valid_conf);
 
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -263,10 +153,17 @@ int main()
     // std::cout << "num incorrect is " << num_incorrect << std::endl;
     // std::cout << "avg incorrect error is " << total_error_incorrect / num_incorrect << std::endl;
 
+    verifyConfs(valid_conf, confs.size());
+
     #if(LOCAL_TESTING == 1)
     if(verify_generateAABB(bot_bounds_CPU, bot_bounds_GPU, confs.size()))
         std::cout << "[PASS] Parallel AABB generation matches serial generation." << std::endl;
     else
         std::cout << "[FAIL] Parallel AABB generation does not match serial generation." << std::endl;
     #endif
+
+    delete[](gpu_transformed_vertices);
+    delete[](bot_bounds_GPU);
+    delete[](bot_bounds_CPU);
+    delete[](valid_conf);
 }

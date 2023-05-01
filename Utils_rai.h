@@ -5,6 +5,11 @@
 #include <random>
 #include <string.h>
 #include <chrono>
+#include <vector>
+
+#define CONF_FILE "src/10,000samples.conf"
+#define ROB_FILE "src/models/alpha1.0/robot.obj"
+#define OBS_FILE "src/models/alpha1.0/obstacle.obj"
 
 #define checkCudaCall(status) \
     do { \
@@ -42,7 +47,7 @@ struct Matrix4f {
 struct Vector3f {
   float x, y, z;
   __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}\
-  __device__ __host__ Vector3f() : x(0), y(0), z(0) {};
+  __device__ __host__ Vector3f(){};
 };
 
 struct Triangle {

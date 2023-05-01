@@ -58,7 +58,10 @@ __device__ Vector3f transformVector(Vector3f v, Matrix4f M) {
     return v_prime;
 }
 
-__global__ void transformAndGenerateAABB(Configuration* confs,  Vector3f *base_robot_vertices,
+#define MAX_NUM_ROBOT_VERTICES 1000
+__constant__ Vector3f base_robot_vertices[MAX_NUM_ROBOT_VERTICES];
+
+__global__ void transformAndGenerateAABBKernel(Configuration* confs,
                                      AABB* bot_bounds, int num_confs, int num_robot_vertices)
 {
     size_t config_idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -88,4 +91,68 @@ __global__ void transformAndGenerateAABB(Configuration* confs,  Vector3f *base_r
       bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.z);
     } 
     bot_bounds[config_idx] = bot_bounds_local;
+}
+
+void transformAndGenerateAABB(std::vector<Configuration> &confs, AABB* bot_bounds, bool *valid_conf)
+{
+    int device_count;
+    if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
+
+    //Load Robot
+    std::vector<Vector3f> rob_vertices;
+    std::vector<Triangle> rob_triangles;
+    loadOBJFile(ROB_FILE, rob_vertices, rob_triangles);
+    std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
+
+    //Load Obstacles
+    std::vector<Vector3f> obs_vertices;
+    std::vector<Triangle> obs_triangles;
+    loadOBJFile(OBS_FILE, obs_vertices, obs_triangles);
+    std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
+
+    //Load robot vertices to constant memory
+    checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f)));
+    std::cout << "Copied the robot vertices " << std::endl;
+
+    Configuration *d_confs;
+    checkCudaCall(cudaMalloc(&d_confs, confs.size() * sizeof(Configuration)));
+    checkCudaMem(cudaMemcpy(d_confs, confs.data(), confs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
+    std::cout << "Copied the configurations " << std::endl;
+
+    AABB* d_bot_bounds;
+    checkCudaCall(cudaMalloc(&d_bot_bounds, confs.size() * sizeof(AABB)));
+    std::cout << "Malloced the AABBs " << std::endl;
+
+    dim3 dimGridTransformKernel(ceil((float)(confs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
+    dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
+    transformAndGenerateAABBKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_confs, d_bot_bounds, 
+                                                    confs.size(), rob_vertices.size());
+    checkCudaCall(cudaDeviceSynchronize());
+
+    // Move obstacle to AABB (on CPU since we only have 1)
+    AABB *obstacle_bbox = new AABB();
+    generateAABBBaseline(obs_vertices.data(), obs_vertices.size(), 1, obstacle_bbox);
+
+    bool *valid_conf_d;
+    AABB *obstacle_bbox_d;
+    checkCudaCall(cudaMalloc(&valid_conf_d, confs.size() * sizeof(bool)));
+    checkCudaCall(cudaMalloc(&obstacle_bbox_d, sizeof(AABB)));
+    checkCudaCall(cudaMemcpy(obstacle_bbox_d, obstacle_bbox, sizeof(AABB), cudaMemcpyHostToDevice));
+
+    broadPhase(confs.size(), d_bot_bounds, obstacle_bbox_d, valid_conf_d);
+
+    std::cout << "Completed kernel execution" << std::endl;
+    
+    checkCudaCall(cudaDeviceSynchronize());
+    std::cout << "Synchronized" << std::endl;
+
+    std:: cout << "Copying back results" << std::endl;
+    cudaMemcpy(bot_bounds, d_bot_bounds, confs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
+    cudaMemcpy(valid_conf, valid_conf_d, confs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
+
+    checkCudaCall(cudaFree(d_confs));
+    checkCudaCall(cudaFree(d_bot_bounds));
+    checkCudaCall(cudaFree(obstacle_bbox_d));
+    checkCudaCall(cudaFree(valid_conf_d));
+    std::cout << "Copied back memory and synchronized" << std::endl;
 }
