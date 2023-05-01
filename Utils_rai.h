@@ -6,6 +6,7 @@
 #include <string.h>
 #include <chrono>
 #include <vector>
+#include <limits>
 
 #define CONF_FILE "src/10,000samples.conf"
 #define ROB_FILE "src/models/alpha1.0/robot.obj"

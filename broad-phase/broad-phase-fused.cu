@@ -58,17 +58,23 @@ __device__ Vector3f transformVector(Vector3f v, Matrix4f M) {
     return v_prime;
 }
 
+// Check if two objects are colliding along a certain dimension
+inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax) {
+    // Done without any control divergence!
+    return fstMin <= sndMax && sndMin <= fstMax;
+}
+
 #define MAX_NUM_ROBOT_VERTICES 1000
 __constant__ Vector3f base_robot_vertices[MAX_NUM_ROBOT_VERTICES];
 
-__global__ void transformAndGenerateAABBKernel(Configuration* confs,
-                                     AABB* bot_bounds, int num_confs, int num_robot_vertices)
+__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle,
+                                     bool *valid_conf, const int num_configs, const int num_robot_vertices)
 {
     size_t config_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
-    if(config_idx >= num_confs) return;
+    if(config_idx >= num_configs) return;
 
-    Matrix4f transform_matrix = createTransformationMatrix(confs[config_idx]);
+    Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
 
     AABB bot_bounds_local;
     bot_bounds_local.x_min = base_robot_vertices[0].x;
@@ -90,10 +96,18 @@ __global__ void transformAndGenerateAABBKernel(Configuration* confs,
       bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex.y);
       bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.z);
     } 
-    bot_bounds[config_idx] = bot_bounds_local;
+    // bot_bounds[config_idx] = bot_bounds_local;
+
+    // Due to the massive reuse it's fastest to store the obstacle AABB in registers
+    AABB obstacleReg = *obstacle;
+    bool isNotValid = 
+            dimensionCollides(obstacleReg.x_min, obstacleReg.x_max, bot_bounds_local.x_min, bot_bounds_local.x_max) &&
+            dimensionCollides(obstacleReg.y_min, obstacleReg.y_max, bot_bounds_local.y_min, bot_bounds_local.y_max) &&
+            dimensionCollides(obstacleReg.z_min, obstacleReg.z_max, bot_bounds_local.z_min, bot_bounds_local.z_max);
+    valid_conf[config_idx] = !isNotValid;
 }
 
-void transformAndGenerateAABB(std::vector<Configuration> &confs, AABB* bot_bounds, bool *valid_conf)
+void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
 {
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
@@ -114,45 +128,45 @@ void transformAndGenerateAABB(std::vector<Configuration> &confs, AABB* bot_bound
     checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f)));
     std::cout << "Copied the robot vertices " << std::endl;
 
-    Configuration *d_confs;
-    checkCudaCall(cudaMalloc(&d_confs, confs.size() * sizeof(Configuration)));
-    checkCudaMem(cudaMemcpy(d_confs, confs.data(), confs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
+    Configuration *d_configs;
+    checkCudaCall(cudaMalloc(&d_configs, configs.size() * sizeof(Configuration)));
+    checkCudaMem(cudaMemcpy(d_configs, configs.data(), configs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
     std::cout << "Copied the configurations " << std::endl;
 
-    AABB* d_bot_bounds;
-    checkCudaCall(cudaMalloc(&d_bot_bounds, confs.size() * sizeof(AABB)));
-    std::cout << "Malloced the AABBs " << std::endl;
-
-    dim3 dimGridTransformKernel(ceil((float)(confs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
-    dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
-    transformAndGenerateAABBKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_confs, d_bot_bounds, 
-                                                    confs.size(), rob_vertices.size());
-    checkCudaCall(cudaDeviceSynchronize());
+    // AABB* d_bot_bounds;
+    // checkCudaCall(cudaMalloc(&d_bot_bounds, configs.size() * sizeof(AABB)));
+    // std::cout << "Malloced the AABBs " << std::endl;
 
     // Move obstacle to AABB (on CPU since we only have 1)
-    AABB *obstacle_bbox = new AABB();
-    generateAABBBaseline(obs_vertices.data(), obs_vertices.size(), 1, obstacle_bbox);
+    AABB *obstacle_AABB = new AABB();
+    generateAABBBaseline(obs_vertices.data(), obs_vertices.size(), 1, obstacle_AABB);
 
     bool *valid_conf_d;
-    AABB *obstacle_bbox_d;
-    checkCudaCall(cudaMalloc(&valid_conf_d, confs.size() * sizeof(bool)));
-    checkCudaCall(cudaMalloc(&obstacle_bbox_d, sizeof(AABB)));
-    checkCudaCall(cudaMemcpy(obstacle_bbox_d, obstacle_bbox, sizeof(AABB), cudaMemcpyHostToDevice));
+    AABB *obstacle_AABB_d;
+    checkCudaCall(cudaMalloc(&valid_conf_d, configs.size() * sizeof(bool)));
+    checkCudaCall(cudaMalloc(&obstacle_AABB_d, sizeof(AABB)));
+    checkCudaCall(cudaMemcpy(obstacle_AABB_d, obstacle_AABB, sizeof(AABB), cudaMemcpyHostToDevice));
 
-    broadPhase(confs.size(), d_bot_bounds, obstacle_bbox_d, valid_conf_d);
+    dim3 dimGridTransformKernel(ceil((float)(configs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
+    dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
+    broadPhaseFusedKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_configs, obstacle_AABB_d, valid_conf_d,
+                                                    configs.size(), rob_vertices.size());
+    checkCudaCall(cudaDeviceSynchronize());
+
+    // broadPhase(configs.size(), d_bot_bounds, obstacle_AABB_d, valid_conf_d);
 
     std::cout << "Completed kernel execution" << std::endl;
     
-    checkCudaCall(cudaDeviceSynchronize());
+    // checkCudaCall(cudaDeviceSynchronize());
     std::cout << "Synchronized" << std::endl;
 
     std:: cout << "Copying back results" << std::endl;
-    cudaMemcpy(bot_bounds, d_bot_bounds, confs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
-    cudaMemcpy(valid_conf, valid_conf_d, confs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(bot_bounds, d_bot_bounds, configs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
+    cudaMemcpy(valid_conf, valid_conf_d, configs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
 
-    checkCudaCall(cudaFree(d_confs));
-    checkCudaCall(cudaFree(d_bot_bounds));
-    checkCudaCall(cudaFree(obstacle_bbox_d));
+    checkCudaCall(cudaFree(d_configs));
+    // checkCudaCall(cudaFree(d_bot_bounds));
+    checkCudaCall(cudaFree(obstacle_AABB_d));
     checkCudaCall(cudaFree(valid_conf_d));
     std::cout << "Copied back memory and synchronized" << std::endl;
 }

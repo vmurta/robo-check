@@ -5,7 +5,7 @@
 #include "../generate-AABB/generate-AABB.hu"
 #include "../broad-phase/broad-phase.hu"
 
-void transformAndGenerateAABB(std::vector<Configuration> &confs, AABB* bot_bounds, bool *valid_conf);
+void broadPhaseFused(std::vector<Configuration> &confs, bool *valid_conf);
 
-__global__ void transformAndGenerateAABBKernel(Configuration* confs, AABB* bot_bounds, 
-                                                int num_confs, int num_robot_vertices);
+__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle,
+                                     bool *valid_conf, const int num_configs, const int num_robot_vertices);

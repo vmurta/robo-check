@@ -1,11 +1,4 @@
-#include <iostream>
-#include <limits>
-#include <vector>
-// #include "../Utils_rai.h"
-// #include "../transformation/transform.hu"
-// #include "../generate-AABB/generate-AABB.hu"
 #include "../broad-phase/broad-phase-fused.hu"
-// #include "../broad-phase/broad-phase.hu"
 
 // Set LOCAL_TESTING to 1 to run CPU tests on local machine (not on rai)
 #define LOCAL_TESTING 0
@@ -109,13 +102,13 @@ int main()
     std::vector<Configuration> confs;
     readConfigurationFromFile(CONF_FILE, confs);
 
-    Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
-    AABB* bot_bounds_GPU = new AABB[confs.size()];
-    AABB* bot_bounds_CPU = new AABB[confs.size()];
+    // Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
+    // AABB* bot_bounds_GPU = new AABB[confs.size()];
 
     bool *valid_conf = new bool[confs.size()];
    
     #if(LOCAL_TESTING == 1)
+    AABB* bot_bounds_CPU = new AABB[confs.size()];
     fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
 
     std::chrono::time_point<std::chrono::high_resolution_clock> cpu_start_time, cpu_end_time;
@@ -129,7 +122,7 @@ int main()
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
     start_time = std::chrono::high_resolution_clock::now();
 
-    transformAndGenerateAABB(confs, bot_bounds_GPU, valid_conf);
+    broadPhaseFused(confs, valid_conf);
 
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -160,10 +153,10 @@ int main()
         std::cout << "[PASS] Parallel AABB generation matches serial generation." << std::endl;
     else
         std::cout << "[FAIL] Parallel AABB generation does not match serial generation." << std::endl;
+    delete[](bot_bounds_CPU);
     #endif
 
-    delete[](gpu_transformed_vertices);
-    delete[](bot_bounds_GPU);
-    delete[](bot_bounds_CPU);
+    // delete[](gpu_transformed_vertices);
+    // delete[](bot_bounds_GPU);
     delete[](valid_conf);
 }

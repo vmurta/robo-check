@@ -1,8 +1,6 @@
 #include "broad-phase.hu"
 #include "../generate-AABB/generate-AABB.hu"
 
-#define BROAD_PHASE_TILE_SIZE 256
-
 // Check if two objects are colliding along a certain dimension
 inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax) {
     // Done without any control divergence!
