@@ -1,5 +1,6 @@
 #include "broad-phase-fused.hu"
 
+#define TRANSFORM_BLOCK_SIZE 32
 __device__ Matrix4f createTransformationMatrix(Configuration config) {
     float x = config.x;
     float y = config.y;
@@ -18,7 +19,7 @@ __device__ Matrix4f createTransformationMatrix(Configuration config) {
     Matrix4f transform;
     transform.m[0][0] = cosA * cosB;
     transform.m[0][1] = cosA * sinB * sinC - sinA * cosC;
-    transform.m[0][2] = cosA * sinB * cosC + sinA * sinC;
+    transform.m[0][2] = cosA *  sinB * cosC + sinA * sinC;
     transform.m[0][3] = x;
     transform.m[1][0] = sinA * cosB;
     transform.m[1][1] = sinA * sinB * sinC + cosA * cosC;
@@ -67,7 +68,7 @@ inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, fl
 #define MAX_NUM_ROBOT_VERTICES 1000
 __constant__ Vector3f base_robot_vertices[MAX_NUM_ROBOT_VERTICES];
 
-__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle,
+__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, AABB *bot_bounds,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices)
 {
     size_t config_idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -77,12 +78,12 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
     Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
 
     AABB bot_bounds_local;
-    bot_bounds_local.x_min = base_robot_vertices[0].x;
-    bot_bounds_local.y_min = base_robot_vertices[0].y;
-    bot_bounds_local.z_min = base_robot_vertices[0].z;
-    bot_bounds_local.x_max = base_robot_vertices[0].x;
-    bot_bounds_local.y_max = base_robot_vertices[0].y;
-    bot_bounds_local.z_max = base_robot_vertices[0].z;
+    bot_bounds_local.x_min = FLT_MAX;
+    bot_bounds_local.y_min = FLT_MAX;
+    bot_bounds_local.z_min = FLT_MAX;
+    bot_bounds_local.x_max = -FLT_MAX;
+    bot_bounds_local.y_max = -FLT_MAX;
+    bot_bounds_local.z_max = -FLT_MAX;
 
     Vector3f transformed_robot_vertex;
     for(int vertex_idx = 0; vertex_idx < num_robot_vertices; ++vertex_idx)
@@ -96,7 +97,7 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
       bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex.y);
       bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.z);
     } 
-    // bot_bounds[config_idx] = bot_bounds_local;
+    bot_bounds[config_idx] = bot_bounds_local;
 
     // Due to the massive reuse it's fastest to store the obstacle AABB in registers
     AABB obstacleReg = *obstacle;
@@ -107,7 +108,7 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
     valid_conf[config_idx] = !isNotValid;
 }
 
-void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
+void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB* bot_bounds)
 {
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
@@ -133,9 +134,9 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
     checkCudaMem(cudaMemcpy(d_configs, configs.data(), configs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
     std::cout << "Copied the configurations " << std::endl;
 
-    // AABB* d_bot_bounds;
-    // checkCudaCall(cudaMalloc(&d_bot_bounds, configs.size() * sizeof(AABB)));
-    // std::cout << "Malloced the AABBs " << std::endl;
+    AABB* d_bot_bounds;
+    checkCudaCall(cudaMalloc(&d_bot_bounds, configs.size() * sizeof(AABB)));
+    std::cout << "Malloced the AABBs " << std::endl;
 
     // Move obstacle to AABB (on CPU since we only have 1)
     AABB *obstacle_AABB = new AABB();
@@ -149,7 +150,7 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
 
     dim3 dimGridTransformKernel(ceil((float)(configs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
     dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
-    broadPhaseFusedKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_configs, obstacle_AABB_d, valid_conf_d,
+    broadPhaseFusedKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_configs, obstacle_AABB_d, d_bot_bounds, valid_conf_d,
                                                     configs.size(), rob_vertices.size());
     checkCudaCall(cudaDeviceSynchronize());
 
@@ -161,11 +162,11 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
     std::cout << "Synchronized" << std::endl;
 
     std:: cout << "Copying back results" << std::endl;
-    // cudaMemcpy(bot_bounds, d_bot_bounds, configs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
+    cudaMemcpy(bot_bounds, d_bot_bounds, configs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
     cudaMemcpy(valid_conf, valid_conf_d, configs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
 
     checkCudaCall(cudaFree(d_configs));
-    // checkCudaCall(cudaFree(d_bot_bounds));
+    checkCudaCall(cudaFree(d_bot_bounds));
     checkCudaCall(cudaFree(obstacle_AABB_d));
     checkCudaCall(cudaFree(valid_conf_d));
     std::cout << "Copied back memory and synchronized" << std::endl;

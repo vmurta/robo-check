@@ -7,10 +7,17 @@
 #include <chrono>
 #include <vector>
 #include <limits>
+#include <float.h>
 
-#define CONF_FILE "src/10,000samples.conf"
-#define ROB_FILE "src/models/alpha1.0/robot.obj"
-#define OBS_FILE "src/models/alpha1.0/obstacle.obj"
+#if LOCAL_TESTING == 1
+    #define CONF_FILE "./10,000samples.conf"
+    #define ROB_FILE "./models/alpha1.0/robot.obj"
+    #define OBS_FILE "./models/alpha1.0/obstacle.obj"
+#else
+    #define CONF_FILE "src/10,000samples.conf"
+    #define ROB_FILE "src/models/alpha1.0/robot.obj"
+    #define OBS_FILE "src/models/alpha1.0/obstacle.obj"
+#endif
 
 #define checkCudaCall(status) \
     do { \

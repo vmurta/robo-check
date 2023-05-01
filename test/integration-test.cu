@@ -1,7 +1,6 @@
 #include "../broad-phase/broad-phase-fused.hu"
 
-// Set LOCAL_TESTING to 1 to run CPU tests on local machine (not on rai)
-#define LOCAL_TESTING 0
+// Set -DLOCAL_TESTING=1 to run CPU tests on local machine (not on rai)
 
 #if(LOCAL_TESTING == 1)
 #include <fcl/fcl.h>
@@ -44,17 +43,36 @@ void generateAABBBaseline_fcl(fcl::Vector3f* vertices, unsigned int numVertices,
 #endif
 
 bool verify_generateAABB(AABB* botBoundsBaseline, AABB* botBoundsParallel, const int numConfigs)
-{
-    for(int i = 0; i < numConfigs; ++i)
-    {
-        if(!(   fabs (botBoundsBaseline[i].x_min - botBoundsParallel[i].x_min) < 1e-4 &&
-                fabs (botBoundsBaseline[i].y_min - botBoundsParallel[i].y_min) < 1e-4 &&
-                fabs (botBoundsBaseline[i].z_min - botBoundsParallel[i].z_min) < 1e-4 &&
-                fabs (botBoundsBaseline[i].x_max - botBoundsParallel[i].x_max) < 1e-4 &&
-                fabs (botBoundsBaseline[i].y_max - botBoundsParallel[i].y_max) < 1e-4 &&
-                fabs (botBoundsBaseline[i].z_max - botBoundsParallel[i].z_max) < 1e-4))
-            return false;
+{   
+    int num_correct = 0;
+    int num_incorrect = 0;
+    float running_error = 0;
+    for(int i = 0; i < numConfigs; ++i) 
+    {   
+        float error = fabs (botBoundsBaseline[i].x_min - botBoundsParallel[i].x_min) +
+                fabs (botBoundsBaseline[i].y_min - botBoundsParallel[i].y_min) +
+                fabs (botBoundsBaseline[i].z_min - botBoundsParallel[i].z_min) +
+                fabs (botBoundsBaseline[i].x_max - botBoundsParallel[i].x_max) +
+                fabs (botBoundsBaseline[i].y_max - botBoundsParallel[i].y_max) + 
+                fabs (botBoundsBaseline[i].z_max - botBoundsParallel[i].z_max);
+        
+        if (error < 1E-4){
+            num_correct++;
+        } else {
+            num_incorrect++;
+            running_error+=error;
+            std::cout << "Baseline x_min: " << botBoundsBaseline[i].x_min << "\tGPU x_min " << botBoundsParallel[i].x_min << std::endl; 
+            std::cout << "Baseline y_min: " << botBoundsBaseline[i].y_min << "\tGPU y_min " << botBoundsParallel[i].y_min << std::endl; 
+            std::cout << "Baseline z_min: " << botBoundsBaseline[i].z_min << "\tGPU z_min " << botBoundsParallel[i].z_min << std::endl; 
+            std::cout << "Baseline x_max: " << botBoundsBaseline[i].x_max << "\tGPU x_max " << botBoundsParallel[i].x_max << std::endl; 
+            std::cout << "Baseline y_max: " << botBoundsBaseline[i].y_max << "\tGPU y_max " << botBoundsParallel[i].y_max << std::endl; 
+            std::cout << "Baseline z_max: " << botBoundsBaseline[i].z_max << "\tGPU z_max " << botBoundsParallel[i].z_max << std::endl;
+        }
     }
+    float avg_error = running_error / num_incorrect;
+    std::cout << "Num correct AABBs: " << num_correct <<std::endl;
+    std::cout << "Num incorrect AABBs: " << num_incorrect <<std::endl;
+    std::cout << "Average Error " << avg_error <<std::endl;
     return true;
 }
 
@@ -85,10 +103,10 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     fcl::Vector3f* vertices = new fcl::Vector3f[10000 * 792];
 
     for (int i = 0; i < confs.size(); i++){
-    fcl::Transform3f transform = configurationToTransform(confs[i]);
-    for (int j = 0; j < fcl_rob_vertices.size(); j++){
-        vertices[i * fcl_rob_vertices.size() + j] = transform * fcl_rob_vertices[j];
-    }  
+        fcl::Transform3f transform = configurationToTransform(confs[i]);
+        for (int j = 0; j < fcl_rob_vertices.size(); j++){
+            vertices[i * fcl_rob_vertices.size() + j] = transform * fcl_rob_vertices[j];
+        }  
     }
 
     generateAABBBaseline_fcl(vertices, fcl_rob_vertices.size(), confs.size(), bot_bounds);
@@ -102,8 +120,8 @@ int main()
     std::vector<Configuration> confs;
     readConfigurationFromFile(CONF_FILE, confs);
 
-    // Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
-    // AABB* bot_bounds_GPU = new AABB[confs.size()];
+    Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
+    AABB* bot_bounds_GPU = new AABB[confs.size()];
 
     bool *valid_conf = new bool[confs.size()];
    
@@ -122,7 +140,7 @@ int main()
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
     start_time = std::chrono::high_resolution_clock::now();
 
-    broadPhaseFused(confs, valid_conf);
+    broadPhaseFused(confs, valid_conf, bot_bounds_GPU);
 
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
@@ -157,6 +175,6 @@ int main()
     #endif
 
     // delete[](gpu_transformed_vertices);
-    // delete[](bot_bounds_GPU);
+    delete[](bot_bounds_GPU);
     delete[](valid_conf);
 }
