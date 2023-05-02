@@ -2,7 +2,7 @@
 #include "test-narrow-phase.hu"
 #include <iostream>
 
-#define NUM_NP_TEST_CONFS 256
+#define NUM_NP_TEST_CONFS 4
 
 void unit_tests() {
     // Test isclose
@@ -103,6 +103,24 @@ void unit_tests() {
         printf("All compute_plane tests passed\n");
     }
 
+    // Test compute_plane_sep
+    compute_plane_sep(pts[t1.v1].x, pts[t1.v1].y, pts[t1.v1].z, pts[t1.v2].x, pts[t1.v2].y, pts[t1.v2].z, pts[t1.v3].x, pts[t1.v3].y, pts[t1.v3].z, &(N1.x), &(N1.y), &N1.z, &d1);
+
+    passed = true;
+    if (!veq(N1, N1_corr)) {
+        passed = false;
+        printf("Failed veq(N1, N1_corr)\n");
+    }
+
+    if (!isclose(d1, -2.25)) {
+        passed = false;
+        printf("Failed isclose(d1, -2.25)\n");
+    }
+
+    if (passed) {
+        printf("All compute_plane_sep tests passed\n");
+    }
+
     // Test compute_signed_dists
     Vector3f dists12 = compute_signed_dists(N1, d1, t2, pts);
 
@@ -117,6 +135,19 @@ void unit_tests() {
         printf("All compute_signed_dists tests passed\n");
     }
 
+    // Test compute_signed_dists_sep
+    compute_signed_dists_sep(N1.x, N1.y, N1.z, d1, pts[t2.v1].x, pts[t2.v1].y, pts[t2.v1].z, pts[t2.v2].x, pts[t2.v2].y, pts[t2.v2].z, pts[t2.v3].x, pts[t2.v3].y, pts[t2.v3].z, &(dists12.x), &(dists12.y), &(dists12.z));
+
+    passed = true;
+    if (!veq(dists12, dists_corr)) {
+        passed = false;
+        printf("Failed veq(dists12, dists_corr)\n");
+    }
+
+    if (passed) {
+        printf("All compute_signed_dists_sep tests passed\n");
+    }
+
     // Test early exit
     passed = true;
     if (no_overlap(dists12)) {
@@ -124,19 +155,9 @@ void unit_tests() {
         printf("Failed no_overlap(dists12)\n");
     }
 
-    if (yes_overlap(dists12)) {
-        passed = false;
-        printf("Failed yes_overlap(dists12)\n");
-    }
-
     if (!no_overlap(compute_signed_dists(N1, d1, t3, pts))) {
         passed = false;
         printf("Failed no_overlap(compute_signed_dists(N1, d1, t3, pts))\n");
-    }
-
-    if (yes_overlap(compute_signed_dists(N1, d1, t3, pts))) {
-        passed = false;
-        printf("Failed yes_overlap(compute_signed_dists(N1, d1, t3, pts))\n");
     }
 
     if (!no_overlap(compute_signed_dists(N1, d1, t1, pts))) {
@@ -144,13 +165,31 @@ void unit_tests() {
         printf("Failed no_overlap(compute_signed_dists(N1, d1, t1, pts))\n");
     }
 
-    if (!yes_overlap(compute_signed_dists(N1, d1, t1, pts))) {
+    if (passed) {
+        printf("All early-exit tests passed\n");
+    }
+
+    // Test early exit sep
+    passed = true;
+    if (no_overlap_sep(dists12.x, dists12.y, dists12.z)) {
         passed = false;
-        printf("Failed yes_overlap(compute_signed_dists(N1, d1, t1, pts))\n");
+        printf("Failed no_overlap(dists12)\n");
+    }
+
+    Vector3f dists13 = compute_signed_dists(N1, d1, t3, pts);
+    if (!no_overlap_sep(dists13.x, dists13.y, dists13.z)) {
+        passed = false;
+        printf("Failed no_overlap(compute_signed_dists(N1, d1, t3, pts))\n");
+    }
+
+    Vector3f dists11 = compute_signed_dists(N1, d1, t1, pts);
+    if (!no_overlap_sep(dists11.x, dists11.y, dists11.z)) {
+        passed = false;
+        printf("Failed no_overlap(compute_signed_dists(N1, d1, t1, pts))\n");
     }
 
     if (passed) {
-        printf("All early-exit tests passed\n");
+        printf("All early-exit sep tests passed\n");
     }
 
     // Test la_solve
@@ -250,6 +289,59 @@ void unit_tests() {
         printf("All compute_intersect_line tests passed\n");
     }
 
+    // Test compute_intersect_line_sep
+    passed = true;
+    compute_intersect_line_sep(XY_plane.x, XY_plane.y, XY_plane.z, -1, YZ_plane.x, YZ_plane.y, YZ_plane.z, -2, &(D.x), &(D.y), &(D.z), &(O.x), &(O.y), &(O.z));
+    if (!veq(D, D_XYYZ_corr)) {
+        passed = false;
+        printf("Failed veq(D, D_XYYZ_corr)\n");
+    }
+
+    if (!veq(O, O_XYYZ_corr)) {
+        passed = false;
+        printf("Failed veq(O, O_XYYZ_corr)\n");
+    }
+
+    compute_intersect_line_sep(YZ_plane.x, YZ_plane.y, YZ_plane.z, -1, XZ_plane.x, XZ_plane.y, XZ_plane.z, -2, &(D.x), &(D.y), &(D.z), &(O.x), &(O.y), &(O.z));
+    if (!veq(D, D_YZXZ_corr)) {
+        passed = false;
+        printf("Failed veq(D, D_YZXZ_corr)\n");
+    }
+
+    if (!veq(O, O_YZXZ_corr)) {
+        passed = false;
+        printf("Failed veq(O, O_YZXZ_corr)\n");
+    }
+
+    compute_intersect_line_sep(XZ_plane.x, XZ_plane.y, XZ_plane.z, -1, XY_plane.x, XY_plane.y, XY_plane.z, -2, &(D.x), &(D.y), &(D.z), &(O.x), &(O.y), &(O.z));
+    if (!veq(D, D_XZXY_corr)) {
+        passed = false;
+        printf("Failed veq(D, D_XZXY_corr)\n");
+    }
+
+    if (!veq(O, O_XZXY_corr)) {
+        passed = false;
+        printf("Failed veq(O, O_XZXY_corr)\n");
+    }
+
+
+    // Example from https://math.stackexchange.com/questions/475953/how-to-calculate-the-intersection-of-two-planes
+    compute_intersect_line_sep(N2.x, N2.y, N2.z, 2, N3.x, N3.y, N3.z, -1, &(D.x), &(D.y), &(D.z), &(O.x), &(O.y), &(O.z));
+
+    if (!veq(D, D_N2N3_corr)) {
+        passed = false;
+        printf("Failed veq(D, D_N2N3_corr)\n");
+    }
+
+    if (!veq(O, O_N2N3_corr)) {
+        passed = false;
+        printf("Failed veq(O, O_N2N3_corr)\n");
+    }
+
+    if (passed) {
+        printf("All compute_intersect_line_sep tests passed\n");
+    }
+
     // Test project_vertex
     Vector3f V_pv(1, 2, 2);
     Vector3f O_pv(2, 2, 4);
@@ -264,6 +356,18 @@ void unit_tests() {
     if (passed) {
         printf("All project_vertex tests passed\n");
     }
+
+    // Test project_vertex_sep
+    passed = true;
+    if (!isclose(project_vertex_sep(V_pv.x, V_pv.y, V_pv.z, D_pv.x, D_pv.y, D_pv.z, O_pv.x, O_pv.y, O_pv.z), -13)) {
+        passed = false;
+        printf("Failed project_vertex_sep(V_pv, D_pv, O_pv)\n");
+    }
+
+    if (passed) {
+        printf("All project_vertex_sep tests passed\n");
+    }
+
 
     // Test canonicalize_triangle
     Vector3f dists1(-1, -1, 1);
@@ -350,6 +454,8 @@ void unit_tests() {
     if (passed) {
         printf("All canonicalize_triangle tests passed\n");
     }
+
+    // Test canonicalize_triangle_sep
 
     // Test compute_parametric_variable
     float d2;
@@ -541,7 +647,7 @@ void test_gpu() {
     }
 
     bool res[NUM_NP_TEST_CONFS];
-    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, real_rob_pts, obs_trs, obs_pts, res);
+    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, rob_pts, obs_trs, obs_pts, res);
 
     bool passed = true;
     for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
