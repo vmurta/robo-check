@@ -1,7 +1,5 @@
 #include "narrow-phase.hu"
-#include <iostream>
-#include <stdio.h>
-#include <stdlib.h>
+
 
 // Machine epsilon for floats is 1e-7
 // https://en.wikipedia.org/wiki/Machine_epsilon#Values_for_standard_hardware_arithmetics
@@ -302,7 +300,8 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
             float dr;
             compute_plane(rob_trs[j], &rob_pts[i * num_rob_pts], &Nr, &dr);
 
-            for (int k = 0; k < num_obs_trs; k++) {
+            for (int k = 0; k < 1; k++) {
+            // for (int k = 0; k < num_obs_trs; k++) {
                 Vector3f distO = compute_signed_dists(Nr, dr, obs_trs[k], obs_pts);
                 if (yes_overlap(distO)) {
                     valid = false;
@@ -310,54 +309,54 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
                     break;
                 }
 
-                if (no_overlap(distO)) {
-                    continue;
-                }
+                // if (no_overlap(distO)) {
+                //     continue;
+                // }
 
-                Vector3f No;
-                float do_;
-                compute_plane(obs_trs[k], obs_pts, &No, &do_);
+                // Vector3f No;
+                // float do_;
+                // compute_plane(obs_trs[k], obs_pts, &No, &do_);
 
-                if (is_coplanar(Nr, dr, No, do_)) {
-                    req_coplanar = true;
-                    continue;
-                }
-                Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
+                // if (is_coplanar(Nr, dr, No, do_)) {
+                //     req_coplanar = true;
+                //     continue;
+                // }
+                // Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
 
-                Vector3f D, O;
-                compute_intersect_line(Nr, dr, No, do_, &D, &O);
+                // Vector3f D, O;
+                // compute_intersect_line(Nr, dr, No, do_, &D, &O);
 
-                Triangle ctr, cto;
-                Vector3f cdr, cdo;
-                canonicalize_triangle(rob_trs[j], distR, &ctr, &cdr);
-                canonicalize_triangle(obs_trs[k], distO, &cto, &cdo);
+                // Triangle ctr, cto;
+                // Vector3f cdr, cdo;
+                // canonicalize_triangle(rob_trs[j], distR, &ctr, &cdr);
+                // canonicalize_triangle(obs_trs[k], distO, &cto, &cdo);
 
-                float t_r01 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v1],
-                    rob_pts[i * num_rob_pts + ctr.v2], cdr.x, cdr.y, D, O);
+                // float t_r01 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v1],
+                //     rob_pts[i * num_rob_pts + ctr.v2], cdr.x, cdr.y, D, O);
 
-                float t_r12 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v2],
-                    rob_pts[i * num_rob_pts + ctr.v3], cdr.y, cdr.z, D, O);
+                // float t_r12 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v2],
+                //     rob_pts[i * num_rob_pts + ctr.v3], cdr.y, cdr.z, D, O);
 
-                float t_o01 = compute_parametric_variable(obs_pts[cto.v1],
-                    obs_pts[cto.v2], cdo.x, cdo.y, D, O);
+                // float t_o01 = compute_parametric_variable(obs_pts[cto.v1],
+                //     obs_pts[cto.v2], cdo.x, cdo.y, D, O);
 
-                float t_o12 = compute_parametric_variable(obs_pts[cto.v2],
-                    obs_pts[cto.v3], cdo.y, cdo.z, D, O);
+                // float t_o12 = compute_parametric_variable(obs_pts[cto.v2],
+                //     obs_pts[cto.v3], cdo.y, cdo.z, D, O);
 
-                // There is no overlap
-                if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
-                    continue;
+                // // There is no overlap
+                // if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
+                //     continue;
 
-                // Also no overlap
-                } else if (min(t_o01, t_o12) > max(t_r01, t_r12)) {
-                    continue;
+                // // Also no overlap
+                // } else if (min(t_o01, t_o12) > max(t_r01, t_r12)) {
+                //     continue;
 
-                // There is overlap
-                } else {
-                    valid = false;
-                    req_coplanar = false;
-                    break;
-                }
+                // // There is overlap
+                // } else {
+                //     valid = false;
+                //     req_coplanar = false;
+                //     break;
+                // }
             }
 
             // Stop if we found a collision
@@ -365,16 +364,21 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
                 break;
         }
 
-        if (req_coplanar)
+        if (req_coplanar){
             printf("Error: require coplanar intersection for configuration: %d\n", i);
+        }
 
+        if(i == 9999){
+            printf("This is thread number %d \n", i);
+            printf("num confs is%d \n", num_confs);
+        }
         valid_conf[i] = valid;
     }
 }
 
 void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
-        int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
-        const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
+        int num_obs_trs, int num_obs_pts, const Triangle *d_rob_trs,
+        const Vector3f *d_rob_pts, const Triangle *d_obs_trs, const Vector3f *d_obs_pts,
         bool *valid_conf) {
 
     int device_count;
@@ -383,23 +387,24 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
     } else {
         printf("CUDA loaded for %d device(s)\n", device_count);
     }
+    std::cout << "num obs triangles is " << num_obs_trs << std::endl;
 
     // Copy the data onto the device
-    Triangle *d_rob_trs;
-    cudaMalloc(&d_rob_trs, num_rob_trs * sizeof(Triangle));
-    cudaMemcpy(d_rob_trs, rob_trs, num_rob_trs * sizeof(Triangle), cudaMemcpyHostToDevice);
+    // Triangle *d_rob_trs;
+    // cudaMalloc(&d_rob_trs, num_rob_trs * sizeof(Triangle));
+    // cudaMemcpy(d_rob_trs, rob_trs, num_rob_trs * sizeof(Triangle), cudaMemcpyHostToDevice);
 
-    Vector3f *d_rob_pts;
-    cudaMalloc(&d_rob_pts, num_confs * num_rob_pts * sizeof(Vector3f));
-    cudaMemcpy(d_rob_pts, rob_pts, num_confs * num_rob_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
+    // Vector3f *d_rob_pts;
+    // cudaMalloc(&d_rob_pts, num_confs * num_rob_pts * sizeof(Vector3f));
+    // cudaMemcpy(d_rob_pts, rob_pts, num_confs * num_rob_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
 
-    Triangle *d_obs_trs;
-    cudaMalloc(&d_obs_trs, num_obs_trs * sizeof(Triangle));
-    cudaMemcpy(d_obs_trs, obs_trs, num_obs_trs * sizeof(Triangle), cudaMemcpyHostToDevice);
-    Vector3f *d_obs_pts;
+    // Triangle *d_obs_trs;
+    // cudaMalloc(&d_obs_trs, num_obs_trs * sizeof(Triangle));
+    // cudaMemcpy(d_obs_trs, obs_trs, num_obs_trs * sizeof(Triangle), cudaMemcpyHostToDevice);
+    // Vector3f *d_obs_pts;
 
-    cudaMalloc(&d_obs_pts, num_obs_pts * sizeof(Vector3f));
-    cudaMemcpy(d_obs_pts, obs_pts, num_obs_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
+    // cudaMalloc(&d_obs_pts, num_obs_pts * sizeof(Vector3f));
+    // cudaMemcpy(d_obs_pts, obs_pts, num_obs_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
 
     bool *d_valid_conf;
     cudaMalloc(&d_valid_conf, num_confs * sizeof(bool));
@@ -421,10 +426,10 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
     // Copy the data back
     cudaMemcpy(valid_conf, d_valid_conf, num_confs * sizeof(bool), cudaMemcpyDeviceToHost);
 
-    // Free the memory
-    cudaFree(d_rob_trs);
-    cudaFree(d_rob_pts);
-    cudaFree(d_obs_trs);
-    cudaFree(d_rob_pts);
+    // // Free the memory
+    // cudaFree(d_rob_trs);
+    // cudaFree(d_rob_pts);
+    // cudaFree(d_obs_trs);
+    // cudaFree(d_rob_pts);
     cudaFree(d_valid_conf);
 }

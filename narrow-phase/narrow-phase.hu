@@ -4,15 +4,20 @@ Function signatures and support for the narrow-phase kernel
 
 #pragma once
 
-struct Vector3f {
-  float x, y, z;
-  __device__ __host__ Vector3f() : x(0), y(0), z(0) {}
-  __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
-};
+#include <iostream>
+#include <stdio.h>
+#include <stdlib.h>
+#include "../Utils_rai.h"
 
-struct Triangle {
-  int v1, v2, v3;
-};
+// struct Vector3f {
+//   float x, y, z;
+//   __device__ __host__ Vector3f() : x(0), y(0), z(0) {}
+//   __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
+// };
+
+// struct Triangle {
+//   int v1, v2, v3;
+// };
 
 
 // This assumes all data is already copied to the device and pre-allocated

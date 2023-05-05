@@ -6,6 +6,7 @@ AABB_DIR=./generate-AABB
 NARROW_DIR=./narrow-phase
 TRANS_DIR=./transformation
 CU=nvcc
+CUFLAGS=-DLOCAL_TESTING=1 -lineinfo -Wno-deprecated-declarations
 
 all: GPU-Mesh-Test
 
@@ -21,39 +22,45 @@ GPU-transform-test: GPU-transform-test.o Utils_rai.o Utils.o transform.o
 CPU-Sphere-Test: CPU-Sphere-Test.o 
 	$(CXX) $(CXXFLAGS) $< $(LDFLAGS) -o $@
 
-Integration-Test: integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o
-	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) -DLOCAL_TESTING=1
+Integration-Test: integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o
+	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
-
+Full-Integration-Test: full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o
+	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 # CPU-Sphere-Test.o: CPU-Sphere-Test.cpp
 # 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 %.o: %.cu
-	$(CU) -c $< -o $@
+	$(CU) $(CUFLAGS) -c $< -o $@
 
 broad-phase.o : broad-phase/broad-phase.cu
-	$(CU) -DLOCAL_TESTING=1 -c $< -o $@ -I. -I./transformation
+	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./transformation
 
 broad-phase-fused.o : broad-phase/broad-phase-fused.cu transform.o
-	$(CU) -DLOCAL_TESTING=1 -dc $< -o $@ -I./transformation
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I./transformation -I./narrow-phase
+
+full-integration-test.o: test/full-integration-test.cu
+	$(CU) $(CUFLAGS) -c $< -o $@ -I.
 
 integration-test.o: test/integration-test.cu
-	$(CU) -DLOCAL_TESTING=1 -c $< -o $@ -I.
+	$(CU) $(CUFLAGS) -c $< -o $@ -I.
 
 transform.o: transformation/transform.cu
-	$(CU) -DLOCAL_TESTING=1 -c $< -o $@ -I. 
+	$(CU) $(CUFLAGS) -c $< -o $@ -I. 
 	
 GPU-transform-test.o: transformation/testing/GPU-transform-test.cu
-	$(CU) -DLOCAL_TESTING=1 -c $< -o $@ -I. 
+	$(CU) $(CUFLAGS) -c $< -o $@ -I. 
 
 generate-AABB.o: generate-AABB/generate-AABB.cu
-	$(CU) -DLOCAL_TESTING=1 -c $< -o $@ -I. -I./generate-AABB
+	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./generate-AABB
 
 CPU-Mesh-Test.o: test/CPU-Mesh-Test.cu
-	$(CU) $(CXXFLAGS) -c $< -o $@
+	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./narrow-phase
 
+narrow-phase.o: narrow-phase/narrow-phase.cu
+	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./narrow-phase
 
 clean:
 	rm -f *.o CPU-Sphere-Test CPU-Mesh-Test GPU-Mesh-Test GPU-transform-test CPU-Sphere-Test Integration-Test

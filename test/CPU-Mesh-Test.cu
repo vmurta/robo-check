@@ -1,6 +1,7 @@
 #include <iostream>
 #include <fcl/fcl.h>
 #include <limits>
+#include <chrono>
 #include "../Utils.h"
 
 // void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs){
@@ -34,6 +35,8 @@ int main()
     std::vector<fcl::Vector3f> rob_vertices;
     std::vector<fcl::Triangle> rob_triangles;
     loadOBJFileFCL("models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
+    loadOBJFileFCL("models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
+
     std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
 
     std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
@@ -46,7 +49,6 @@ int main()
     std::vector<fcl::Vector3f> obs_vertices;
     std::vector<fcl::Triangle> obs_triangles;
     std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> obs_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
-    loadOBJFileFCL("models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
     obs_mesh->beginModel(obs_triangles.size(), obs_vertices.size());
     obs_mesh->addSubModel(obs_vertices, obs_triangles);
     obs_mesh->endModel();
