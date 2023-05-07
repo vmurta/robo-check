@@ -193,11 +193,11 @@ int main()
     AABB* bot_bounds_CPU = new AABB[confs.size()];
     fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
 
-    auto cpu_start_time = std::chrono::high_resolution_clock::now();
-    collisionCheckCPU(cpu_valid_conf);
-    auto cpu_end_time = std::chrono::high_resolution_clock::now();
-    auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
-    std::cout << "Transformation cpu execution time: " << cpu_elapsed_time.count() << " milliseconds" << std::endl;
+    // auto cpu_start_time = std::chrono::high_resolution_clock::now();
+    // collisionCheckCPU(cpu_valid_conf);
+    // auto cpu_end_time = std::chrono::high_resolution_clock::now();
+    // auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
+    // std::cout << "Transformation cpu execution time: " << cpu_elapsed_time.count() << " milliseconds" << std::endl;
     #endif
 
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;

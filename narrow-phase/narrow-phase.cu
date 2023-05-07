@@ -17,7 +17,7 @@ __host__ __device__ bool isclose(float v1, float v2) {
     } else if (abs(v2) < TOL) {
         return false;
     } else {
-        return abs((v1 - v2) / v1) < TOL;
+        return abs((v1 - v2) / v1) < 1e-10;
     }
 }
 
@@ -374,21 +374,15 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
 
     if (i < num_confs) {
         bool valid = true;
-
+        // printf("First robot vertex is: %f, %f, %f\n", rob_pts[i * num_rob_pts].x,
+        //     rob_pts[i * num_rob_pts].y, rob_pts[i * num_rob_pts].z);
         // True only if we require coplanar analysis to determine whether or
         // not these intersect
         bool req_coplanar = false;
         for (int j = 0; j < num_rob_trs; j++) {
             Vector3f Nr;
             float dr;
-            //delete these when testing 
-            Triangle t = rob_trs[j];
-            const Vector3f* robot_pts = &rob_pts[i * num_rob_pts]; 
-            Vector3f *pNr = &Nr;
-            float *pdr = &dr;
-            compute_plane(t, robot_pts, pNr, pdr);
-            // compute_plane(rob_trs[j], &rob_pts[i * num_rob_pts], &Nr, &dr);
-
+            compute_plane(rob_trs[j], &rob_pts[i * num_rob_pts], &Nr, &dr);
             for (int k = 0; k < num_obs_trs; k++) {
                 Vector3f distO = compute_signed_dists(Nr, dr, obs_trs[k], obs_pts);
                 if (no_overlap(distO)) {
@@ -448,7 +442,8 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
 
         if (req_coplanar)
             printf("Error: require coplanar intersection for configuration: %d\n", i);
-
+        
+        valid = req_coplanar;
         valid_conf[i] = valid;
     }
 }

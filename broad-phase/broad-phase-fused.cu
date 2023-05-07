@@ -88,7 +88,7 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
     for(int vertex_idx = 0; vertex_idx < num_robot_vertices; ++vertex_idx)
     {      
       transformed_robot_vertex = transformVector(base_robot_vertices[vertex_idx], transform_matrix);
-      
+      transformed_robot_vertices[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex;
       bot_bounds_local.x_min = min(bot_bounds_local.x_min, transformed_robot_vertex.x);
       bot_bounds_local.y_min = min(bot_bounds_local.y_min, transformed_robot_vertex.y);
       bot_bounds_local.z_min = min(bot_bounds_local.z_min, transformed_robot_vertex.z);
@@ -126,14 +126,14 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
     std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
     std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
-    size_t count = 0;
-    for (const auto& triangle : obs_triangles) {
-        if (count > 100){
-            break;
-        }
-        std::cout << "v: " << triangle.v1 << ", v2: " << triangle.v2 << ", v3: " << triangle.v3 << std::endl;
-        count++;
-    }
+    // size_t count = 0;
+    // for (const auto& triangle : obs_triangles) {
+    //     if (count > 100){
+    //         break;
+    //     }
+    //     std::cout << "v: " << triangle.v1 << ", v2: " << triangle.v2 << ", v3: " << triangle.v3 << std::endl;
+    //     count++;
+    // }
     // std::cout <base_robot_trianglesb_points;
     Vector3f *d_rob_transformed_points;
     Triangle *d_rob_triangles;
@@ -194,15 +194,14 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
     checkCudaCall(cudaDeviceSynchronize());
     std::cout << "Synchronized" << std::endl;
 
-    std:: cout << "Copying back results" << std::endl;
-    cudaMemcpy(bot_bounds, d_bot_bounds, configs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
+    // std:: cout << "Copying back results" << std::endl;
+    // cudaMemcpy(bot_bounds, d_bot_bounds, configs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
     // cudaMemcpy(valid_conf, valid_conf_d, configs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
-    checkCudaCall(cudaDeviceSynchronize());
+    // checkCudaCall(cudaDeviceSynchronize());
 
     checkCudaCall(cudaFree(d_configs));
     checkCudaCall(cudaFree(d_bot_bounds));
     checkCudaCall(cudaFree(d_rob_transformed_points));
-    // checkCudaCall(cudaFree(d_obs_));
     checkCudaCall(cudaFree(d_obs_points));
     checkCudaCall(cudaFree(d_rob_triangles));
     checkCudaCall(cudaFree(d_obs_triangles));
