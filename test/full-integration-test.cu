@@ -193,12 +193,11 @@ int main()
     AABB* bot_bounds_CPU = new AABB[confs.size()];
     fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
 
-    std::chrono::time_point<std::chrono::high_resolution_clock> cpu_start_time, cpu_end_time;
-    // auto cpu_start_time = std::chrono::high_resolution_clock::now();
+    auto cpu_start_time = std::chrono::high_resolution_clock::now();
     collisionCheckCPU(cpu_valid_conf);
-    // cpu_end_time = std::chrono::high_resolution_clock::now();
-    // auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
-    // std::cout << "Transformation cpu execution time: " << cpu_elapsed_time.count() << " milliseconds" << std::endl;
+    auto cpu_end_time = std::chrono::high_resolution_clock::now();
+    auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
+    std::cout << "Transformation cpu execution time: " << cpu_elapsed_time.count() << " milliseconds" << std::endl;
     #endif
 
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
@@ -211,39 +210,15 @@ int main()
 
     int num_correct = 0;
     for (int i = 0; i < confs.size(); i++){
-        // if (valid_conf[i]==false){
-        if (valid_conf[i]==cpu_valid_conf[i]){
+        if (valid_conf[i]==true){
+        // if (valid_conf[i]==cpu_valid_conf[i]){
             num_correct++;
         }
     }
     std::cout << "Num correct collision detections " << num_correct << std::endl;
 
-    // int num_correct = 0;
-    // int num_incorrect = 0;
-    // float total_error_incorrect = 0;
-    // for (int i = 0; i < 10000; i++){
-    //   for (int j = 0; j < 792; j++){
-    //     if (verticesEqual(gpu_transformed_vertices[i * 792 + j], cpu_transformed_vertices[i * 792 + j])){
-    //       num_correct++;
-    //     } else {
-    //       num_incorrect++;
-    //     }
-    //   }
-    // }
-
-    // std::cout << "num correct is " << num_correct << std::endl;
-    // std::cout << "num incorrect is " << num_incorrect << std::endl;
-    // std::cout << "avg incorrect error is " << total_error_incorrect / num_incorrect << std::endl;
 
     verifyConfs(valid_conf, confs.size());
-
-    #if(LOCAL_TESTING == 1)
-    // if(verify_generateAABB(bot_bounds_CPU, bot_bounds_GPU, confs.size()))
-    //     std::cout << "[PASS] Parallel AABB generation matches serial generation." << std::endl;
-    // else
-    //     std::cout << "[FAIL] Parallel AABB generation does not match serial generation." << std::endl;
-    // delete[](bot_bounds_CPU);
-    #endif
 
     // delete[](gpu_transformed_vertices);
     delete[](bot_bounds_GPU);

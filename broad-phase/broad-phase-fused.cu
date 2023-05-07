@@ -67,7 +67,7 @@ inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, fl
 
 // __constant__ Triangle base_obs_triangles[2500];
 
-__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, AABB *bot_bounds,
+__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, AABB *bot_bounds, Vector3f *transformed_robot_vertices,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices)
 {
     size_t config_idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -117,23 +117,43 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
     std::vector<Triangle> rob_triangles;
     loadOBJFile(ROB_FILE, rob_vertices, rob_triangles);
     std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
-    std::cout << "Robot has " << rob_triangles.size() << "triangles " <<std::endl;
+    std::cout << "Robot has " << rob_triangles.size() << " triangles " <<std::endl;
 
     //Load Obstacles
     std::vector<Vector3f> obs_vertices;
     std::vector<Triangle> obs_triangles;
     loadOBJFile(OBS_FILE, obs_vertices, obs_triangles);
     std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
-    std::cout << "Obstacle has " << obs_triangles.size() << "triangles " <<std::endl;
+    std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
-    //Load robot vertices to constant memory
+    size_t count = 0;
+    for (const auto& triangle : obs_triangles) {
+        if (count > 100){
+            break;
+        }
+        std::cout << "v: " << triangle.v1 << ", v2: " << triangle.v2 << ", v3: " << triangle.v3 << std::endl;
+        count++;
+    }
+    // std::cout <base_robot_trianglesb_points;
+    Vector3f *d_rob_transformed_points;
+    Triangle *d_rob_triangles;
+    Vector3f *d_rob_points;
+
+    checkCudaCall(cudaMalloc(&d_rob_transformed_points, rob_vertices.size() * configs.size() * sizeof(Vector3f)));
+    checkCudaCall(cudaMalloc(&d_rob_triangles, rob_triangles.size() * sizeof(Triangle)));
+    // checkCudaMem(cudaMemcpy(d_rob_points, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f)));
-    checkCudaMem(cudaMemcpyToSymbol(base_robot_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle)));
+    // checkCudaMem(cudaMemcpyToSymbol(base_robot_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle)));
     std::cout << "Copied the robot vertices and triangles " << std::endl;
     
     checkCudaMem(cudaMemcpyToSymbol(base_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f)));
+    Vector3f *d_obs_points;
     Triangle *d_obs_triangles;
+
+    checkCudaCall(cudaMalloc(&d_obs_points, obs_vertices.size() * sizeof(Vector3f)));
     checkCudaCall(cudaMalloc(&d_obs_triangles, obs_triangles.size() * sizeof(Triangle)));
+    checkCudaMem(cudaMemcpy(d_obs_points, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_obs_triangles, obs_triangles.data(), obs_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     std::cout << "Copied the obstacle vertices and triangles " << std::endl;
 
@@ -159,15 +179,17 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
 
     dim3 dimGridTransformKernel(ceil((float)(configs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
     dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
-    broadPhaseFusedKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>(d_configs, obstacle_AABB_d, d_bot_bounds, valid_conf_d,
-                                                    configs.size(), rob_vertices.size());
+    broadPhaseFusedKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>( d_configs, obstacle_AABB_d, d_bot_bounds,
+                                                                                d_rob_transformed_points, valid_conf_d,
+                                                                                configs.size(), rob_vertices.size());
     checkCudaCall(cudaDeviceSynchronize());
+    std::cout << "About to call narrow phase" << std::endl;
     narrowPhase(configs.size(), rob_triangles.size(), rob_vertices.size(), obs_triangles.size(), 
-            obs_vertices.size(), base_robot_triangles, base_robot_vertices, d_obs_triangles, base_obs_vertices,
+            obs_vertices.size(), d_rob_triangles, d_rob_transformed_points, d_obs_triangles, d_obs_points,
             valid_conf);
     // broadPhase(configs.size(), d_bot_bounds, obstacle_AABB_d, valid_conf_d);
 
-    std::cout << "Completed kernel execution" << std::endl;
+    std::cout << "Launched kernel execution" << std::endl;
     
     checkCudaCall(cudaDeviceSynchronize());
     std::cout << "Synchronized" << std::endl;
@@ -179,6 +201,10 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
 
     checkCudaCall(cudaFree(d_configs));
     checkCudaCall(cudaFree(d_bot_bounds));
+    checkCudaCall(cudaFree(d_rob_transformed_points));
+    // checkCudaCall(cudaFree(d_obs_));
+    checkCudaCall(cudaFree(d_obs_points));
+    checkCudaCall(cudaFree(d_rob_triangles));
     checkCudaCall(cudaFree(d_obs_triangles));
     checkCudaCall(cudaFree(obstacle_AABB_d));
     checkCudaCall(cudaFree(valid_conf_d));
