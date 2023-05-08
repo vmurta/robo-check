@@ -1,6 +1,6 @@
 from narrow import *
 
-def main():
+def unittests():
     pts = [np.array([1, 2, 3]),
            np.array([2, 2, 3.5]),
            np.array([2, 2.5, 3]),
@@ -29,5 +29,16 @@ def main():
     print("compute_parametric_variable(ct2.v0, ct2.v1, cdists12[0], cdists12[1], D, O):", compute_parametric_variable(ct2.v0, ct2.v1, cdists12[0], cdists12[1], D, O))
     print("compute_parametric_variable(ct2.v1, ct2.v2, cdists12[1], cdists12[2], D, O):", compute_parametric_variable(ct2.v1, ct2.v2, cdists12[1], cdists12[2], D, O))
 
+def integration():
+    t1 = Triangle(np.array([-63.164360, 17.731352, 1.918750]),
+        np.array([-62.795624, 17.946169, 2.753716]),
+        np.array([-21.813282, 2.671533, -12.468030]))
+    t2 = Triangle(np.array([1.681669, 2.616245, 1.069425]),
+        np.array([3.561536, 0.677467, 1.707230]),
+        np.array([1.172210, 2.534812, 1.852433]))
+
+    print("is_overlapped(t1, t2):", is_overlapped(t1, t2))
+
 if __name__ == "__main__":
-    main()
+    # unittests()
+    integration()

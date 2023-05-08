@@ -381,9 +381,9 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
         for (int j = 0; j < num_rob_trs; j++) {
             Vector3f Nr;
             float dr;
-            //delete these when testing 
+            //delete these when testing
             Triangle t = rob_trs[j];
-            const Vector3f* robot_pts = &rob_pts[i * num_rob_pts]; 
+            const Vector3f* robot_pts = &rob_pts[i * num_rob_pts];
             Vector3f *pNr = &Nr;
             float *pdr = &dr;
             compute_plane(t, robot_pts, pNr, pdr);
@@ -454,8 +454,8 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
 }
 
 void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
-        int num_obs_trs, int num_obs_pts, const Triangle *d_rob_trs,
-        const Vector3f *d_rob_pts, const Triangle *d_obs_trs, const Vector3f *d_obs_pts,
+        int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
+        const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
         bool *valid_conf) {
 
     int device_count;
@@ -464,28 +464,97 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
     } else {
         printf("CUDA loaded for %d device(s)\n", device_count);
     }
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    cudaError_t err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
 
     // Copy the data onto the device
+    Triangle *d_rob_trs;
+    cudaMalloc(&d_rob_trs, num_rob_trs * sizeof(Triangle));
+    cudaMemcpy(d_rob_trs, rob_trs, num_rob_trs * sizeof(Triangle), cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
+    Vector3f *d_rob_pts;
+    cudaMalloc(&d_rob_pts, num_confs * num_rob_pts * sizeof(Vector3f));
+    cudaMemcpy(d_rob_pts, rob_pts, num_confs * num_rob_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
+    Triangle *d_obs_trs;
+    cudaMalloc(&d_obs_trs, num_obs_trs * sizeof(Triangle));
+    cudaMemcpy(d_obs_trs, obs_trs, num_obs_trs * sizeof(Triangle), cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
+    Vector3f *d_obs_pts;
+    cudaMalloc(&d_obs_pts, num_obs_pts * sizeof(Vector3f));
+    cudaMemcpy(d_obs_pts, obs_pts, num_obs_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
     bool *d_valid_conf;
     cudaMalloc(&d_valid_conf, num_confs * sizeof(bool));
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
 
     // Call the kernel;
-    const int numBlocks = (num_confs - 1) / BLOCK_SIZE + 1;
-
-    dim3 a(numBlocks, 1, 1);
-    dim3 b(BLOCK_SIZE, 1, 1);
     narrowPhaseKernel<<<(num_confs - 1) / BLOCK_SIZE + 1, BLOCK_SIZE>>>(num_confs, num_rob_trs,
         num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs, d_rob_pts, d_obs_trs,
         d_obs_pts, d_valid_conf);
 
     cudaDeviceSynchronize();
     fflush(stdout);
-    cudaError_t err = cudaGetLastError();
+    err = cudaGetLastError();
     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
 
     // Copy the data back
     cudaMemcpy(valid_conf, d_valid_conf, num_confs * sizeof(bool), cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
     // Free the memory
+    cudaFree(d_rob_trs);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
+    cudaFree(d_rob_pts);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
+    cudaFree(d_obs_trs);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
+    cudaFree(d_obs_pts);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
     cudaFree(d_valid_conf);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
 }

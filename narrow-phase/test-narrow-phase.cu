@@ -589,6 +589,53 @@ void test_baseline() {
     }
 }
 
+void test_single_triangle() {
+    Vector3f rob_pts[3];
+    Vector3f ptr0(-63.164360, 17.731352, 1.918750);
+    rob_pts[0] = ptr0;
+    Vector3f ptr1(-62.795624, 17.946169, 2.753716);
+    rob_pts[1] = ptr1;
+    Vector3f ptr2(-21.813282, 2.671533, -12.468030);
+    rob_pts[2] = ptr2;
+
+    Vector3f obj_pts[3];
+    Vector3f pto0(1.681669, 2.616245, 1.069425);
+    obj_pts[0] = pto0;
+    Vector3f pto1(3.561536, 0.677467, 1.707230);
+    obj_pts[1] = pto1;
+    Vector3f pto2(1.172210, 2.534812, 1.852433);
+    obj_pts[2] = pto2;
+
+    Triangle rob_trs[1];
+    rob_trs[0] = {0, 1, 2};
+
+    Triangle obs_trs[1];
+    obs_trs[0] = {0, 1, 2};
+
+    bool res[1];
+    res[0] = false;
+    narrowPhaseBaseline(1, 1, 3, 1, 3, rob_trs, rob_pts, obs_trs, obj_pts, res);
+
+    bool passed = true;
+    if (!res[0]) {
+        passed = false;
+        printf("Failed test_single_triangle CPU res[0]\n");
+    }
+
+    res[0] = false;
+    narrowPhase(1, 1, 3, 1, 3, rob_trs, rob_pts, obs_trs, obj_pts, res);
+    if (!res[0]) {
+        passed = false;
+        printf("Failed test_single_triangle GPU res[0]\n");
+    }
+
+    if (passed) {
+        printf("All test_single_triangle tests passed\n");
+    }
+
+}
+
+
 void test_gpu() {
     Triangle rob_trs[4];
     rob_trs[0] = {0, 1, 2};
@@ -666,6 +713,7 @@ void test_gpu() {
 
 int main() {
     unit_tests();
+    test_single_triangle();
     test_baseline();
     test_gpu();
     return 0;
