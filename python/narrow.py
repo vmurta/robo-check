@@ -1,6 +1,8 @@
 """
 This file contains a Python implementation of the narrow phase, which I will
 use as pseudocode for the GPU kernel
+
+Source: https://fileadmin.cs.lth.se/cs/Personal/Tomas_Akenine-Moller/code/tritri_tam.pdf
 """
 from collections import namedtuple
 import numpy as np
@@ -23,10 +25,7 @@ def compute_signed_dists(N, d, triangle):
     return np.array([N @ v + d for v in tuple(triangle)])
 
 def no_overlap(dvs):
-    return not (any(dvs > 0) and any(dvs < 0))
-
-def yes_overlap(dvs):
-    return any(np.isclose(dvs, 0))
+    return not (any(dvs >= 0) and any(dvs <= 0))
 
 # O computed with https://math.stackexchange.com/questions/475953/how-to-calculate-the-intersection-of-two-planes
 def compute_intersect_line(N1, d1, N2, d2):
@@ -168,8 +167,6 @@ def is_overlapped(t1, t2):
     dvs1 = compute_signed_dists(N2, d2, t1)
 
     # Early exit
-    if yes_overlap(dvs1):
-        return True
     if no_overlap(dvs1):
         return False
 
@@ -181,6 +178,9 @@ def is_overlapped(t1, t2):
 
     # The two triangles are on different planes
     dvs2 = compute_signed_dists(N1, d1, t2)
+
+    if no_overlap(dvs2):
+        return False
 
     D, O = compute_intersect_line(N1, d1, N2, d2)
 

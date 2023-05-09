@@ -78,16 +78,16 @@ __host__ __device__ void compute_signed_dists_sep(const float Nx, const float Ny
 }
 
 __host__ __device__ bool no_overlap(const Vector3f dists) {
-    bool gz = dists.x > TOL || dists.y > TOL || dists.z > TOL;
-    bool lz = dists.x < -1 * TOL || dists.y < -1 * TOL || dists.z < -1 * TOL;
+    bool gz = dists.x >= TOL || dists.y >= TOL || dists.z >= TOL;
+    bool lz = dists.x <= -1 * TOL || dists.y <= -1 * TOL || dists.z <= -1 * TOL;
 
     return !(gz && lz);
 }
 
 __host__ __device__ bool no_overlap_sep(const float dists_x, const float dists_y, const float dists_z) {
-    bool gz = dists_x > TOL || dists_y > TOL || dists_z > TOL;
+    bool gz = dists_x >= TOL || dists_y >= TOL || dists_z >= TOL;
     float neg_tol = -1 * TOL;
-    bool lz = dists_x < neg_tol || dists_y < neg_tol || dists_z < neg_tol;
+    bool lz = dists_x <= neg_tol || dists_y <= neg_tol || dists_z <= neg_tol;
 
     return !(gz && lz);
 }
@@ -315,7 +315,11 @@ void narrowPhaseBaseline(int num_confs, int num_rob_trs, int num_rob_pts,
                     req_coplanar = true;
                     continue;
                 }
+
                 Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
+                if (no_overlap(distR)) {
+                    continue;
+                }
 
                 Vector3f D, O;
                 compute_intersect_line(Nr, dr, No, do_, &D, &O);
@@ -403,7 +407,11 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
                     req_coplanar = true;
                     continue;
                 }
+
                 Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
+                if (no_overlap(distR)) {
+                    continue;
+                }
 
                 Vector3f D, O;
                 compute_intersect_line(Nr, dr, No, do_, &D, &O);
@@ -426,11 +434,11 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
                     obs_pts[cto.v3], cdo.y, cdo.z, D, O);
 
                 // There is no overlap
-                if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
+                if (min(t_r01, t_r12) >= max(t_o01, t_o12)) {
                     continue;
 
                 // Also no overlap
-                } else if (min(t_o01, t_o12) > max(t_r01, t_r12)) {
+                } else if (min(t_o01, t_o12) >= max(t_r01, t_r12)) {
                     continue;
 
                 // There is overlap
