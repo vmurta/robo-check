@@ -186,51 +186,53 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
     checkCudaCall(cudaDeviceSynchronize());
     std::cout << "About to call narrow phase" << std::endl;
 
-    Vector3f test_rob_points[3];
-    test_rob_points[0] = {1.441547, -14.800514, 62.841087};
-    test_rob_points[1] = {-4.215309, 8.199282, 23.057938};
-    test_rob_points[2] = {1.883977, -15.487457, 62.381035};
+    // Vector3f test_rob_points[3];
+    // test_rob_points[0] = {1.441547, -14.800514, 62.841087};
+    // test_rob_points[1] = {-4.215309, 8.199282, 23.057938};
+    // test_rob_points[2] = {1.883977, -15.487457, 62.381035};
 
-    Vector3f test_obs_points[3];
-    test_obs_points[0] = {1.681669, 2.616245, 1.069425};
-    test_obs_points[1] = {3.561536, 0.677467, 1.707230};
-    test_obs_points[2] = {1.172210, 2.534812, 1.852433};
+    // Vector3f test_obs_points[3];
+    // test_obs_points[0] = {1.681669, 2.616245, 1.069425};
+    // test_obs_points[1] = {3.561536, 0.677467, 1.707230};
+    // test_obs_points[2] = {1.172210, 2.534812, 1.852433};
 
-    Triangle test_rob_triangles = {0, 1, 2};
-    Triangle test_obs_triangles = {0, 1, 2};
+    // Triangle test_rob_triangles = {0, 1, 2};
+    // Triangle test_obs_triangles = {0, 1, 2};
 
-    Vector3f *d_test_rob_points;
-    Vector3f *d_test_obs_points;
-    Triangle *d_test_rob_triangles;
-    Triangle *d_test_obs_triangles;
+    // Vector3f *d_test_rob_points;
+    // Vector3f *d_test_obs_points;
+    // Triangle *d_test_rob_triangles;
+    // Triangle *d_test_obs_triangles;
 
-    checkCudaCall(cudaMalloc(&d_test_rob_points, 3 * sizeof(Vector3f)));
-    checkCudaCall(cudaMalloc(&d_test_rob_triangles, sizeof(Triangle)));
-    checkCudaCall(cudaMemcpy(d_test_rob_points, test_rob_points, 3 * sizeof(Vector3f), cudaMemcpyHostToDevice));
-    checkCudaCall(cudaMemcpy(d_test_rob_triangles, &test_rob_triangles, sizeof(Triangle), cudaMemcpyHostToDevice));
+    // checkCudaCall(cudaMalloc(&d_test_rob_points, 3 * sizeof(Vector3f)));
+    // checkCudaCall(cudaMalloc(&d_test_rob_triangles, sizeof(Triangle)));
+    // checkCudaCall(cudaMemcpy(d_test_rob_points, test_rob_points, 3 * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaCall(cudaMemcpy(d_test_rob_triangles, &test_rob_triangles, sizeof(Triangle), cudaMemcpyHostToDevice));
 
 
-    checkCudaCall(cudaMalloc(&d_test_obs_points, 3 * sizeof(Vector3f)));
-    checkCudaCall(cudaMalloc(&d_test_obs_triangles, sizeof(Triangle)));
-    checkCudaMem(cudaMemcpy(d_test_obs_points, test_obs_points, 3 * sizeof(Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_test_obs_triangles, &test_obs_triangles, sizeof(Triangle), cudaMemcpyHostToDevice));
+    // checkCudaCall(cudaMalloc(&d_test_obs_points, 3 * sizeof(Vector3f)));
+    // checkCudaCall(cudaMalloc(&d_test_obs_triangles, sizeof(Triangle)));
+    // checkCudaMem(cudaMemcpy(d_test_obs_points, test_obs_points, 3 * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaMem(cudaMemcpy(d_test_obs_triangles, &test_obs_triangles, sizeof(Triangle), cudaMemcpyHostToDevice));
     
-    narrowPhaseKernel<<<1, 1>>>(
-        1, 1, 3, 1, 3, d_test_rob_triangles, d_test_rob_points, d_test_obs_triangles, d_test_obs_points,
-        valid_conf_d);
-    checkCudaCall(cudaDeviceSynchronize());
-
-    checkCudaCall(cudaMemcpy(valid_conf, valid_conf_d , sizeof(bool), cudaMemcpyDeviceToHost));
-    checkCudaCall(cudaDeviceSynchronize());
-    std::cout << "configuration was " << valid_conf[0] << std::endl;
-    
-    
-    // narrowPhaseKernel<<<(configs.size() - 1) / 128, 128>>>(
-    //     configs.size(), rob_triangles.size(), rob_vertices.size(), obs_triangles.size(),
-    //     obs_vertices.size(), d_rob_triangles, d_rob_transformed_points, d_obs_triangles, d_obs_points,
+    // narrowPhaseKernel<<<1, 1>>>(
+    //     1, 1, 3, 1, 3, d_test_rob_triangles, d_test_rob_points, d_test_obs_triangles, d_test_obs_points,
     //     valid_conf_d);
     // checkCudaCall(cudaDeviceSynchronize());
 
+    // checkCudaCall(cudaMemcpy(valid_conf, valid_conf_d , sizeof(bool), cudaMemcpyDeviceToHost));
+    // checkCudaCall(cudaDeviceSynchronize());
+    // std::cout << "configuration was " << valid_conf[0] << std::endl;
+    
+    auto start = std::chrono::high_resolution_clock::now();
+    narrowPhaseKernel<<<(configs.size() - 1) / 128 + 1, 128>>>(
+        configs.size(), rob_triangles.size(), rob_vertices.size(), obs_triangles.size(),
+        obs_vertices.size(), d_rob_triangles, d_rob_transformed_points, d_obs_triangles, d_obs_points,
+        valid_conf_d);
+    
+    checkCudaCall(cudaDeviceSynchronize());
+    auto end = std::chrono::high_resolution_clock::now();
+    std::cout << "Narrow phase took " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() << " ms" << std::endl;
     checkCudaCall(cudaMemcpy(valid_conf, valid_conf_d , configs.size() * sizeof(bool), cudaMemcpyDeviceToHost));
 
     // narrowPhase(configs.size(), rob_triangles.size(), rob_vertices.size(), obs_triangles.size(),

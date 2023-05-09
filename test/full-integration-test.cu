@@ -216,6 +216,8 @@ int main()
         // if (valid_conf[i]==true){
         if (valid_conf[i]==cpu_valid_conf[i]){
             num_correct++;
+        } else {
+            // std::cout << "conf " << i << " is " << valid_conf[i] << " but should be " << cpu_valid_conf[i] << std::endl;
         }
     }
     std::cout << "Num correct collision detections " << num_correct << std::endl;
