@@ -17,7 +17,7 @@ __host__ __device__ bool isclose(float v1, float v2) {
     } else if (abs(v2) < TOL) {
         return false;
     } else {
-        return abs((v1 - v2) / v1) < 1e-10;
+        return abs((v1 - v2) / v1) < TOL;
     }
 }
 
@@ -429,8 +429,14 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
 
                 // There is overlap
                 } else {
-                    valid = false;
+                    // if (j == 56){
+                    //     // printf("Found collision at obstacle triangle %d and robot triangle %d\nt_r01: %f, t_r12: %f, t_o01: %f, t_o12: %f\n", k, j,  t_r01, t_r12, t_o01, t_o12);
+                    //     printf("Robot Triangle 56 coordinates: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\nObstacle Triangle %d coordinates: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\n", 
+                    //             rob_pts[i * num_rob_pts + ctr.v1].x, rob_pts[i * num_rob_pts + ctr.v1].y, rob_pts[i * num_rob_pts + ctr.v1].z, rob_pts[i * num_rob_pts + ctr.v2].x, rob_pts[i * num_rob_pts + ctr.v2].y, rob_pts[i * num_rob_pts + ctr.v2].z, rob_pts[i * num_rob_pts + ctr.v3].x, rob_pts[i * num_rob_pts + ctr.v3].y, rob_pts[i * num_rob_pts + ctr.v3].z,
+                    //             k, obs_pts[cto.v1].x, obs_pts[cto.v1].y, obs_pts[cto.v1].z, obs_pts[cto.v2].x, obs_pts[cto.v2].y, obs_pts[cto.v2].z, obs_pts[cto.v3].x, obs_pts[cto.v3].y, obs_pts[cto.v3].z);
+                    // }
                     req_coplanar = false;
+                    valid = false;
                     break;
                 }
             }
@@ -443,7 +449,6 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
         if (req_coplanar)
             printf("Error: require coplanar intersection for configuration: %d\n", i);
         
-        valid = req_coplanar;
         valid_conf[i] = valid;
     }
 }

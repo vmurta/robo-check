@@ -68,7 +68,7 @@ int main()
 
       // Define CollisionRequest and CollisionResult objects
       fcl::CollisionRequest<float> request;
-      fcl::CollisionResult<float> result;git 
+      fcl::CollisionResult<float> result;
 
       // // Perform collision detection
       fcl::collide(&obs_col_obj, &rob_col_obj, request, result);

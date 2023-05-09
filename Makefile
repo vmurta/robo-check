@@ -6,7 +6,7 @@ AABB_DIR=./generate-AABB
 NARROW_DIR=./narrow-phase
 TRANS_DIR=./transformation
 CU=nvcc
-CUFLAGS=-DLOCAL_TESTING=1 -lineinfo -Wno-deprecated-declarations
+CUFLAGS=-DLOCAL_TESTING=1 -lineinfo -O3 -Wno-deprecated-declarations
 
 all: GPU-Mesh-Test
 
