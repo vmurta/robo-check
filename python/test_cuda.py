@@ -30,14 +30,14 @@ def unittests():
     print("compute_parametric_variable(ct2.v1, ct2.v2, cdists12[1], cdists12[2], D, O):", compute_parametric_variable(ct2.v1, ct2.v2, cdists12[1], cdists12[2], D, O))
 
 def integration():
-    t1 = Triangle(np.array([-63.164360, 17.731352, 1.918750]),
-        np.array([-62.795624, 17.946169, 2.753716]),
-        np.array([-21.813282, 2.671533, -12.468030]))
+    t1 = Triangle(np.array([1.441547, -14.800514, 62.841087]),
+        np.array([-4.215309, 8.199282, 23.057938]),
+        np.array([1.883977, -15.487457, 62.381035]))
     t2 = Triangle(np.array([1.681669, 2.616245, 1.069425]),
         np.array([3.561536, 0.677467, 1.707230]),
         np.array([1.172210, 2.534812, 1.852433]))
 
-    print("is_overlapped(t1, t2):", is_overlapped(t1, t2))
+    print("is_overlapped(t1, t2):", is_overlapped(t2, t1))
 
 if __name__ == "__main__":
     # unittests()

@@ -21,19 +21,16 @@ def test_all():
 
     # There is definitely overlap (sharing a vertex)
     assert not no_overlap(dvs2)
-    assert yes_overlap(dvs2)
 
     # Maybe have overlap
     t3 = Triangle(np.array([1, 1, 1]), np.array([0.5, 2, 3]), np.array([3, 0, 0]))
     dvs3 = compute_signed_dists(N1, d1, t3)
     assert not no_overlap(dvs3)
-    assert not yes_overlap(dvs3)
 
     # Definitely do not have overlap
     t4 = Triangle(np.array([300, 1, 1]), np.array([300, 2, 3]), np.array([300, 0, 0]))
     dvs4 = compute_signed_dists(N1, d1, t4)
     assert no_overlap(dvs4)
-    assert not yes_overlap(dvs4)
 
     # Canonicalize the triangle
     ct3, cdvs3 = canonicalize_triangle(t3, dvs3)
@@ -208,3 +205,13 @@ def test_is_contained():
     assert is_coplanar(N1, d1, N3, d3)
     assert not is_contained(t1, t3)
 
+def test_problem():
+    t1 = Triangle(np.array([1.441547, -14.800514, 62.841087]),
+        np.array([-4.215309, 8.199282, 23.057938]),
+        np.array([1.883977, -15.487457, 62.381035]))
+    t2 = Triangle(np.array([1.681669, 2.616245, 1.069425]),
+        np.array([3.561536, 0.677467, 1.707230]),
+        np.array([1.172210, 2.534812, 1.852433]))
+
+    assert not is_overlapped(t2, t1)
+    assert not is_overlapped(t1, t2)

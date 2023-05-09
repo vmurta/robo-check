@@ -591,11 +591,11 @@ void test_baseline() {
 
 void test_single_triangle() {
     Vector3f rob_pts[3];
-    Vector3f ptr0(-63.164360, 17.731352, 1.918750);
+    Vector3f ptr0(1.441547, -14.800514, 62.841087);
     rob_pts[0] = ptr0;
-    Vector3f ptr1(-62.795624, 17.946169, 2.753716);
+    Vector3f ptr1(-4.215309, 8.199282, 23.057938);
     rob_pts[1] = ptr1;
-    Vector3f ptr2(-21.813282, 2.671533, -12.468030);
+    Vector3f ptr2(1.883977, -15.487457, 62.381035);
     rob_pts[2] = ptr2;
 
     Vector3f obj_pts[3];
