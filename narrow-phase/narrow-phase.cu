@@ -437,10 +437,10 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
                 // There is overlap
                 } else {
                     // if (j == 56){
-                    //     // printf("Found collision at obstacle triangle %d and robot triangle %d\nt_r01: %f, t_r12: %f, t_o01: %f, t_o12: %f\n", k, j,  t_r01, t_r12, t_o01, t_o12);
-                    //     printf("Robot Triangle 56 coordinates: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\nObstacle Triangle %d coordinates: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\n", 
-                    //             rob_pts[i * num_rob_pts + ctr.v1].x, rob_pts[i * num_rob_pts + ctr.v1].y, rob_pts[i * num_rob_pts + ctr.v1].z, rob_pts[i * num_rob_pts + ctr.v2].x, rob_pts[i * num_rob_pts + ctr.v2].y, rob_pts[i * num_rob_pts + ctr.v2].z, rob_pts[i * num_rob_pts + ctr.v3].x, rob_pts[i * num_rob_pts + ctr.v3].y, rob_pts[i * num_rob_pts + ctr.v3].z,
-                    //             k, obs_pts[cto.v1].x, obs_pts[cto.v1].y, obs_pts[cto.v1].z, obs_pts[cto.v2].x, obs_pts[cto.v2].y, obs_pts[cto.v2].z, obs_pts[cto.v3].x, obs_pts[cto.v3].y, obs_pts[cto.v3].z);
+                        // printf("Found collision at obstacle triangle %d and robot triangle %d\nt_r01: %f, t_r12: %f, t_o01: %f, t_o12: %f\n", k, j,  t_r01, t_r12, t_o01, t_o12);
+                        printf("Robot Triangle 0 coordinates: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\nObstacle Triangle %d coordinates: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\n", 
+                                rob_pts[t.v1].x, rob_pts[t.v1].y, rob_pts[t.v1].z, rob_pts[t.v2].x, rob_pts[t.v2].y, rob_pts[t.v2].z, rob_pts[t.v3].x, rob_pts[t.v3].y, rob_pts[t.v3].z,
+                                k, obs_pts[obs_trs[k].v1].x, obs_pts[obs_trs[k].v1].y, obs_pts[obs_trs[k].v1].z, obs_pts[obs_trs[k].v2].x, obs_pts[obs_trs[k].v2].y, obs_pts[obs_trs[k].v2].z, obs_pts[obs_trs[k].v3].x, obs_pts[obs_trs[k].v3].y, obs_pts[obs_trs[k].v3].z);
                     // }
                     req_coplanar = false;
                     valid = false;

@@ -189,6 +189,9 @@ int main()
     bool *valid_conf = new bool[confs.size()];
 
     #if(LOCAL_TESTING == 1)
+    for (int i = 0; i < confs.size(); i++){
+        valid_conf[i] = true;
+    }
     bool *cpu_valid_conf = new bool[confs.size()];
     AABB* bot_bounds_CPU = new AABB[confs.size()];
     fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];

@@ -33,3 +33,9 @@ void narrowPhaseBaseline(int num_confs, int num_rob_trs, int num_rob_pts,
     int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
     const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
     bool *valid_conf);
+
+// the kernel itself
+__global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pts,
+        int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
+        const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
+        bool *valid_conf);
