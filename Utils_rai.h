@@ -75,10 +75,25 @@ struct AABB
     float z_max;
 };
 
-#define MAX_NUM_ROBOT_VERTICES 1000
-__constant__ Vector3f base_robot_vertices[MAX_NUM_ROBOT_VERTICES];
-__constant__ Triangle base_robot_triangles[2500];
-__constant__ Vector3f base_obs_vertices[MAX_NUM_ROBOT_VERTICES];
+#define MAX_NUM_ROBOT_VERTICES 792
+#define MAX_NUM_ROBOT_TRIANGLES 1008
+// __constant__ Vector3f base_robot_vertices[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Vector3f base_obs_vertices[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
+
+__constant__ float base_rob_x[MAX_NUM_ROBOT_VERTICES];
+__constant__ float base_rob_y[MAX_NUM_ROBOT_VERTICES];
+__constant__ float base_rob_z[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Triangle base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Vector3f base_obs_x[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Vector3f base_obs_y[MAX_NUM_ROBOT_VERTICES]; 
+// __constant__ Vector3f base_obs_z[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Triangle base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 
 void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename);
 
