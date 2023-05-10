@@ -895,6 +895,7 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
         num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);
 
     cudaDeviceSynchronize();
+
     fflush(stdout);
     #if VERBOSE
         err = cudaGetLastError();
@@ -930,6 +931,194 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
     cudaFree(d_rob_pts_x);
     cudaFree(d_rob_pts_y);
     cudaFree(d_rob_pts_z);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    free(obs_trs_1);
+    free(obs_trs_2);
+    free(obs_trs_3);
+    cudaFree(d_obs_trs_1);
+    cudaFree(d_obs_trs_2);
+    cudaFree(d_obs_trs_3);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    free(obs_pts_x);
+    free(obs_pts_y);
+    free(obs_pts_z);
+    cudaFree(d_obs_pts_x);
+    cudaFree(d_obs_pts_y);
+    cudaFree(d_obs_pts_z);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    cudaFree(d_valid_conf);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    err = cudaGetLastError();
+    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+
+}
+
+// Note: Only the d_rob_points should be passed in as device pointers!
+void narrowPhase_sep(int num_confs, int num_rob_trs, int num_rob_pts,
+        int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
+        const float *d_rob_pts_x, const float *d_rob_pts_y, const float *d_rob_pts_z,
+        const Triangle *obs_trs, const Vector3f *obs_pts,
+        bool *valid_conf) {
+
+    // First copy everything to struct-of-arrays;
+    int *rob_trs_1 = (int*) malloc(num_rob_trs * sizeof(int));
+    int *rob_trs_2 = (int*) malloc(num_rob_trs * sizeof(int));
+    int *rob_trs_3 = (int*) malloc(num_rob_trs * sizeof(int));
+    int *obs_trs_1 = (int*) malloc(num_obs_trs * sizeof(int));
+    int *obs_trs_2 = (int*) malloc(num_obs_trs * sizeof(int));
+    int *obs_trs_3 = (int*) malloc(num_obs_trs * sizeof(int));
+    float *obs_pts_x = (float*) malloc(num_obs_pts * sizeof(float));
+    float *obs_pts_y = (float*) malloc(num_obs_pts * sizeof(float));
+    float *obs_pts_z = (float*) malloc(num_obs_pts * sizeof(float));
+
+
+    // FIXME - These are sent on the GPU
+    for (int i = 0; i < num_rob_trs; i++) {
+        rob_trs_1[i] = rob_trs[i].v1;
+        rob_trs_2[i] = rob_trs[i].v2;
+        rob_trs_3[i] = rob_trs[i].v3;
+    }
+    for (int i = 0; i < num_obs_trs; i++) {
+        obs_trs_1[i] = obs_trs[i].v1;
+        obs_trs_2[i] = obs_trs[i].v2;
+        obs_trs_3[i] = obs_trs[i].v3;
+    }
+    for (int i = 0; i < num_obs_pts; i++) {
+        obs_pts_x[i] = obs_pts[i].x;
+        obs_pts_y[i] = obs_pts[i].y;
+        obs_pts_z[i] = obs_pts[i].z;
+    }
+
+    int device_count;
+    if (cudaGetDeviceCount(&device_count) != 0) {
+        printf("CUDA not loaded properly\n");
+    } else {
+        printf("CUDA loaded for %d device(s)\n", device_count);
+    }
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    cudaError_t err;
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    // Copy the data onto the device
+    int *d_rob_trs_1;
+    int *d_rob_trs_2;
+    int *d_rob_trs_3;
+    cudaMalloc(&d_rob_trs_1, num_rob_trs * sizeof(int));
+    cudaMalloc(&d_rob_trs_2, num_rob_trs * sizeof(int));
+    cudaMalloc(&d_rob_trs_3, num_rob_trs * sizeof(int));
+    cudaMemcpy(d_rob_trs_1, rob_trs_1, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rob_trs_2, rob_trs_2, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_rob_trs_3, rob_trs_3, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    int *d_obs_trs_1;
+    int *d_obs_trs_2;
+    int *d_obs_trs_3;
+    cudaMalloc(&d_obs_trs_1, num_obs_trs * sizeof(int));
+    cudaMalloc(&d_obs_trs_2, num_obs_trs * sizeof(int));
+    cudaMalloc(&d_obs_trs_3, num_obs_trs * sizeof(int));
+    cudaMemcpy(d_obs_trs_1, obs_trs_1, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_obs_trs_2, obs_trs_2, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_obs_trs_3, obs_trs_3, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    float *d_obs_pts_x;
+    float *d_obs_pts_y;
+    float *d_obs_pts_z;
+    cudaMalloc(&d_obs_pts_x, num_confs * num_obs_pts * sizeof(float));
+    cudaMalloc(&d_obs_pts_y, num_confs * num_obs_pts * sizeof(float));
+    cudaMalloc(&d_obs_pts_z, num_confs * num_obs_pts * sizeof(float));
+    std::cerr << "Time = 2.24"<< std::endl;
+    cudaMemcpy(d_obs_pts_x, obs_pts_x, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    std::cerr << "Time = 2.25"<< std::endl;
+    cudaMemcpy(d_obs_pts_y, obs_pts_y, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    std::cerr << "Time = 2.26"<< std::endl;
+    cudaMemcpy(d_obs_pts_z, obs_pts_z, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+
+    std::cerr << "Time = 2.3"<< std::endl;
+
+    bool *d_valid_conf;
+    cudaMalloc(&d_valid_conf, num_confs * sizeof(bool));
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    std::cerr << "Time = 2"<< std::endl;
+
+    // Call the kernel;
+    narrowPhaseKernel_sep<<<(num_confs - 1) / BLOCK_SIZE + 1, BLOCK_SIZE>>>(num_confs, num_rob_trs,
+        num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);
+
+    cudaDeviceSynchronize();
+    std::cerr << "Time = "<< std::endl;
+
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    // Copy the data back
+    cudaMemcpy(valid_conf, d_valid_conf, num_confs * sizeof(bool), cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
+    fflush(stdout);
+    #if VERBOSE
+        err = cudaGetLastError();
+        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    #endif
+
+    // Free the memory
+    free(rob_trs_1);
+    free(rob_trs_2);
+    free(rob_trs_3);
+    cudaFree(d_rob_trs_1);
+    cudaFree(d_rob_trs_2);
+    cudaFree(d_rob_trs_3);
     cudaDeviceSynchronize();
     fflush(stdout);
     #if VERBOSE
