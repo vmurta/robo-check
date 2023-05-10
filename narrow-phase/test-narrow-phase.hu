@@ -26,7 +26,9 @@ void compute_intersect_line_sep(const float N1_x, const float N1_y, const float 
 float project_vertex(const Vector3f V, const Vector3f D, const Vector3f O);
 float project_vertex_sep(const float Vx, const float Vy, const float Vz, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
 void canonicalize_triangle(const Triangle t, const Vector3f dists, Triangle *new_t, Vector3f *new_dists);
-void canonicalize_triangle_sep(const int t_v1, const int t_v2, const int t_v3, const float dists_x, const float dists_y, const float dists_z, int *new_t_v1, int *new_t_v2, int *new_t_v3, float *new_dists_x, float *new_dists_y, float *new_dists_z);
+void canonicalize_triangle_sep(const float dists_x, const float dists_y, const float dists_z, int *v1, int *v2, int *v3);
 float compute_parametric_variable(const Vector3f v0, const Vector3f v1,
         const float d0, const float d1, const Vector3f D, const Vector3f O);
+float compute_parametric_variable_sep(const float v0_x, const float v0_y, const float v0_z, const float v1_x, const float v1_y, const float v1_z, const float d0, const float d1, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
 bool is_coplanar(const Vector3f N1, const float d1, const Vector3f N2, const float d2);
+bool is_coplanar_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2);
