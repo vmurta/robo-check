@@ -83,7 +83,7 @@ void verifyConfs(bool *confs, size_t num_confs) {
         if (confs[i]) numValidConfs++;
     }
 
-    std::cout << "Valid configurations: " << numValidConfs << " (out of " << num_confs << ")" << std::endl;
+    std::cerr << "Valid configurations: " << numValidConfs << " (out of " << num_confs << ")" << std::endl;
 }
 
 #if(LOCAL_TESTING == 1)
@@ -140,7 +140,7 @@ int main()
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
     start_time = std::chrono::high_resolution_clock::now();
 
-    broadPhaseFused(confs, valid_conf, bot_bounds_GPU);
+    broadPhaseFused_sep(confs, valid_conf, bot_bounds_GPU);
 
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);

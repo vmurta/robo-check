@@ -456,6 +456,47 @@ void unit_tests() {
     }
 
     // Test canonicalize_triangle_sep
+    passed = true;
+    int v1, v2, v3;
+    canonicalize_triangle_sep(dists1.x, dists1.y, dists1.z, &v1, &v2, &v3);
+    if (!teq({v1, v2, v3}, pts, {0, 2, 1}, pts)) {
+        passed = false;
+        printf("Failed canonicalize_triangle_sep(t_ct, dists1, &new_t, &new_dists)\n");
+    }
+
+    canonicalize_triangle_sep(dists2.x, dists2.y, dists2.z, &v1, &v2, &v3);
+    if (!teq({v1, v2, v3}, pts, {1, 0, 2}, pts)) {
+        passed = false;
+        printf("Failed canonicalize_triangle_sep(t_ct, dists2, &new_t, &new_dists)\n");
+    }
+
+    canonicalize_triangle_sep(dists3.x, dists3.y, dists3.z, &v1, &v2, &v3);
+    if (!teq({v1, v2, v3}, pts, {0, 1, 2}, pts)) {
+        passed = false;
+        printf("Failed canonicalize_triangle_sep(t_ct, dists3, &new_t, &new_dists)\n");
+    }
+
+    canonicalize_triangle_sep(dists4.x, dists4.y, dists4.z, &v1, &v2, &v3);
+    if (!teq({v1, v2, v3}, pts, {0, 2, 1}, pts)) {
+        passed = false;
+        printf("Failed canonicalize_triangle_sep(t_ct, dists4, &new_t, &new_dists)\n");
+    }
+
+    canonicalize_triangle_sep(dists5.x, dists5.y, dists5.z, &v1, &v2, &v3);
+    if (!teq({v1, v2, v3}, pts, {1, 0, 2}, pts)) {
+        passed = false;
+        printf("Failed canonicalize_triangle_sep(t_ct, dists5, &new_t, &new_dists)\n");
+    }
+
+    canonicalize_triangle_sep(dists6.x, dists6.y, dists6.z, &v1, &v2, &v3);
+    if (!teq({v1, v2, v3}, pts, {0, 1, 2}, pts)) {
+        passed = false;
+        printf("Failed canonicalize_triangle_sep(t_ct, dists6, &new_t, &new_dists)\n");
+    }
+
+    if (passed) {
+        printf("All canonicalize_triangle_sep tests passed\n");
+    }
 
     // Test compute_parametric_variable
     float d2;
@@ -493,6 +534,32 @@ void unit_tests() {
         printf("All compute_parametric_variable tests passed\n");
     }
 
+    // Test compute_parametric_variable_sep
+    passed = true;
+    if (!isclose(compute_parametric_variable_sep(pts[ct1.v1].x, pts[ct1.v1].y, pts[ct1.v1].z, pts[ct1.v2].x, pts[ct1.v2].y, pts[ct1.v2].z, cdists21.x, cdists21.y, D.x, D.y, D.z, O.x, O.y, O.z), 108.607147)) {
+        passed = false;
+        printf("Failed compute_parametric_variable_sep(pts[ct1.v1], pts[ct1.v2], cdists21.x, cdists21.y, D, O)\n");
+    }
+
+    if (!isclose(compute_parametric_variable_sep(pts[ct1.v2].x, pts[ct1.v2].y, pts[ct1.v2].z, pts[ct1.v3].x, pts[ct1.v3].y, pts[ct1.v3].z, cdists21.y, cdists21.z, D.x, D.y, D.z, O.x, O.y, O.z), 143.744751)) {
+        passed = false;
+        printf("Failed compute_parametric_variable_sep(pts[ct1.v2], pts[ct1.v3], cdists21.y, cdists21.z, D, O)\n");
+    }
+
+    if (!isclose(compute_parametric_variable_sep(pts[ct2.v1].x, pts[ct2.v1].y, pts[ct2.v1].z, pts[ct2.v2].x, pts[ct2.v2].y, pts[ct2.v2].z, cdists12.x, cdists12.y, D.x, D.y, D.z, O.x, O.y, O.z), 130.328568)) {
+        passed = false;
+        printf("Failed compute_parametric_variable_sep(pts[ct2.v1], pts[ct2.v2], cdists12.x, cdists12.y, D, O)\n");
+    }
+
+    if (!isclose(compute_parametric_variable_sep(pts[ct2.v2].x, pts[ct2.v2].y, pts[ct2.v2].z, pts[ct2.v3].x, pts[ct2.v3].y, pts[ct2.v3].z, cdists12.y, cdists12.z, D.x, D.y, D.z, O.x, O.y, O.z), 88.860390)) {
+        passed = false;
+        printf("Failed compute_parametric_variable_sep(pts[ct2.v2], pts[ct2.v3], cdists12.y, cdists12.z, D, O)\n");
+    }
+
+    if (passed) {
+        printf("All compute_parametric_variable_sep tests passed\n");
+    }
+
     // Test is_coplanar
     passed = true;
 
@@ -527,6 +594,35 @@ void unit_tests() {
         printf("All is_coplanar tests passed\n");
     }
 
+    // Test is_coplanar_sep
+    passed = true;
+
+    if (is_coplanar_sep(N1.x, N1.y, N1.z, d1, N2.x, N2.y, N2.z, d2)) {
+        passed = false;
+        printf("Failed is_coplanar_sep(N1, d1, N2, d2)\n");
+    }
+
+    N3.x =  N1.x * 2;
+    if (!is_coplanar_sep(N1.x, N1.y, N1.z, d1, N3.x, N3.y, N3.z, d1 * 2)) {
+        passed = false;
+        printf("Failed is_coplanar_sep(N1, d1, N3, d1 * 2)\n");
+    }
+
+    if (is_coplanar_sep(N1.x, N1.y, N1.z, d1, N3.x, N3.y, N3.z, 0)) {
+        passed = false;
+        printf("Failed is_coplanar_sep(N1, d1, N3, 0)\n");
+    }
+
+    N3.x = 0;
+
+    if (!is_coplanar_sep(N4.x, N4.y, N4.z, d1, N3.x, N3.y, N3.z, d1 * 2)) {
+        passed = false;
+        printf("Failed is_coplanar_sep(N4, d1, N3, d1 * 2)\n");
+    }
+
+    if (passed) {
+        printf("All is_coplanar_sep tests passed\n");
+    }
 }
 
 void test_baseline() {
@@ -623,10 +719,17 @@ void test_single_triangle() {
     }
 
     res[0] = false;
+    narrowPhase_unopt(1, 1, 3, 1, 3, rob_trs, rob_pts, obs_trs, obj_pts, res);
+    if (!res[0]) {
+        passed = false;
+        printf("Failed test_single_triangle GPU unoptimized res[0]\n");
+    }
+
+    res[0] = false;
     narrowPhase(1, 1, 3, 1, 3, rob_trs, rob_pts, obs_trs, obj_pts, res);
     if (!res[0]) {
         passed = false;
-        printf("Failed test_single_triangle GPU res[0]\n");
+        printf("Failed test_single_triangle GPU optimized res[0]\n");
     }
 
     if (passed) {
@@ -694,9 +797,22 @@ void test_gpu() {
     }
 
     bool res[NUM_NP_TEST_CONFS];
-    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, rob_pts, obs_trs, obs_pts, res);
+    narrowPhase_unopt(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, rob_pts, obs_trs, obs_pts, res);
 
     bool passed = true;
+    for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
+        if (res[i] != i % 2) {
+            passed = false;
+            printf("Error checking conf %d\n", i);
+            break;
+        }
+
+        // Reset res
+        res[i] = false;
+    }
+
+
+    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, rob_pts, obs_trs, obs_pts, res);
     for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
         if (res[i] != i % 2) {
             passed = false;

@@ -9,20 +9,18 @@ Function signatures and support for the narrow-phase kernel
 #include <stdlib.h>
 #include "../Utils_rai.h"
 
-// struct Vector3f {
-//   float x, y, z;
-//   __device__ __host__ Vector3f() : x(0), y(0), z(0) {}
-//   __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}
-// };
-
-// struct Triangle {
-//   int v1, v2, v3;
-// };
-
 
 // This assumes all data is already copied to the device and pre-allocated
 // It's basically just a wrapper for the CUDA kernel
 void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
+    int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
+    const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
+    bool *valid_conf);
+void narrowPhase_sep(int num_confs, int num_rob_trs, int num_rob_pts,
+    int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
+    const float *rob_pts_x, const float *rob_pts_y, const float *rob_pts_z, const Triangle *obs_trs, const Vector3f *obs_pts,
+    bool *valid_conf);
+void narrowPhase_unopt(int num_confs, int num_rob_trs, int num_rob_pts,
     int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
     const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
     bool *valid_conf);
