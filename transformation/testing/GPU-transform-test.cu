@@ -87,7 +87,7 @@ int main()
 {
       // load configurations, should have 6990 valids and 3010 invalids
     std::vector<Configuration> confs;
-    readConfigurationFromFile("10,000samples.conf", confs);
+    readConfigurationFromFile(CONF_FILE, confs);
 
     Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
     fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];

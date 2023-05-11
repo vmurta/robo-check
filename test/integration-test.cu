@@ -100,7 +100,7 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     rob_mesh->endModel();
     std::cout << "loaded robot" <<std::endl;
 
-    fcl::Vector3f* vertices = new fcl::Vector3f[10000 * 792];
+    fcl::Vector3f* vertices = new fcl::Vector3f[confs.size() * 792];
 
     for (int i = 0; i < confs.size(); i++){
         fcl::Transform3f transform = configurationToTransform(confs[i]);

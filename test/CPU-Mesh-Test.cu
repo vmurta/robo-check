@@ -28,7 +28,7 @@ int main()
 {
     // load configurations, should have  valids and 3010 invalids
     std::vector<Configuration> confs;
-    readConfigurationFromFile("10,000samples.conf", confs);
+    readConfigurationFromFile(CONF_FILE, confs);
     // createAlphaBotConfigurations(confs, 10000);
 
     //Load Robot
@@ -84,7 +84,7 @@ int main()
     }
 
     // s//save configurations in output file
-    // writeConfigurationToFile(confs, "10,000samples.conf");
+    // writeConfigurationToFile(confs, CONF_FILE);
     std::cout << "We had " << num_valid << " valid confs and " << num_invalid << " invalid confs." << std::endl;
 
     return 0;

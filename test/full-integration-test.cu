@@ -100,7 +100,7 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     rob_mesh->endModel();
     std::cout << "loaded robot" <<std::endl;
 
-    fcl::Vector3f* vertices = new fcl::Vector3f[10000 * 792];
+    fcl::Vector3f* vertices = new fcl::Vector3f[confs.size() * 792];
 
     for (int i = 0; i < confs.size(); i++){
         fcl::Transform3f transform = configurationToTransform(confs[i]);
@@ -115,8 +115,8 @@ void collisionCheckCPU(bool *valid){
 
     // load configurations, should have  valids and 3010 invalids
     std::vector<Configuration> confs;
-    readConfigurationFromFile("10,000samples.conf", confs);
-    // createAlphaBotConfigurations(confs, 10000);
+    readConfigurationFromFile(CONF_FILE, confs);
+    // createAlphaBotConfigurations(confs, confs.size());
 
     //Load Robot
     std::vector<fcl::Vector3f> rob_vertices;
@@ -183,7 +183,7 @@ int main()
     std::vector<Configuration> confs;
     readConfigurationFromFile(CONF_FILE, confs);
 
-    Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
+    Vector3f* gpu_transformed_vertices = new Vector3f[confs.size() * 792];
     AABB* bot_bounds_GPU = new AABB[confs.size()];
 
     bool *valid_conf = new bool[confs.size()];
@@ -194,7 +194,7 @@ int main()
     }
     bool *cpu_valid_conf = new bool[confs.size()];
     AABB* bot_bounds_CPU = new AABB[confs.size()];
-    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
+    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[confs.size() * 792];
 
     auto cpu_start_time = std::chrono::high_resolution_clock::now();
     collisionCheckCPU(cpu_valid_conf);
@@ -212,14 +212,19 @@ int main()
     std::cout << "Transformation GPU execution time: " << elapsed_time.count() << " milliseconds" << std::endl;
 
     int num_correct = 0;
+    int num_true = 0;
     for (int i = 0; i < confs.size(); i++){
-        // if (valid_conf[i]==true){
+        if (valid_conf[i]==true){
+            num_true++;
+        }
         if (valid_conf[i]==cpu_valid_conf[i]){
             num_correct++;
+            std::cout << "conf " << i << " is " << valid_conf[i] << std::endl;
         } else {
-            // std::cout << "conf " << i << " is " << valid_conf[i] << " but should be " << cpu_valid_conf[i] << std::endl;
+            std::cout << "conf " << i << " is " << valid_conf[i] << " but should be " << cpu_valid_conf[i] << std::endl;
         }
     }
+    std::cout << "Num valid configurations " << num_true << std::endl;
     std::cout << "Num correct collision detections " << num_correct << std::endl;
 
 
