@@ -8,9 +8,13 @@
 #include <vector>
 #include <limits>
 #include <float.h>
+#include <sstream>
+
 
 #if LOCAL_TESTING == 1
-    #define CONF_FILE "./10,000samples.conf"
+    #ifndef CONF_FILE
+        #define CONF_FILE "./hard_confs10,000.conf"
+    #endif
     #define ROB_FILE "./models/alpha1.0/robot.obj"
     #define OBS_FILE "./models/alpha1.0/obstacle.obj"
 #else
@@ -48,6 +52,15 @@ struct Configuration {
     float pitch;
     float yaw;
     float roll;
+};
+
+struct ConfigurationTagged {
+    float x;
+    float y;
+    float z;
+    float pitch;
+    float yaw;
+    float roll;
     bool valid;
 };
 
@@ -75,16 +88,33 @@ struct AABB
     float z_max;
 };
 
-#define MAX_NUM_ROBOT_VERTICES 1000
+#define MAX_NUM_ROBOT_VERTICES 792
+#define MAX_NUM_ROBOT_TRIANGLES 1008
 __constant__ Vector3f base_robot_vertices[MAX_NUM_ROBOT_VERTICES];
-__constant__ Triangle base_robot_triangles[2500];
+__constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
 __constant__ Vector3f base_obs_vertices[MAX_NUM_ROBOT_VERTICES];
+__constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
-void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename);
+// __constant__ float base_rob_x[MAX_NUM_ROBOT_VERTICES];
+// __constant__ float base_rob_y[MAX_NUM_ROBOT_VERTICES];
+// __constant__ float base_rob_z[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Triangle base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Vector3f base_obs_x[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Vector3f base_obs_y[MAX_NUM_ROBOT_VERTICES]; 
+// __constant__ Vector3f base_obs_z[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Triangle base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+// __constant__ Triangle base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 
+void writeConfigurationToFileTagged(const std::vector<ConfigurationTagged> &confs, const std::string& filename);
+
+void readConfigurationFromFileTagged(const std::string& filename, std::vector<ConfigurationTagged> &confs);
 void readConfigurationFromFile(const std::string& filename, std::vector<Configuration> &confs);
+ConfigurationTagged makeTagged(const Configuration& conf);
 
-void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs);
+void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs, bool hard);
 void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vector<Triangle>& triangles);
 void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
                                                       float y_min, float y_max,
@@ -92,3 +122,4 @@ void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
                                                       int num_confs);
 
 void printConfiguration(const Configuration& conf);
+void printConfigurationTagged(const ConfigurationTagged& conf);

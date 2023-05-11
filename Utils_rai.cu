@@ -2,39 +2,113 @@
 #include <iostream>
 #include <random>
 #include <string.h>
+#include <fstream>
+#include <vector>
+#include <string>
+#include <stdexcept>
 #include "Utils_rai.h"
 
-void writeConfigurationToFile(const std::vector<Configuration> &confs, const std::string& filename) {
+void writeConfigurationToFileTagged(const std::vector<ConfigurationTagged> &confs, const std::string& filename) {
     std::ofstream file(filename);
     if (file.is_open()) {
-      for(auto config: confs ){
-        file  << config.x << " "
-              << config.y << " "
-              << config.z << " "
-              << config.pitch << " "
-              << config.yaw << " "
-              << config.roll << " "
-              << config.valid << std::endl;
-      }
-      file.close();
+        int validCount = 0;
+        int invalidCount = 0;
+
+        for (const auto& config : confs) {
+            if (config.valid) {
+                validCount++;
+            } else {
+                invalidCount++;
+            }
+        }
+
+        file << "There are " << validCount << " valid configurations and " << invalidCount << " invalid configurations\n";
+
+        for (const auto& config : confs) {
+            file  << config.x << " "
+                  << config.y << " "
+                  << config.z << " "
+                  << config.pitch << " "
+                  << config.yaw << " "
+                  << config.roll << " "
+                  << config.valid << std::endl;
+        }
+
+        file.close();
     } else {
         throw std::runtime_error("Failed to open file " + filename);
     }
 }
 
-void readConfigurationFromFile(const std::string& filename, std::vector<Configuration> &confs) {
+void readConfigurationFromFileTagged(const std::string& filename, std::vector<ConfigurationTagged> &confs) {
     std::ifstream file(filename);
     if (!file.is_open()) {
         throw std::runtime_error("Failed to open file " + filename);
     }
-    Configuration config;
+
+    int validCount = 0;
+    int invalidCount = 0;
+    std::string firstLine;
+    std::getline(file, firstLine);
+
+    std::istringstream lineStream(firstLine);
+    std::string word;
+
+    // Parse the first line to extract the valid and invalid configuration counts
+    while (lineStream >> word) {
+        if (word == "valid") {
+            lineStream >> validCount;
+        } else if (word == "invalid") {
+            lineStream >> invalidCount;
+        }
+    }
+
+    ConfigurationTagged config;
     while (file >> config.x >> config.y >> config.z >> config.pitch >> config.yaw >> config.roll >> config.valid) {
         confs.push_back(config);
     }
     file.close();
 }
 
-void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs){
+//automatically detags
+void readConfigurationFromFile(const std::string& filename, std::vector<Configuration> &confs) {
+    std::ifstream file(filename);
+    if (!file.is_open()) {
+        throw std::runtime_error("Failed to open file " + filename);
+    }
+
+    int validCount = 0;
+    int invalidCount = 0;
+    std::string firstLine;
+    std::getline(file, firstLine);
+
+    std::istringstream lineStream(firstLine);
+    std::string word;
+
+
+    Configuration config;
+    while (file >> config.x >> config.y >> config.z >> config.pitch >> config.yaw >> config.roll) {
+      std::string valid_str; // dump value
+      file >> valid_str; // skip past this validity of the configuration
+      confs.push_back(config);
+    }
+
+    file.close();
+}
+
+ConfigurationTagged makeTagged(const Configuration& config) {
+    ConfigurationTagged tagged;
+    tagged.x = config.x;
+    tagged.y = config.y;
+    tagged.z = config.z;
+    tagged.pitch = config.pitch;
+    tagged.yaw = config.yaw;
+    tagged.roll = config.roll;
+    tagged.valid = false;
+    return tagged;
+}
+
+void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs, bool hard){
   // these are the max and min values for vertices in alpha1.0/robot.obj
     float x_min = 3.72119;
     float y_min = -11.0518;
@@ -47,10 +121,17 @@ void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_con
     float y_range = y_max - y_min;
     float z_range = z_max - z_min;
 
-    generateConfs(confs, -x_range/20, x_range/20,
-                         -y_range/20, y_range/20,
-                         -z_range/20, z_range/20,
+    if(hard){
+      generateConfs(confs,  -x_range/200, x_range/200,
+                            -y_range/200, y_range/200,
+                            -z_range/200, z_range/200,
                          num_confs);
+    } else {
+      generateConfs(confs,  -x_range * 10, x_range* 10,
+                            -y_range * 10, y_range* 10,
+                            -z_range * 10, z_range* 10,
+                         num_confs);
+    }
 
 }
 
@@ -169,13 +250,21 @@ void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
         conf.pitch = dis_rot(gen);
         conf.yaw = dis_rot(gen);
         conf.roll = dis_rot(gen);
-        conf.valid = false;
-        confs.push_back(conf);
+        confs[i] =conf;
     }
 
 }
 
 void printConfiguration(const Configuration& conf) {
+    std::cout << "x: " << conf.x << std::endl;
+    std::cout << "y: " << conf.y << std::endl;
+    std::cout << "z: " << conf.z << std::endl;
+    std::cout << "pitch: " << conf.pitch << std::endl;
+    std::cout << "yaw: " << conf.yaw << std::endl;
+    std::cout << "roll: " << conf.roll << std::endl;
+}
+
+void printConfigurationTagged(const ConfigurationTagged& conf) {
     std::cout << "x: " << conf.x << std::endl;
     std::cout << "y: " << conf.y << std::endl;
     std::cout << "z: " << conf.z << std::endl;

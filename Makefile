@@ -25,8 +25,12 @@ CPU-Sphere-Test: CPU-Sphere-Test.o
 Integration-Test: integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
-Full-Integration-Test: full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o
+Full-Integration-Test: full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
+
+Generate-Tests: generate-tests.o Utils_rai.o Utils.o
+	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
+
 # CPU-Sphere-Test.o: CPU-Sphere-Test.cpp
 # 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -56,11 +60,14 @@ GPU-transform-test.o: transformation/testing/GPU-transform-test.cu
 generate-AABB.o: generate-AABB/generate-AABB.cu
 	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./generate-AABB
 
+generate-tests.o: generate-tests.cu
+	$(CU) $(CUFLAGS) -c $< -o $@ -I.
+
 CPU-Mesh-Test.o: test/CPU-Mesh-Test.cu
 	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./narrow-phase
 
-narrow-phase.o: narrow-phase/narrow-phase.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./narrow-phase
+narrow-phase.o: narrow-phase/narrow-phase.cu broad-phase.o
+	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./narrow-phase -I./broad-phasegit
 
 clean:
 	rm -f *.o CPU-Sphere-Test CPU-Mesh-Test GPU-Mesh-Test GPU-transform-test CPU-Sphere-Test Integration-Test
