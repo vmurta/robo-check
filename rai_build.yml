@@ -1,7 +1,8 @@
 # project
 rai:
   version: 0.2
-  image: tonywukun/pumps2018:amd64-dcuda100-nsighttest
+  # image: tonywukun/pumps2018:amd64-dcuda100-nsighttest
+  image: raiproject/pumps2018:amd64-cuda100
 resources:
   cpu:
     architecture: ppc64le
