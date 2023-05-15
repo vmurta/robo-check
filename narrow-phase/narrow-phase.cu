@@ -593,7 +593,7 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
     if (i < num_confs) {
         if (valid_conf[i])
             return;
-            
+
         bool valid = true;
         // printf("First robot vertex is: %f, %f, %f\n", rob_pts[i * num_rob_pts].x,
         //     rob_pts[i * num_rob_pts].y, rob_pts[i * num_rob_pts].z);
@@ -1120,11 +1120,11 @@ void narrowPhase_sep(int num_confs, int num_rob_trs, int num_rob_pts,
     cudaMalloc(&d_obs_pts_y, num_confs * num_obs_pts * sizeof(float));
     cudaMalloc(&d_obs_pts_z, num_confs * num_obs_pts * sizeof(float));
     std::cerr << "Time = 2.24"<< std::endl;
-    cudaMemcpy(d_obs_pts_x, obs_pts_x, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_obs_pts_x, obs_pts_x,num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
     std::cerr << "Time = 2.25"<< std::endl;
-    cudaMemcpy(d_obs_pts_y, obs_pts_y, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_obs_pts_y, obs_pts_y, num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
     std::cerr << "Time = 2.26"<< std::endl;
-    cudaMemcpy(d_obs_pts_z, obs_pts_z, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_obs_pts_z, obs_pts_z,  num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
 
     cudaDeviceSynchronize();
     fflush(stdout);

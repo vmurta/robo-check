@@ -668,9 +668,9 @@ int main(int argc, char *argv[])
 
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
     start_time = std::chrono::high_resolution_clock::now();
-    // broadPhaseFused_sep(confs, valid_conf);
+    broadPhaseFused_sep(confs, valid_conf);
     // broadPhaseFused(confs, valid_conf);
-    CallMegaKernel(confs, valid_conf);
+    // CallMegaKernel(confs, valid_conf);
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     std::cout << "Transformation GPU execution time: " << elapsed_time.count() << " milliseconds" << std::endl;

@@ -20,22 +20,22 @@ commands:
     #- nvcc -dc /src/broad-phase/broad-phase.cu -o broad-phase.o
     #- nvcc broad-phase.o -o test-broad-phase
     #- ./test-broad-phase
-    - nvcc -dc /src/narrow-phase/narrow-phase.cu -o narrow-phase.o
+    - nvcc -dc -O3 /src/narrow-phase/narrow-phase.cu -o narrow-phase.o
     #- nvcc -dc /src/narrow-phase/test-narrow-phase.cu -o test-narrow-phase.o
     #- nvcc narrow-phase.o test-narrow-phase.o -o test-narrow-phase
     #- ./test-narrow-phase
     # =====
-    - nvcc -dc /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
-    - nvcc -dc /src/transformation/transform.cu -o transform.o
-    - nvcc -dc /src/broad-phase/broad-phase.cu -o broad-phase.o
-    - nvcc -dc /src/broad-phase/broad-phase-fused.cu -o broad-phase-fused.o
-    - nvcc -dc /src/test/integration-test.cu -o integration-test.o
-    - nvcc -dc /src/Utils_rai.cu -o Utils_rai.o
-    - nvcc -dc /src/test/MegaKernel.cu -o MegaKernel.o
+    - nvcc -dc -O3 /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
+    - nvcc -dc -O3 /src/transformation/transform.cu -o transform.o
+    - nvcc -dc -O3 /src/broad-phase/broad-phase.cu -o broad-phase.o
+    - nvcc -dc -O3 /src/broad-phase/broad-phase-fused.cu -o broad-phase-fused.o
+    # - nvcc -dc /src/test/integration-test.cu -o integration-test.o
+    - nvcc -dc -O3 /src/Utils_rai.cu -o Utils_rai.o
+    - nvcc -dc -O3 /src/test/MegaKernel.cu -o MegaKernel.o
     - nvcc -dc -O3 -Wno-deprecated-declarations -dc /src/test/full-integration-test.cu -o full-integration-test.o
     # - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
-    - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
-    - nvcc full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o MegaKernel.o -g -o Full-Integration-Test -lineinfo -O3 -Wno-deprecated-declarations
+    # - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
+    - nvcc full-integration-test.o Utils_rai.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o MegaKernel.o -g -o Full-Integration-Test -lineinfo -O3 -Wno-deprecated-declarations
 
     - ./Full-Integration-Test /src/hard_confs10,000.conf
     # - ./integration-test
