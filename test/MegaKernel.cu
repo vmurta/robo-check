@@ -5,50 +5,10 @@
 #define TRIANGLE_BUFFER_SIZE 128
 
 // Set -DLOCAL_TESTING=1 to run CPU tests on local machine (not on rai)
-__constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
-__constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
-__constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
-
-#if(LOCAL_TESTING == 1)
-#include <fcl/fcl.h>
-#include "../Utils.h"
-#endif
-
-#if(LOCAL_TESTING == 1)
-inline bool verticesEqual(const Vector3f &v1, const fcl::Vector3f &v2){
-  return (fabs(v1.x -v2[0]) +
-            fabs(v1.y -v2[1]) +
-            fabs(v1.z -v2[2]) < 1e-5);
-  // return false;
-}
-
-void generateAABBBaseline_fcl(fcl::Vector3f* vertices, unsigned int numVertices,
-                    unsigned int numConfigs, AABB* botBounds)
-{
-    // Loop over every configuration
-    for(int i = 0; i < numConfigs; ++i)
-    {
-        // Loop over every vertex in each configuration
-        unsigned int configOffset = i * numVertices;
-        botBounds[i].x_min = vertices[configOffset][0];
-        botBounds[i].y_min = vertices[configOffset][1];
-        botBounds[i].z_min = vertices[configOffset][2];
-        botBounds[i].x_max = vertices[configOffset][0];
-        botBounds[i].y_max = vertices[configOffset][1];
-        botBounds[i].z_max = vertices[configOffset][2];
-        for(int j = 0; j < numVertices; ++j)
-        {
-            botBounds[i].x_min = min(botBounds[i].x_min, vertices[configOffset + j][0]);
-            botBounds[i].y_min = min(botBounds[i].y_min, vertices[configOffset + j][1]);
-            botBounds[i].z_min = min(botBounds[i].z_min, vertices[configOffset + j][2]);
-            botBounds[i].x_max = max(botBounds[i].x_max, vertices[configOffset + j][0]);
-            botBounds[i].y_max = max(botBounds[i].y_max, vertices[configOffset + j][1]);
-            botBounds[i].z_max = max(botBounds[i].z_max, vertices[configOffset + j][2]);
-        }
-    }
-}
-#endif
+extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
 
 inline __device__ bool overlaps(const AABB &a1, const AABB &a2){
@@ -151,7 +111,6 @@ __device__ bool triangles_valid(const Triangle &rob_tri, const Triangle &obs_tri
 }
 
 __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB, const AABB *obs_tri_AABBs,
-
                                      bool *valid_confs, const int _num_configs){
 
     //stage one variables
@@ -370,13 +329,22 @@ __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB,
                             invalid_obs_tris[curr_tri_index] = base_obs_triangles[k];
                         }
                     }
+
                 // if we have overflowed shared memory
                 } else {
                     // __syncthreads();
                     k--;
+                    //TODO: change this so that instead of exhausting the buffer
+                    // we only do as many as we can before threard divergence
+                    // ie, if we have num_invalid_tris = MEGA_BLOCK_SIZE*2 + 4,
+                    // we only do MEGA_BLOCK_SIZE*2 triangles and then leave the 4 for later
+
+
                     // do triangle triangle collision checking on all pairs found so far
                     // this flushes the buffer
-                    for (int l = threadIdx.x; l < num_invalid_tris; l+=MEGA_BLOCK_SIZE){
+
+                    int num_to_do = (num_invalid_tris / MEGA_BLOCK_SIZE) * MEGA_BLOCK_SIZE;
+                    for (int l = threadIdx.x; l < num_to_do; l+=MEGA_BLOCK_SIZE){
                         // __syncthreads();
                         if (!valid){
                             break;
@@ -390,7 +358,9 @@ __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB,
                     }
                     // reset the number of invalid triangles
                     __syncthreads();
-                    num_invalid_tris = 0;
+                    if (threadIdx.x == 0){
+                        num_invalid_tris = num_invalid_tris - num_to_do;
+                    }
                     __syncthreads();
                 }
             }

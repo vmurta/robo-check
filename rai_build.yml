@@ -1,7 +1,7 @@
 # project
 rai:
   version: 0.2
-  image: tonywukun/pumps2018:amd64-cuda100-nsighttest
+  image: tonywukun/pumps2018:amd64-dcuda100-nsighttest
 resources:
   cpu:
     architecture: ppc64le
@@ -12,26 +12,29 @@ resources:
 commands:
   build:
     - cp -r /src .
-    # - nvcc -c /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
-    # - nvcc -c /src/generate-AABB/test-generate-AABB.cu -o test-generate-AABB.o
+    # - nvcc -dc /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
+    # - nvcc -dc /src/generate-AABB/test-generate-AABB.cu -o test-generate-AABB.o
     # - nvcc generate-AABB.o test-generate-AABB.o -o test-generate-AABB
     # - ./test-generate-AABB
-    #- nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
+    #- nvcc -dc /src/broad-phase/broad-phase.cu -o broad-phase.o
     #- nvcc broad-phase.o -o test-broad-phase
     #- ./test-broad-phase
-    - nvcc -c /src/narrow-phase/narrow-phase.cu -o narrow-phase.o
-    #- nvcc -c /src/narrow-phase/test-narrow-phase.cu -o test-narrow-phase.o
+    - nvcc -dc /src/narrow-phase/narrow-phase.cu -o narrow-phase.o
+    #- nvcc -dc /src/narrow-phase/test-narrow-phase.cu -o test-narrow-phase.o
     #- nvcc narrow-phase.o test-narrow-phase.o -o test-narrow-phase
     #- ./test-narrow-phase
     # =====
-    - nvcc -c /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
-    - nvcc -c /src/transformation/transform.cu -o transform.o
-    - nvcc -c /src/broad-phase/broad-phase.cu -o broad-phase.o
-    - nvcc -c /src/broad-phase/broad-phase-fused.cu -o broad-phase-fused.o
-    - nvcc -c /src/test/integration-test.cu -o integration-test.o
-    - nvcc -c /src/Utils_rai.cu -o Utils_rai.o
+    - nvcc -dc /src/generate-AABB/generate-AABB.cu -o generate-AABB.o
+    - nvcc -dc /src/transformation/transform.cu -o transform.o
+    - nvcc -dc /src/broad-phase/broad-phase.cu -o broad-phase.o
+    - nvcc -dc /src/broad-phase/broad-phase-fused.cu -o broad-phase-fused.o
+    - nvcc -dc /src/test/integration-test.cu -o integration-test.o
+    - nvcc -dc /src/Utils_rai.cu -o Utils_rai.o
     - nvcc -dc /src/test/MegaKernel.cu -o MegaKernel.o
+    # - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
     - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
+    - nvcc full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o MegaKernel.o -g -o Full-Integration-Test -lineinfo -O3 -Wno-deprecated-declarations
+
     - ./integration-test
     # Note that you have to submit to the rai_amd64_exclusive queue by adding `--queue=rai_amd64_exclusive` to your RAI invocation.
-    # - /usr/local/NVIDIA-Nsight-Compute/ncu --export "integration-test" --force-overwrite --target-processes all --kernel-name-base function --kernel-name regex:broadPhaseFusedKernel --launch-skip-before-match 0 --section ComputeWorkloadAnalysis --section InstructionStats --section LaunchStats --section MemoryWorkloadAnalysis --section MemoryWorkloadAnalysis_Chart --section MemoryWorkloadAnalysis_Tables --section Occupancy --section SchedulerStats --section SourceCounters --section SpeedOfLight --section SpeedOfLight_HierarchicalSingleRooflineChart --section WarpStateStats --sampling-interval auto --sampling-max-passes 5 --sampling-buffer-size 33554432 --profile-from-start 1 --cache-control all --clock-control base ./integration-test -a
+    # - /usr/local/NVIDIA-Nsight-dCompute/ncu --export "integration-test" --force-overwrite --target-processes all --kernel-name-base function --kernel-name regex:broadPhaseFusedKernel --launch-skip-before-match 0 --section ComputeWorkloadAnalysis --section InstructionStats --section LaunchStats --section MemoryWorkloadAnalysis --section MemoryWorkloadAnalysis_Chart --section MemoryWorkloadAnalysis_Tables --section Occupancy --section SchedulerStats --section SourceCounters --section SpeedOfLight --section SpeedOfLight_HierarchicalSingleRooflineChart --section WarpStateStats --sampling-interval auto --sampling-max-passes 5 --sampling-buffer-size 33554432 --profile-from-start 1 --dcache-dcontrol all --dclock-dcontrol base ./integration-test -a

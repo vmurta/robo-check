@@ -334,7 +334,7 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
     std::cout << "Copied back memory and synchronized" << std::endl;
 }
 
-void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, AABB* bot_bounds)
+void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf)
 {
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
@@ -354,13 +354,13 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
     std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
     size_t count = 0;
-    for (const auto& triangle : obs_triangles) {
-        if (count > 100){
-            break;
-        }
-        std::cout << "v: " << triangle.v1 << ", v2: " << triangle.v2 << ", v3: " << triangle.v3 << std::endl;
-        count++;
-    }
+    // for (const auto& triangle : obs_triangles) {
+    //     if (count > 100){
+    //         break;
+    //     }
+    //     std::cout << "v: " << triangle.v1 << ", v2: " << triangle.v2 << ", v3: " << triangle.v3 << std::endl;
+    //     count++;
+    // }
     // std::cout <base_robot_trianglesb_points;
     float *d_rob_transformed_points_x;
     float *d_rob_transformed_points_y;

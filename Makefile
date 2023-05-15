@@ -25,7 +25,7 @@ CPU-Sphere-Test: CPU-Sphere-Test.o
 Integration-Test: integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
-Full-Integration-Test: full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o
+Full-Integration-Test: full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o MegaKernel.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
 Generate-Tests: generate-tests.o Utils_rai.o Utils.o
@@ -67,6 +67,9 @@ CPU-Mesh-Test.o: test/CPU-Mesh-Test.cu
 	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./narrow-phase
 
 narrow-phase.o: narrow-phase/narrow-phase.cu
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./narrow-phase -I./broad-phase
+
+MegaKernel.o: test/MegaKernel.cu
 	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./narrow-phase -I./broad-phase
 
 clean:
