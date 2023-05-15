@@ -2,7 +2,7 @@
 #include "test-narrow-phase.hu"
 #include <iostream>
 
-#define NUM_NP_TEST_CONFS 4
+#define NUM_NP_TEST_CONFS 1024
 
 void unit_tests() {
     // Test isclose
@@ -752,7 +752,6 @@ void test_gpu() {
     obs_trs[2] = {0, 2, 3};
     obs_trs[3] = {1, 2, 3};
 
-    Vector3f rob_pts[8];
     Vector3f pt0(0, 0, 0);
     Vector3f pt1(0, 1, 2);
     Vector3f pt2(0, 2, 0);
@@ -761,14 +760,6 @@ void test_gpu() {
     Vector3f pt5(100, 1, 2);
     Vector3f pt6(100, 2, 0);
     Vector3f pt7(102, 2, 2);
-    rob_pts[0] = pt0;
-    rob_pts[1] = pt1;
-    rob_pts[2] = pt2;
-    rob_pts[3] = pt3;
-    rob_pts[4] = pt4;
-    rob_pts[5] = pt5;
-    rob_pts[6] = pt6;
-    rob_pts[7] = pt7;
 
     Vector3f obs_pts[4];
     Vector3f pto0(1, 0.1, 0);
@@ -797,13 +788,16 @@ void test_gpu() {
     }
 
     bool res[NUM_NP_TEST_CONFS];
-    narrowPhase_unopt(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, rob_pts, obs_trs, obs_pts, res);
+    for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
+        res[i] = false;
+    }
+    narrowPhase_unopt(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, real_rob_pts, obs_trs, obs_pts, res);
 
     bool passed = true;
     for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
         if (res[i] != i % 2) {
             passed = false;
-            printf("Error checking conf %d\n", i);
+            printf("Error checking unopt conf %d\n", i);
             break;
         }
 
@@ -812,15 +806,29 @@ void test_gpu() {
     }
 
 
-    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, rob_pts, obs_trs, obs_pts, res);
+    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, real_rob_pts, obs_trs, obs_pts, res);
     for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
         if (res[i] != i % 2) {
             passed = false;
-            printf("Error checking conf %d\n", i);
+            printf("Error checking opt conf %d\n", i);
+            break;
+        }
+        // Set res to prepare for next test
+        res[i] = true;
+    }
+
+    // If all configurations are already valid, don't even run the narrow phase
+    for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
+        res[i] = true;
+    }
+    narrowPhase(NUM_NP_TEST_CONFS, 4, 4, 4, 4, rob_trs, real_rob_pts, obs_trs, obs_pts, res);
+    for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
+        if (!res[i]) {
+            passed = false;
+            printf("Error checking conf %d despite broad\n", i);
             break;
         }
     }
-
     if (passed) {
         printf("All GPU tests successful\n");
     }

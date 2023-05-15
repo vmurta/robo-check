@@ -12,7 +12,9 @@ Function signatures and support for the narrow-phase kernel
 // Machine epsilon for floats is 1e-7
 // https://en.wikipedia.org/wiki/Machine_epsilon#Values_for_standard_hardware_arithmetics
 #define TOL 1e-6
-#define BLOCK_SIZE 128
+#define CONFS_PER_BLOCK 8
+#define COARSEN_SZ 32
+#define BLOCK_SIZE CONFS_PER_BLOCK * COARSEN_SZ
 #define VERBOSE 0
 
 // This assumes all data is already copied to the device and pre-allocated
@@ -51,49 +53,49 @@ __global__ void narrowPhaseKernel_sep(int num_confs,
 // helper functions
 
 
-__host__ __device__ bool isclose(float v1, float v2);
-__host__ __device__ bool veq(const Vector3f v1, const Vector3f v2);
-
-__host__ __device__ bool teq(const Triangle self_tr, const Vector3f *self_pts,
-        const Triangle other_tr, const Vector3f *other_pts);
-
-__host__ __device__ void compute_plane(const Triangle tr, const Vector3f *pts, Vector3f *N,
-    float *d);
-__host__ __device__ void compute_plane( const Vector3f &pt1, const Vector3f &pt2, const Vector3f &pt3,
-                                        Vector3f *N, float *d);
-
-__host__ __device__ void compute_plane_sep(const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float *Nx, float *Ny, float *Nz, float *d);
-__host__ __device__ Vector3f compute_signed_dists(const Vector3f &N, const float d, const Triangle &tr,
-        const Vector3f *pts);
-
-__host__ __device__ Vector3f compute_signed_dists(const Vector3f &N, const float d, const Vector3f &pt1, const  Vector3f &pt2, const Vector3f &pt3);
-
-__host__ __device__ void compute_signed_dists_sep(const float Nx, const float Ny, const float Nz, const float d, const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float* dists_x, float* dists_y, float* dists_z);
-__host__ __device__ bool no_overlap(const Vector3f dists);
-__host__ __device__ bool no_overlap_sep(const float dists_x, const float dists_y, const float dists_z);
-
-// TODO: investigate a more numerically stable way to do this
-__host__ __device__ void la_solve(const float A1, const float A2, const float A3, const float A4,
-        const float b1, const float b2, float *x1, float *x2);
-
-__host__ __device__ void compute_intersect_line(const Vector3f N1, const float d1,
-        const Vector3f N2, const float d2, Vector3f *D, Vector3f *O);
-
-__host__ __device__ void compute_intersect_line_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2, float *Dx, float *Dy, float *Dz, float *Ox, float *Oy, float *Oz);
-
-__host__ __device__ float project_vertex(const Vector3f V, const Vector3f D, const Vector3f O);
-
-__host__ __device__ float project_vertex_sep(const float Vx, const float Vy, const float Vz, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
-__host__ __device__ void canonicalize_triangle(const Triangle t, const Vector3f dists, Triangle *new_t, Vector3f *new_dists);
-__host__ __device__ void canonicalize_triangle(Vector3f &v1, Vector3f &v2, Vector3f &v3, Vector3f &dists);
-
-__host__ __device__ void canonicalize_triangle_sep(const float dists_x, const float dists_y, const float dists_z, int *v1, int *v2, int *v3);
-
-__host__ __device__ float compute_parametric_variable(const Vector3f v0, const Vector3f v1,
-        const float d0, const float d1, const Vector3f D, const Vector3f O);
-
-__host__ __device__ float compute_parametric_variable_sep(const float v0_x, const float v0_y, const float v0_z, const float v1_x, const float v1_y, const float v1_z, const float d0, const float d1, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
-
-__host__ __device__ bool is_coplanar_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2);
-
-__host__ __device__ bool is_coplanar(const Vector3f N1, const float d1, const Vector3f N2, const float d2);
+// __host__ __device__ bool isclose(float v1, float v2);
+// __host__ __device__ bool veq(const Vector3f v1, const Vector3f v2);
+//
+// __host__ __device__ bool teq(const Triangle self_tr, const Vector3f *self_pts,
+//         const Triangle other_tr, const Vector3f *other_pts);
+//
+// __host__ __device__ void compute_plane(const Triangle tr, const Vector3f *pts, Vector3f *N,
+//     float *d);
+// __host__ __device__ void compute_plane( const Vector3f &pt1, const Vector3f &pt2, const Vector3f &pt3,
+//                                         Vector3f *N, float *d);
+//
+// __host__ __device__ void compute_plane_sep(const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float *Nx, float *Ny, float *Nz, float *d);
+// __host__ __device__ Vector3f compute_signed_dists(const Vector3f &N, const float d, const Triangle &tr,
+//         const Vector3f *pts);
+//
+// __host__ __device__ Vector3f compute_signed_dists(const Vector3f &N, const float d, const Vector3f &pt1, const  Vector3f &pt2, const Vector3f &pt3);
+//
+// __host__ __device__ void compute_signed_dists_sep(const float Nx, const float Ny, const float Nz, const float d, const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float* dists_x, float* dists_y, float* dists_z);
+// __host__ __device__ bool no_overlap(const Vector3f dists);
+// __host__ __device__ bool no_overlap_sep(const float dists_x, const float dists_y, const float dists_z);
+//
+// // TODO: investigate a more numerically stable way to do this
+// __host__ __device__ void la_solve(const float A1, const float A2, const float A3, const float A4,
+//         const float b1, const float b2, float *x1, float *x2);
+//
+// __host__ __device__ void compute_intersect_line(const Vector3f N1, const float d1,
+//         const Vector3f N2, const float d2, Vector3f *D, Vector3f *O);
+//
+// __host__ __device__ void compute_intersect_line_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2, float *Dx, float *Dy, float *Dz, float *Ox, float *Oy, float *Oz);
+//
+// __host__ __device__ float project_vertex(const Vector3f V, const Vector3f D, const Vector3f O);
+//
+// __host__ __device__ float project_vertex_sep(const float Vx, const float Vy, const float Vz, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
+// __host__ __device__ void canonicalize_triangle(const Triangle t, const Vector3f dists, Triangle *new_t, Vector3f *new_dists);
+// __host__ __device__ void canonicalize_triangle(Vector3f &v1, Vector3f &v2, Vector3f &v3, Vector3f &dists);
+//
+// __host__ __device__ void canonicalize_triangle_sep(const float dists_x, const float dists_y, const float dists_z, int *v1, int *v2, int *v3);
+//
+// __host__ __device__ float compute_parametric_variable(const Vector3f v0, const Vector3f v1,
+//         const float d0, const float d1, const Vector3f D, const Vector3f O);
+//
+// __host__ __device__ float compute_parametric_variable_sep(const float v0_x, const float v0_y, const float v0_z, const float v1_x, const float v1_y, const float v1_z, const float d0, const float d1, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
+//
+// __host__ __device__ bool is_coplanar_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2);
+//
+// __host__ __device__ bool is_coplanar(const Vector3f N1, const float d1, const Vector3f N2, const float d2);
