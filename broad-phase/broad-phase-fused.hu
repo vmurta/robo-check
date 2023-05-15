@@ -5,9 +5,29 @@
 #include "../generate-AABB/generate-AABB.hu"
 #include "../broad-phase/broad-phase.hu"
 
+
 void broadPhaseFused(std::vector<Configuration> &confs, bool *valid_conf, AABB* bot_bounds);
 
 void broadPhaseFused_sep(std::vector<Configuration> &confs, bool *valid_conf, AABB* bot_bounds);
 
 __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, AABB *bot_bounds,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices);
+
+// helper functions
+__device__ Matrix4f createTransformationMatrix(const Configuration config);
+__device__ Matrix3f createRotationMatrix(const Configuration config);
+
+inline __device__ Vector3f transformVector(const Vector3f &v, const Matrix3f &R, const Vector3f &t){
+    Vector3f v_prime = {
+        R.m[0][0] * v.x + R.m[0][1] * v.y + R.m[0][2] * v.z + t.x,
+        R.m[1][0] * v.x + R.m[1][1] * v.y + R.m[1][2] * v.z + t.y,
+        R.m[2][0] * v.x + R.m[2][1] * v.y + R.m[2][2] * v.z + t.z
+    };
+
+    return v_prime;
+
+}
+
+__device__ Vector3f transformVector(Vector3f v, Matrix4f M);
+
+inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax);

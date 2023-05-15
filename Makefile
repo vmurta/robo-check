@@ -32,42 +32,42 @@ Generate-Tests: generate-tests.o Utils_rai.o Utils.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
 # CPU-Sphere-Test.o: CPU-Sphere-Test.cpp
-# 	$(CXX) $(CXXFLAGS) -c $< -o $@
+# 	$(CXX) $(CXXFLAGS) -dc $< -o $@
 
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CXX) $(CXXFLAGS) -dc $< -o $@
 %.o: %.cu
-	$(CU) $(CUFLAGS) -c $< -o $@
+	$(CU) $(CUFLAGS) -dc $< -o $@
 
 broad-phase.o : broad-phase/broad-phase.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./transformation
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./transformation
 
-broad-phase-fused.o : broad-phase/broad-phase-fused.cu transform.o
+broad-phase-fused.o : broad-phase/broad-phase-fused.cu 
 	$(CU) $(CUFLAGS) -dc $< -o $@ -I./transformation -I./narrow-phase
 
 full-integration-test.o: test/full-integration-test.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I.
+	$(CU) $(CUFLAGS) -dc $^ -o $@
 
 integration-test.o: test/integration-test.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I.
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I.
 
 transform.o: transformation/transform.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I. 
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I. 
 	
 GPU-transform-test.o: transformation/testing/GPU-transform-test.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I. 
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I. 
 
 generate-AABB.o: generate-AABB/generate-AABB.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./generate-AABB
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./generate-AABB
 
 generate-tests.o: generate-tests.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I.
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I.
 
 CPU-Mesh-Test.o: test/CPU-Mesh-Test.cu
-	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./narrow-phase
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./narrow-phase
 
-narrow-phase.o: narrow-phase/narrow-phase.cu broad-phase.o
-	$(CU) $(CUFLAGS) -c $< -o $@ -I. -I./narrow-phase -I./broad-phasegit
+narrow-phase.o: narrow-phase/narrow-phase.cu
+	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./narrow-phase -I./broad-phase
 
 clean:
 	rm -f *.o CPU-Sphere-Test CPU-Mesh-Test GPU-Mesh-Test GPU-transform-test CPU-Sphere-Test Integration-Test

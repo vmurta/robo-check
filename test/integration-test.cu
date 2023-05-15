@@ -100,7 +100,7 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
     rob_mesh->endModel();
     std::cout << "loaded robot" <<std::endl;
 
-    fcl::Vector3f* vertices = new fcl::Vector3f[confs.size() * 792];
+    fcl::Vector3f* vertices = new fcl::Vector3f[confs.size() * NUM_ROB_VERTICES];
 
     for (int i = 0; i < confs.size(); i++){
         fcl::Transform3f transform = configurationToTransform(confs[i]);
@@ -120,14 +120,14 @@ int main()
     std::vector<Configuration> confs;
     readConfigurationFromFile(CONF_FILE, confs);
 
-    Vector3f* gpu_transformed_vertices = new Vector3f[10000 * 792];
+    Vector3f* gpu_transformed_vertices = new Vector3f[NUM_CONFS * NUM_ROB_VERTICES];
     AABB* bot_bounds_GPU = new AABB[confs.size()];
 
     bool *valid_conf = new bool[confs.size()];
    
     #if(LOCAL_TESTING == 1)
     AABB* bot_bounds_CPU = new AABB[confs.size()];
-    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[10000 * 792];
+    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[NUM_CONFS * NUM_ROB_VERTICES];
 
     std::chrono::time_point<std::chrono::high_resolution_clock> cpu_start_time, cpu_end_time;
     cpu_start_time = std::chrono::high_resolution_clock::now();
@@ -150,9 +150,9 @@ int main()
     // int num_correct = 0;
     // int num_incorrect = 0;
     // float total_error_incorrect = 0;
-    // for (int i = 0; i < 10000; i++){
-    //   for (int j = 0; j < 792; j++){
-    //     if (verticesEqual(gpu_transformed_vertices[i * 792 + j], cpu_transformed_vertices[i * 792 + j])){
+    // for (int i = 0; i < NUM_CONFS; i++){
+    //   for (int j = 0; j < NUM_ROB_VERTICES; j++){
+    //     if (verticesEqual(gpu_transformed_vertices[i * NUM_ROB_VERTICES + j], cpu_transformed_vertices[i * NUM_ROB_VERTICES + j])){
     //       num_correct++;
     //     } else {
     //       num_incorrect++;

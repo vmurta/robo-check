@@ -13,7 +13,7 @@
 
 #if LOCAL_TESTING == 1
     #ifndef CONF_FILE
-        #define CONF_FILE "./hard_confs10,000.conf"
+        #define CONF_FILE "./easy_confs10,000.conf"
     #endif
     #define ROB_FILE "./models/alpha1.0/robot.obj"
     #define OBS_FILE "./models/alpha1.0/obstacle.obj"
@@ -68,6 +68,10 @@ struct Matrix4f {
     float m[4][4];
 };
 
+struct Matrix3f {
+    float m[3][3];
+};
+
 struct Vector3f {
   float x, y, z;
   __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}\
@@ -88,22 +92,22 @@ struct AABB
     float z_max;
 };
 
-#define MAX_NUM_ROBOT_VERTICES 792
+#define NUM_ROB_VERTICES 792
 #define MAX_NUM_ROBOT_TRIANGLES 1008
-__constant__ Vector3f base_robot_vertices[MAX_NUM_ROBOT_VERTICES];
-__constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ Vector3f base_obs_vertices[MAX_NUM_ROBOT_VERTICES];
-__constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
-// __constant__ float base_rob_x[MAX_NUM_ROBOT_VERTICES];
-// __constant__ float base_rob_y[MAX_NUM_ROBOT_VERTICES];
-// __constant__ float base_rob_z[MAX_NUM_ROBOT_VERTICES];
+// __constant__ float base_rob_x[NUM_ROB_VERTICES];
+// __constant__ float base_rob_y[NUM_ROB_VERTICES];
+// __constant__ float base_rob_z[NUM_ROB_VERTICES];
 // __constant__ Triangle base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
 // __constant__ Triangle base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
 // __constant__ Triangle base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
-// __constant__ Vector3f base_obs_x[MAX_NUM_ROBOT_VERTICES];
-// __constant__ Vector3f base_obs_y[MAX_NUM_ROBOT_VERTICES]; 
-// __constant__ Vector3f base_obs_z[MAX_NUM_ROBOT_VERTICES];
+// __constant__ Vector3f base_obs_x[NUM_ROB_VERTICES];
+// __constant__ Vector3f base_obs_y[NUM_ROB_VERTICES]; 
+// __constant__ Vector3f base_obs_z[NUM_ROB_VERTICES];
 // __constant__ Triangle base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
 // __constant__ Triangle base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
 // __constant__ Triangle base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];

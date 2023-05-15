@@ -2,34 +2,34 @@
 #include "../narrow-phase/narrow-phase.hu"
 #define TRANSFORM_BLOCK_SIZE 32
 
-__device__ Matrix4f createTransformationMatrix(Configuration config) {
-    float x = config.x;
-    float y = config.y;
-    float z = config.z;
-    float pitch = config.pitch;
-    float yaw = config.yaw;
-    float roll= config.roll;
+extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
-    float cosB = cos(pitch);
-    float sinB = sin(pitch);
-    float cosA = cos(yaw);
-    float sinA = sin(yaw);
-    float cosC = cos(roll);
-    float sinC = sin(roll);
+__device__ Matrix4f createTransformationMatrix(const Configuration config) {
+
+
+    float cosB = cos(config.pitch);
+    float sinB = sin(config.pitch);
+    float cosA = cos(config.yaw);
+    float sinA = sin(config.yaw);
+    float cosC = cos(config.roll);
+    float sinC = sin(config.roll);
 
     Matrix4f transform;
     transform.m[0][0] = cosA * cosB;
     transform.m[0][1] = cosA * sinB * sinC - sinA * cosC;
     transform.m[0][2] = cosA *  sinB * cosC + sinA * sinC;
-    transform.m[0][3] = x;
+    transform.m[0][3] = config.x;
     transform.m[1][0] = sinA * cosB;
     transform.m[1][1] = sinA * sinB * sinC + cosA * cosC;
     transform.m[1][2] = sinA * sinB * cosC - cosA * sinC;
-    transform.m[1][3] = y;
+    transform.m[1][3] = config.y;
     transform.m[2][0] = -sinB;
     transform.m[2][1] = cosB * sinC;
     transform.m[2][2] = cosB * cosC;
-    transform.m[2][3] = z;
+    transform.m[2][3] = config.z;
     transform.m[3][0] = 0;
     transform.m[3][1] = 0;
     transform.m[3][2] = 0;
@@ -37,6 +37,33 @@ __device__ Matrix4f createTransformationMatrix(Configuration config) {
 
     return transform;
 }
+
+__device__ Matrix3f createRotationMatrix(const Configuration config) {
+
+
+    float cosB = cos(config.pitch);
+    float sinB = sin(config.pitch);
+    float cosA = cos(config.yaw);
+    float sinA = sin(config.yaw);
+    float cosC = cos(config.roll);
+    float sinC = sin(config.roll);
+
+    Matrix3f rotate;
+    rotate.m[0][0] = cosA * cosB;
+    rotate.m[0][1] = cosA * sinB * sinC - sinA * cosC;
+    rotate.m[0][2] = cosA *  sinB * cosC + sinA * sinC;
+    rotate.m[1][0] = sinA * cosB;
+    rotate.m[1][1] = sinA * sinB * sinC + cosA * cosC;
+    rotate.m[1][2] = sinA * sinB * cosC - cosA * sinC;
+    rotate.m[2][0] = -sinB;
+    rotate.m[2][1] = cosB * sinC;
+    rotate.m[2][2] = cosB * cosC;
+
+    return rotate;
+}
+
+
+
 
 __device__ Vector3f transformVector(Vector3f v, Matrix4f M) {
     // Create a 4D homogeneous vector from the 3D vector
@@ -50,11 +77,12 @@ __device__ Vector3f transformVector(Vector3f v, Matrix4f M) {
         }
     }
 
+    // printf("v_h_prime: %f %f %f %f\n", v_h_prime[0], v_h_prime[1], v_h_prime[2], v_h_prime[3]);
     // Convert the transformed 4D vector back to a 3D vector
     Vector3f v_prime = {
-        v_h_prime[0] / v_h_prime[3],
-        v_h_prime[1] / v_h_prime[3],
-        v_h_prime[2] / v_h_prime[3]
+        v_h_prime[0],
+        v_h_prime[1],
+        v_h_prime[2]
     };
 
     return v_prime;
@@ -68,7 +96,7 @@ inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, fl
 
 // __constant__ Triangle base_obs_triangles[2500];
 
-__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, AABB *bot_bounds, Vector3f *transformed_robot_vertices,
+__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, Vector3f *transformed_robot_vertices,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices)
 {
     size_t config_idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -97,7 +125,7 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
       bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex.y);
       bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.z);
     }
-    bot_bounds[config_idx] = bot_bounds_local;
+    // bot_bounds[config_idx] = bot_bounds_local;
 
     // Due to the massive reuse it's fastest to store the obstacle AABB in registers
     AABB obstacleReg = *obstacle;
@@ -209,8 +237,8 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
     checkCudaMem(cudaMemcpy(d_configs, configs.data(), configs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
     std::cout << "Copied the configurations " << std::endl;
 
-    AABB* d_bot_bounds;
-    checkCudaCall(cudaMalloc(&d_bot_bounds, configs.size() * sizeof(AABB)));
+    // AABB* d_bot_bounds;
+    // checkCudaCall(cudaMalloc(&d_bot_bounds, configs.size() * sizeof(AABB)));
     std::cout << "Malloced the AABBs " << std::endl;
 
     // Move obstacle to AABB (on CPU since we only have 1)
@@ -225,10 +253,10 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
 
     dim3 dimGridTransformKernel(ceil((float)(configs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
     dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
-    broadPhaseFusedKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>( d_configs, obstacle_AABB_d, d_bot_bounds,
+    broadPhaseFusedKernel<<<dimGridTransformKernel, dimBlockTransformKernel>>>( d_configs, obstacle_AABB_d,
                                                                                 d_rob_transformed_points, valid_conf_d,
                                                                                 configs.size(), rob_vertices.size());
-    checkCudaCall(cudaDeviceSynchronize());
+    // checkCudaCall(cudaDeviceSynchronize());
     std::cout << "About to call narrow phase" << std::endl;
 
     // Vector3f test_rob_points[3];
