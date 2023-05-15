@@ -35,6 +35,7 @@ commands:
     - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
     - nvcc full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o MegaKernel.o -g -o Full-Integration-Test -lineinfo -O3 -Wno-deprecated-declarations
 
-    - ./integration-test
+    - ./Full-Integration-Test /src/hard_confs10,000.conf
+    # - ./integration-test
     # Note that you have to submit to the rai_amd64_exclusive queue by adding `--queue=rai_amd64_exclusive` to your RAI invocation.
     # - /usr/local/NVIDIA-Nsight-dCompute/ncu --export "integration-test" --force-overwrite --target-processes all --kernel-name-base function --kernel-name regex:broadPhaseFusedKernel --launch-skip-before-match 0 --section ComputeWorkloadAnalysis --section InstructionStats --section LaunchStats --section MemoryWorkloadAnalysis --section MemoryWorkloadAnalysis_Chart --section MemoryWorkloadAnalysis_Tables --section Occupancy --section SchedulerStats --section SourceCounters --section SpeedOfLight --section SpeedOfLight_HierarchicalSingleRooflineChart --section WarpStateStats --sampling-interval auto --sampling-max-passes 5 --sampling-buffer-size 33554432 --profile-from-start 1 --dcache-dcontrol all --dclock-dcontrol base ./integration-test -a
