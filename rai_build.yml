@@ -31,6 +31,7 @@ commands:
     - nvcc -dc /src/test/integration-test.cu -o integration-test.o
     - nvcc -dc /src/Utils_rai.cu -o Utils_rai.o
     - nvcc -dc /src/test/MegaKernel.cu -o MegaKernel.o
+    - nvcc -dc -O3 -Wno-deprecated-declarations -dc /src/test/full-integration-test.cu -o full-integration-test.o
     # - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
     - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
     - nvcc full-integration-test.o Utils_rai.o Utils.o generate-AABB.o broad-phase-fused.o narrow-phase.o broad-phase.o MegaKernel.o -g -o Full-Integration-Test -lineinfo -O3 -Wno-deprecated-declarations
