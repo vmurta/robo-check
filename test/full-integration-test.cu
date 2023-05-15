@@ -703,6 +703,11 @@ int main(int argc, char *argv[])
             } else {
                 // std::cout << "conf " << i << " is a false positive" << std::endl;
             }
+        } else {
+            if (valid_conf[i]==cpu_valid_conf[i]){
+            } else {
+                std::cout << "conf " << i << " is a false negative" << std::endl;
+            }
         }
         if (valid_conf[i]==cpu_valid_conf[i]){
             num_correct++;

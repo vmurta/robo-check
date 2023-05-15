@@ -549,11 +549,8 @@ __global__ void narrowPhaseKernel_sep(int num_confs, int num_rob_trs, int num_ro
 }
 
 __global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num_rob_pts,
-        int num_obs_trs, int num_obs_pts, const int *rob_trs_1, const int * rob_trs_2,
-        const int *rob_trs_3, const float *rob_pts_x, const float *rob_pts_y,
-        const float *rob_pts_z, const int *obs_trs_1, const int *obs_trs_2,
-        const int *obs_trs_3, const float *obs_pts_x, const float *obs_pts_y,
-        const float *obs_pts_z, bool *valid_conf) {
+        int num_obs_trs, int num_obs_pts, const float *rob_pts_x, const float *rob_pts_y,
+        const float *rob_pts_z, bool *valid_conf) {
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
@@ -588,37 +585,37 @@ __global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num
         bool req_coplanar = false;
         for (int j = 0; j < num_rob_trs; j++) {
             // Load the robot triangle
-            rob[0][0][bidx] = rob_pts_x[i * num_rob_pts + rob_trs_1[j]];
-            rob[0][1][bidx] = rob_pts_y[i * num_rob_pts + rob_trs_1[j]];
-            rob[0][2][bidx] = rob_pts_z[i * num_rob_pts + rob_trs_1[j]];
-            rob[1][0][bidx] = rob_pts_x[i * num_rob_pts + rob_trs_2[j]];
-            rob[1][1][bidx] = rob_pts_y[i * num_rob_pts + rob_trs_2[j]];
-            rob[1][2][bidx] = rob_pts_z[i * num_rob_pts + rob_trs_2[j]];
-            rob[2][0][bidx] = rob_pts_x[i * num_rob_pts + rob_trs_3[j]];
-            rob[2][1][bidx] = rob_pts_y[i * num_rob_pts + rob_trs_3[j]];
-            rob[2][2][bidx] = rob_pts_z[i * num_rob_pts + rob_trs_3[j]];
+            rob[0][0][bidx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[0][1][bidx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[0][2][bidx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[1][0][bidx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[1][1][bidx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[1][2][bidx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[2][0][bidx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v3[j]];
+            rob[2][1][bidx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v3[j]];
+            rob[2][2][bidx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v3[j]];
 
             // Compute the plane of the robot triangle
             compute_plane_sep(rob[0][0][bidx], rob[0][1][bidx], rob[0][2][bidx], rob[1][0][bidx], rob[1][1][bidx], rob[1][2][bidx], rob[2][0][bidx], rob[2][1][bidx], rob[2][2][bidx], &(Nr[0][bidx]), &(Nr[1][bidx]), &(Nr[2][bidx]), &(dr[bidx]));
 
             for (int kk = 0; kk < num_obs_trs; kk += COARSEN_SZ) {
                 // All threads should stop if a collision was found
-                __syncwarp();
+                // __syncwarp();
                 if (!valid[ty])
                     break;
 
                 int k = kk + tx;
                 if (k < num_obs_trs) {
                     // Load the obstacle triangle
-                    obs[0][0][bidx] = obs_pts_x[obs_trs_1[k]];
-                    obs[0][1][bidx] = obs_pts_y[obs_trs_1[k]];
-                    obs[0][2][bidx] = obs_pts_z[obs_trs_1[k]];
-                    obs[1][0][bidx] = obs_pts_x[obs_trs_2[k]];
-                    obs[1][1][bidx] = obs_pts_y[obs_trs_2[k]];
-                    obs[1][2][bidx] = obs_pts_z[obs_trs_2[k]];
-                    obs[2][0][bidx] = obs_pts_x[obs_trs_3[k]];
-                    obs[2][1][bidx] = obs_pts_y[obs_trs_3[k]];
-                    obs[2][2][bidx] = obs_pts_z[obs_trs_3[k]];
+                    obs[0][0][bidx] = base_obs_x[base_obs_tri_v1[k]];
+                    obs[0][1][bidx] = base_obs_y[base_obs_tri_v1[k]];
+                    obs[0][2][bidx] = base_obs_z[base_obs_tri_v1[k]];
+                    obs[1][0][bidx] = base_obs_x[base_obs_tri_v2[k]];
+                    obs[1][1][bidx] = base_obs_y[base_obs_tri_v2[k]];
+                    obs[1][2][bidx] = base_obs_z[base_obs_tri_v2[k]];
+                    obs[2][0][bidx] = base_obs_x[base_obs_tri_v3[k]];
+                    obs[2][1][bidx] = base_obs_y[base_obs_tri_v3[k]];
+                    obs[2][2][bidx] = base_obs_z[base_obs_tri_v3[k]];
 
                     // Compute the distances between the robot plane and the obstacle triangle
                     compute_signed_dists_sep(Nr[0][bidx], Nr[1][bidx], Nr[2][bidx], dr[bidx], obs[0][0][bidx], obs[0][1][bidx], obs[0][2][bidx], obs[1][0][bidx], obs[1][1][bidx], obs[1][2][bidx], obs[2][0][bidx], obs[2][1][bidx], obs[2][2][bidx], &(distO[0][bidx]), &(distO[1][bidx]), &(distO[2][bidx]));
@@ -1050,8 +1047,8 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
 
     // Call the kernel;
     dim3 thread(COARSEN_SZ, CONFS_PER_BLOCK, 1);
-    narrowPhaseKernel_coarse<<<(num_confs - 1) / CONFS_PER_BLOCK + 1, thread>>>(num_confs, num_rob_trs,
-        num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);
+    // narrowPhaseKernel_coarse<<<(num_confs - 1) / CONFS_PER_BLOCK + 1, thread>>>(num_confs, num_rob_trs,
+    //     num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);
 
     // narrowPhaseKernel_sep<<<(num_confs - 1) / BLOCK_SIZE + 1, BLOCK_SIZE>>>(num_confs, num_rob_trs,
     //     num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);

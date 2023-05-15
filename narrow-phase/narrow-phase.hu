@@ -50,6 +50,10 @@ __global__ void narrowPhaseKernel_sep(int num_confs,
         const float *rob_pts_x, const float *rob_pts_y, const float *rob_pts_z,
         bool *valid_conf);
 
+__global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num_rob_pts,
+        int num_obs_trs, int num_obs_pts, const float *rob_pts_x, const float *rob_pts_y,
+        const float *rob_pts_z, bool *valid_conf);
+
 // helper functions
 
 

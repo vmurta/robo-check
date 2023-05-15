@@ -484,7 +484,9 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf)
             d_valid_conf, configs.size(), rob_x.size());
     checkCudaCall(cudaDeviceSynchronize());
     std::cout << "About to call narrow phase" << std::endl;
-    narrowPhaseKernel_sep<<<(configs.size() - 1) / BLOCK_SIZE + 1, BLOCK_SIZE>>>(
+    dim3 thread(COARSEN_SZ, CONFS_PER_BLOCK, 1);
+
+    narrowPhaseKernel_coarse<<<(configs.size() - 1) / CONFS_PER_BLOCK + 1, thread>>>(
         configs.size(), MAX_NUM_ROBOT_TRIANGLES, NUM_ROB_VERTICES, MAX_NUM_ROBOT_TRIANGLES, NUM_ROB_VERTICES, 
         d_rob_transformed_points_x, d_rob_transformed_points_y, d_rob_transformed_points_z,
         d_valid_conf);
