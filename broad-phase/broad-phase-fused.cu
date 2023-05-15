@@ -136,7 +136,7 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
     valid_conf[config_idx] = !isNotValid;
 }
 
-__global__ void broadPhaseFusedKernel_sep(Configuration *configs, const AABB *obstacle, AABB *bot_bounds,
+__global__ void broadPhaseFusedKernel_sep(Configuration *configs, const AABB *obstacle,
     float *rob_pts_x, float *rob_pts_y,
         float *rob_pts_z,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices)
@@ -170,7 +170,7 @@ __global__ void broadPhaseFusedKernel_sep(Configuration *configs, const AABB *ob
       bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex.y);
       bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.z);
     } 
-    bot_bounds[config_idx] = bot_bounds_local;
+    // bot_bounds[config_idx] = bot_bounds_local;
 
     // Due to the massive reuse it's fastest to store the obstacle AABB in registers
     AABB obstacleReg = *obstacle;
@@ -181,7 +181,7 @@ __global__ void broadPhaseFusedKernel_sep(Configuration *configs, const AABB *ob
     valid_conf[config_idx] = !isNotValid;
 }
 
-void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB* bot_bounds)
+void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
 {
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
@@ -324,7 +324,7 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, AABB
     // checkCudaCall(cudaDeviceSynchronize());
 
     checkCudaCall(cudaFree(d_configs));
-    checkCudaCall(cudaFree(d_bot_bounds));
+    // checkCudaCall(cudaFree(d_bot_bounds));
     checkCudaCall(cudaFree(d_rob_transformed_points));
     checkCudaCall(cudaFree(d_obs_points));
     checkCudaCall(cudaFree(d_rob_triangles));
@@ -394,8 +394,8 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
     checkCudaMem(cudaMemcpy(d_configs, configs.data(), configs.size() * sizeof(Configuration), cudaMemcpyHostToDevice));
     std::cout << "Copied the configurations " << std::endl;
 
-    AABB* d_bot_bounds;
-    checkCudaCall(cudaMalloc(&d_bot_bounds, configs.size() * sizeof(AABB)));
+    // AABB* d_bot_bounds;
+    // checkCudaCall(cudaMalloc(&d_bot_bounds, configs.size() * sizeof(AABB)));
     std::cout << "Malloced the AABBs " << std::endl;
 
     // Move obstacle to AABB (on CPU since we only have 1)
@@ -410,7 +410,7 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
 
     dim3 dimGridTransformKernel(ceil((float)(configs.size()) / TRANSFORM_BLOCK_SIZE), 1, 1);
     dim3 dimBlockTransformKernel(TRANSFORM_BLOCK_SIZE, 1, 1);
-    broadPhaseFusedKernel_sep<<<dimGridTransformKernel, dimBlockTransformKernel>>>( d_configs, obstacle_AABB_d, d_bot_bounds,
+    broadPhaseFusedKernel_sep<<<dimGridTransformKernel, dimBlockTransformKernel>>>( d_configs, obstacle_AABB_d,
                                                                                 d_rob_transformed_points_x, d_rob_transformed_points_y, d_rob_transformed_points_z, valid_conf_d,
                                                                                 configs.size(), rob_vertices.size());
     checkCudaCall(cudaDeviceSynchronize());
@@ -426,12 +426,12 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
     std::cout << "Synchronized" << std::endl;
 
     std:: cout << "Copying back results" << std::endl;
-    cudaMemcpy(bot_bounds, d_bot_bounds, configs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
+    // cudaMemcpy(bot_bounds, d_bot_bounds, configs.size() * sizeof(AABB), cudaMemcpyDeviceToHost);
     // cudaMemcpy(valid_conf, valid_conf_d, configs.size() * sizeof(bool), cudaMemcpyDeviceToHost);
     checkCudaCall(cudaDeviceSynchronize());
 
     checkCudaCall(cudaFree(d_configs));
-    checkCudaCall(cudaFree(d_bot_bounds));
+    // checkCudaCall(cudaFree(d_bot_bounds));
     checkCudaCall(cudaFree(d_rob_transformed_points_x));
     checkCudaCall(cudaFree(d_rob_transformed_points_y));
     checkCudaCall(cudaFree(d_rob_transformed_points_z));

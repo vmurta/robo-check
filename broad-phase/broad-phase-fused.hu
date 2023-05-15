@@ -6,11 +6,11 @@
 #include "../broad-phase/broad-phase.hu"
 
 
-void broadPhaseFused(std::vector<Configuration> &confs, bool *valid_conf, AABB* bot_bounds);
+void broadPhaseFused(std::vector<Configuration> &confs, bool *valid_conf);
 
-void broadPhaseFused_sep(std::vector<Configuration> &confs, bool *valid_conf, AABB* bot_bounds);
+void broadPhaseFused_sep(std::vector<Configuration> &confs, bool *valid_conf);
 
-__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, AABB *bot_bounds,
+__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices);
 
 // helper functions

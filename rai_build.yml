@@ -30,6 +30,7 @@ commands:
     - nvcc -c /src/broad-phase/broad-phase-fused.cu -o broad-phase-fused.o
     - nvcc -c /src/test/integration-test.cu -o integration-test.o
     - nvcc -c /src/Utils_rai.cu -o Utils_rai.o
+    - nvcc -dc /src/test/MegaKernel.cu -o MegaKernel.o
     - nvcc narrow-phase.o broad-phase-fused.o broad-phase.o generate-AABB.o integration-test.o Utils_rai.o -o integration-test
     - ./integration-test
     # Note that you have to submit to the rai_amd64_exclusive queue by adding `--queue=rai_amd64_exclusive` to your RAI invocation.
