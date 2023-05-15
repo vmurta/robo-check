@@ -2,7 +2,9 @@
 #include "../narrow-phase/narrow-phase.hu"
 #include "../broad-phase/broad-phase-fused.hu"
 
+#ifndef COALESCE
 __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB, const AABB *obs_tri_AABBs,
                                      bool *valid_confs, const int _num_configs);
 
 void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs);
+#endif

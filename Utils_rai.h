@@ -23,6 +23,9 @@
     #define OBS_FILE "src/models/alpha1.0/obstacle.obj"
 #endif
 
+#define COALESCE 1
+
+
 #define checkCudaCall(status) \
     do { \
         cudaError_t err = status; \
@@ -99,18 +102,31 @@ extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
-// __constant__ float base_rob_x[NUM_ROB_VERTICES];
-// __constant__ float base_rob_y[NUM_ROB_VERTICES];
-// __constant__ float base_rob_z[NUM_ROB_VERTICES];
-// __constant__ Triangle base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-// __constant__ Triangle base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-// __constant__ Triangle base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
-// __constant__ Vector3f base_obs_x[NUM_ROB_VERTICES];
-// __constant__ Vector3f base_obs_y[NUM_ROB_VERTICES]; 
-// __constant__ Vector3f base_obs_z[NUM_ROB_VERTICES];
-// __constant__ Triangle base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-// __constant__ Triangle base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-// __constant__ Triangle base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+// extern __constant__ float base_robot_vertices_x[NUM_ROB_VERTICES];
+// extern __constant__ float base_robot_vertices_y[NUM_ROB_VERTICES];
+// extern __constant__ float base_robot_vertices_z[NUM_ROB_VERTICES];
+// extern __constant__ int base_robot_triangles_1[MAX_NUM_ROBOT_TRIANGLES];
+// extern __constant__ int base_robot_triangles_2[MAX_NUM_ROBOT_TRIANGLES];
+// extern __constant__ int base_robot_triangles_3[MAX_NUM_ROBOT_TRIANGLES];
+// extern __constant__ float base_obs_vertices_x[NUM_ROB_VERTICES];
+// extern __constant__ float base_obs_vertices_y[NUM_ROB_VERTICES];
+// extern __constant__ float base_obs_vertices_z[NUM_ROB_VERTICES];
+// extern __constant__ int base_obs_triangles_1[MAX_NUM_ROBOT_TRIANGLES];
+// extern __constant__ int base_obs_triangles_2[MAX_NUM_ROBOT_TRIANGLES];
+// extern __constant__ int base_obs_triangles_3[MAX_NUM_ROBOT_TRIANGLES];
+
+extern __constant__ float base_rob_x[NUM_ROB_VERTICES];
+extern __constant__ float base_rob_y[NUM_ROB_VERTICES];
+extern __constant__ float base_rob_z[NUM_ROB_VERTICES];
+extern __constant__ int base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ float base_obs_x[NUM_ROB_VERTICES];
+extern __constant__ float base_obs_y[NUM_ROB_VERTICES]; 
+extern __constant__ float base_obs_z[NUM_ROB_VERTICES];
+extern __constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 
 void writeConfigurationToFileTagged(const std::vector<ConfigurationTagged> &confs, const std::string& filename);
 
@@ -119,7 +135,10 @@ void readConfigurationFromFile(const std::string& filename, std::vector<Configur
 ConfigurationTagged makeTagged(const Configuration& conf);
 
 void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs, bool hard);
-void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vector<Triangle>& triangles);
+void loadOBJFile(const char* filename,  std::vector<Vector3f>& points, std::vector<Triangle>& triangles);
+void loadOBJFile(const char* filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
+                                        std::vector<int>& v1, std::vector<int>& v2, std::vector<int>& v3);
+
 void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
                                                       float y_min, float y_max,
                                                       float z_min, float z_max,

@@ -3,10 +3,27 @@
 #include "./MegaKernel.hu"
 
 // Set -DLOCAL_TESTING=1 to run CPU tests on local machine (not on rai)
+#ifdef COALESCE
+
+__constant__ float base_rob_x[NUM_ROB_VERTICES];
+__constant__ float base_rob_y[NUM_ROB_VERTICES];
+__constant__ float base_rob_z[NUM_ROB_VERTICES];
+__constant__ int base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+__constant__ int base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+__constant__ int base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+__constant__ float base_obs_x[NUM_ROB_VERTICES];
+__constant__ float base_obs_y[NUM_ROB_VERTICES]; 
+__constant__ float base_obs_z[NUM_ROB_VERTICES];
+__constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+__constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+__constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+
+#else
 __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
 __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
+#endif
 
 #if(LOCAL_TESTING == 1)
 #include <fcl/fcl.h>
