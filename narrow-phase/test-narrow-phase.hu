@@ -13,8 +13,7 @@ bool teq(const Triangle self_tr, const Vector3f *self_pts,
 void compute_plane(const Triangle tr, const Vector3f *pts, Vector3f *N,
     float *d);
 void compute_plane_sep(const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float *Nx, float *Ny, float *Nz, float *d);
-Vector3f compute_signed_dists(const Vector3f N, const float d, const Triangle tr,
-        const Vector3f *pts);
+Vector3f compute_signed_dists(const Vector3f N, const float d, const Triangle tr, const Vector3f *pts);
 void compute_signed_dists_sep(const float Nx, const float Ny, const float Nz, const float d, const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float* dists_x, float* dists_y, float* dists_z);
 bool no_overlap(const Vector3f dists);
 bool no_overlap_sep(const float dists_x, const float dists_y, const float dists_z);
