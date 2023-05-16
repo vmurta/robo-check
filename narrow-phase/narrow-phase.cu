@@ -668,8 +668,9 @@ __global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num
         if (req_coplanar)
             printf("Error: require coplanar intersection for configuration: %d\n", i);
 
-        if (tx == 0) {
-            valid_conf[i] = valid[ty];
+        __syncthreads();
+        if (bidx < CONFS_PER_BLOCK && valid[tx]) {
+            valid_conf[blockIdx.x * CONFS_PER_BLOCK + bidx] = valid[bidx];
         }
     }
 }

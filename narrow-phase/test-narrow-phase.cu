@@ -2,7 +2,7 @@
 #include "test-narrow-phase.hu"
 #include <iostream>
 
-#define NUM_NP_TEST_CONFS 1024
+#define NUM_NP_TEST_CONFS 4096
 
 void unit_tests() {
     // Test isclose
