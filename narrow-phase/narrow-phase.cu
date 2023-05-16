@@ -15,7 +15,7 @@ extern __constant__ int base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ int base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ int base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ float base_obs_x[NUM_ROB_VERTICES];
-extern __constant__ float base_obs_y[NUM_ROB_VERTICES]; 
+extern __constant__ float base_obs_y[NUM_ROB_VERTICES];
 extern __constant__ float base_obs_z[NUM_ROB_VERTICES];
 extern __constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
@@ -681,8 +681,8 @@ __global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num
             printf("Error: require coplanar intersection for configuration: %d\n", i);
 
         __syncthreads();
-        if (bidx < CONFS_PER_BLOCK && valid[tx]) {
-            valid_conf[blockIdx.x * CONFS_PER_BLOCK + bidx] = valid[bidx];
+        if (tx == 0) {
+            valid_conf[i] = valid[ty];
         }
     }
 }
