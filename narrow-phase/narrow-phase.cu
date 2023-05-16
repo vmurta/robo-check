@@ -3,6 +3,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
+
+extern __constant__ float base_rob_x[NUM_ROB_VERTICES];
+extern __constant__ float base_rob_y[NUM_ROB_VERTICES];
+extern __constant__ float base_rob_z[NUM_ROB_VERTICES];
+extern __constant__ int base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ float base_obs_x[NUM_ROB_VERTICES];
+extern __constant__ float base_obs_y[NUM_ROB_VERTICES]; 
+extern __constant__ float base_obs_z[NUM_ROB_VERTICES];
+extern __constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+
 __host__ __device__ bool isclose(float v1, float v2) {
 
     if (abs(v1) < TOL && abs(v2) < TOL) {
@@ -406,11 +424,8 @@ void narrowPhaseBaseline(int num_confs, int num_rob_trs, int num_rob_pts,
 }
 
 __global__ void narrowPhaseKernel_sep(int num_confs, int num_rob_trs, int num_rob_pts,
-        int num_obs_trs, int num_obs_pts, const int *rob_trs_1, const int * rob_trs_2,
-        const int *rob_trs_3, const float *rob_pts_x, const float *rob_pts_y,
-        const float *rob_pts_z, const int *obs_trs_1, const int *obs_trs_2,
-        const int *obs_trs_3, const float *obs_pts_x, const float *obs_pts_y,
-        const float *obs_pts_z, bool *valid_conf) {
+        int num_obs_trs, int num_obs_pts, const float *rob_pts_x, const float *rob_pts_y,
+        const float *rob_pts_z, bool *valid_conf) {
 
     int tx = threadIdx.x;
     int i = blockDim.x * blockIdx.x + tx;
@@ -442,30 +457,30 @@ __global__ void narrowPhaseKernel_sep(int num_confs, int num_rob_trs, int num_ro
         bool req_coplanar = false;
         for (int j = 0; j < num_rob_trs; j++) {
             // Load the robot triangle
-            rob[0][0][tx] = rob_pts_x[i * num_rob_pts + rob_trs_1[j]];
-            rob[0][1][tx] = rob_pts_y[i * num_rob_pts + rob_trs_1[j]];
-            rob[0][2][tx] = rob_pts_z[i * num_rob_pts + rob_trs_1[j]];
-            rob[1][0][tx] = rob_pts_x[i * num_rob_pts + rob_trs_2[j]];
-            rob[1][1][tx] = rob_pts_y[i * num_rob_pts + rob_trs_2[j]];
-            rob[1][2][tx] = rob_pts_z[i * num_rob_pts + rob_trs_2[j]];
-            rob[2][0][tx] = rob_pts_x[i * num_rob_pts + rob_trs_3[j]];
-            rob[2][1][tx] = rob_pts_y[i * num_rob_pts + rob_trs_3[j]];
-            rob[2][2][tx] = rob_pts_z[i * num_rob_pts + rob_trs_3[j]];
+            rob[0][0][tx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[0][1][tx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[0][2][tx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[1][0][tx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[1][1][tx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[1][2][tx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[2][0][tx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v3[j]];
+            rob[2][1][tx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v3[j]];
+            rob[2][2][tx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v3[j]];
 
             // Compute the plane of the robot triangle
             compute_plane_sep(rob[0][0][tx], rob[0][1][tx], rob[0][2][tx], rob[1][0][tx], rob[1][1][tx], rob[1][2][tx], rob[2][0][tx], rob[2][1][tx], rob[2][2][tx], &(Nr[0][tx]), &(Nr[1][tx]), &(Nr[2][tx]), &(dr[tx]));
 
             for (int k = 0; k < num_obs_trs; k++) {
                 // Load the obstacle triangle
-                obs[0][0][tx] = obs_pts_x[obs_trs_1[k]];
-                obs[0][1][tx] = obs_pts_y[obs_trs_1[k]];
-                obs[0][2][tx] = obs_pts_z[obs_trs_1[k]];
-                obs[1][0][tx] = obs_pts_x[obs_trs_2[k]];
-                obs[1][1][tx] = obs_pts_y[obs_trs_2[k]];
-                obs[1][2][tx] = obs_pts_z[obs_trs_2[k]];
-                obs[2][0][tx] = obs_pts_x[obs_trs_3[k]];
-                obs[2][1][tx] = obs_pts_y[obs_trs_3[k]];
-                obs[2][2][tx] = obs_pts_z[obs_trs_3[k]];
+                obs[0][0][tx] = base_obs_x[base_obs_tri_v1[k]];
+                obs[0][1][tx] = base_obs_y[base_obs_tri_v1[k]];
+                obs[0][2][tx] = base_obs_z[base_obs_tri_v1[k]];
+                obs[1][0][tx] = base_obs_x[base_obs_tri_v2[k]];
+                obs[1][1][tx] = base_obs_y[base_obs_tri_v2[k]];
+                obs[1][2][tx] = base_obs_z[base_obs_tri_v2[k]];
+                obs[2][0][tx] = base_obs_x[base_obs_tri_v3[k]];
+                obs[2][1][tx] = base_obs_y[base_obs_tri_v3[k]];
+                obs[2][2][tx] = base_obs_z[base_obs_tri_v3[k]];
 
                 // Compute the distances between the robot plane and the obstacle triangle
                 compute_signed_dists_sep(Nr[0][tx], Nr[1][tx], Nr[2][tx], dr[tx], obs[0][0][tx], obs[0][1][tx], obs[0][2][tx], obs[1][0][tx], obs[1][1][tx], obs[1][2][tx], obs[2][0][tx], obs[2][1][tx], obs[2][2][tx], &(distO[0][tx]), &(distO[1][tx]), &(distO[2][tx]));
@@ -534,11 +549,8 @@ __global__ void narrowPhaseKernel_sep(int num_confs, int num_rob_trs, int num_ro
 }
 
 __global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num_rob_pts,
-        int num_obs_trs, int num_obs_pts, const int *rob_trs_1, const int * rob_trs_2,
-        const int *rob_trs_3, const float *rob_pts_x, const float *rob_pts_y,
-        const float *rob_pts_z, const int *obs_trs_1, const int *obs_trs_2,
-        const int *obs_trs_3, const float *obs_pts_x, const float *obs_pts_y,
-        const float *obs_pts_z, bool *valid_conf) {
+        int num_obs_trs, int num_obs_pts, const float *rob_pts_x, const float *rob_pts_y,
+        const float *rob_pts_z, bool *valid_conf) {
 
     int tx = threadIdx.x;
     int ty = threadIdx.y;
@@ -573,37 +585,37 @@ __global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num
         bool req_coplanar = false;
         for (int j = 0; j < num_rob_trs; j++) {
             // Load the robot triangle
-            rob[0][0][bidx] = rob_pts_x[i * num_rob_pts + rob_trs_1[j]];
-            rob[0][1][bidx] = rob_pts_y[i * num_rob_pts + rob_trs_1[j]];
-            rob[0][2][bidx] = rob_pts_z[i * num_rob_pts + rob_trs_1[j]];
-            rob[1][0][bidx] = rob_pts_x[i * num_rob_pts + rob_trs_2[j]];
-            rob[1][1][bidx] = rob_pts_y[i * num_rob_pts + rob_trs_2[j]];
-            rob[1][2][bidx] = rob_pts_z[i * num_rob_pts + rob_trs_2[j]];
-            rob[2][0][bidx] = rob_pts_x[i * num_rob_pts + rob_trs_3[j]];
-            rob[2][1][bidx] = rob_pts_y[i * num_rob_pts + rob_trs_3[j]];
-            rob[2][2][bidx] = rob_pts_z[i * num_rob_pts + rob_trs_3[j]];
+            rob[0][0][bidx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[0][1][bidx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[0][2][bidx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v1[j]];
+            rob[1][0][bidx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[1][1][bidx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[1][2][bidx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v2[j]];
+            rob[2][0][bidx] = rob_pts_x[i * num_rob_pts + base_rob_tri_v3[j]];
+            rob[2][1][bidx] = rob_pts_y[i * num_rob_pts + base_rob_tri_v3[j]];
+            rob[2][2][bidx] = rob_pts_z[i * num_rob_pts + base_rob_tri_v3[j]];
 
             // Compute the plane of the robot triangle
             compute_plane_sep(rob[0][0][bidx], rob[0][1][bidx], rob[0][2][bidx], rob[1][0][bidx], rob[1][1][bidx], rob[1][2][bidx], rob[2][0][bidx], rob[2][1][bidx], rob[2][2][bidx], &(Nr[0][bidx]), &(Nr[1][bidx]), &(Nr[2][bidx]), &(dr[bidx]));
 
             for (int kk = 0; kk < num_obs_trs; kk += COARSEN_SZ) {
                 // All threads should stop if a collision was found
-                __syncwarp();
+                // __syncwarp();
                 if (!valid[ty])
                     break;
 
                 int k = kk + tx;
                 if (k < num_obs_trs) {
                     // Load the obstacle triangle
-                    obs[0][0][bidx] = obs_pts_x[obs_trs_1[k]];
-                    obs[0][1][bidx] = obs_pts_y[obs_trs_1[k]];
-                    obs[0][2][bidx] = obs_pts_z[obs_trs_1[k]];
-                    obs[1][0][bidx] = obs_pts_x[obs_trs_2[k]];
-                    obs[1][1][bidx] = obs_pts_y[obs_trs_2[k]];
-                    obs[1][2][bidx] = obs_pts_z[obs_trs_2[k]];
-                    obs[2][0][bidx] = obs_pts_x[obs_trs_3[k]];
-                    obs[2][1][bidx] = obs_pts_y[obs_trs_3[k]];
-                    obs[2][2][bidx] = obs_pts_z[obs_trs_3[k]];
+                    obs[0][0][bidx] = base_obs_x[base_obs_tri_v1[k]];
+                    obs[0][1][bidx] = base_obs_y[base_obs_tri_v1[k]];
+                    obs[0][2][bidx] = base_obs_z[base_obs_tri_v1[k]];
+                    obs[1][0][bidx] = base_obs_x[base_obs_tri_v2[k]];
+                    obs[1][1][bidx] = base_obs_y[base_obs_tri_v2[k]];
+                    obs[1][2][bidx] = base_obs_z[base_obs_tri_v2[k]];
+                    obs[2][0][bidx] = base_obs_x[base_obs_tri_v3[k]];
+                    obs[2][1][bidx] = base_obs_y[base_obs_tri_v3[k]];
+                    obs[2][2][bidx] = base_obs_z[base_obs_tri_v3[k]];
 
                     // Compute the distances between the robot plane and the obstacle triangle
                     compute_signed_dists_sep(Nr[0][bidx], Nr[1][bidx], Nr[2][bidx], dr[bidx], obs[0][0][bidx], obs[0][1][bidx], obs[0][2][bidx], obs[1][0][bidx], obs[1][1][bidx], obs[1][2][bidx], obs[2][0][bidx], obs[2][1][bidx], obs[2][2][bidx], &(distO[0][bidx]), &(distO[1][bidx]), &(distO[2][bidx]));
@@ -907,122 +919,122 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
         const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
         bool *valid_conf) {
 
-    // First copy everything to struct-of-arrays;
-    int *rob_trs_1 = (int*) malloc(num_rob_trs * sizeof(int));
-    int *rob_trs_2 = (int*) malloc(num_rob_trs * sizeof(int));
-    int *rob_trs_3 = (int*) malloc(num_rob_trs * sizeof(int));
-    float *rob_pts_x = (float*) malloc(num_confs * num_rob_pts * sizeof(float));
-    float *rob_pts_y = (float*) malloc(num_confs * num_rob_pts * sizeof(float));
-    float *rob_pts_z = (float*) malloc(num_confs * num_rob_pts * sizeof(float));
-    int *obs_trs_1 = (int*) malloc(num_obs_trs * sizeof(int));
-    int *obs_trs_2 = (int*) malloc(num_obs_trs * sizeof(int));
-    int *obs_trs_3 = (int*) malloc(num_obs_trs * sizeof(int));
-    float *obs_pts_x = (float*) malloc(num_obs_pts * sizeof(float));
-    float *obs_pts_y = (float*) malloc(num_obs_pts * sizeof(float));
-    float *obs_pts_z = (float*) malloc(num_obs_pts * sizeof(float));
+    // // First copy everything to struct-of-arrays;
+    // int *rob_trs_1 = (int*) malloc(num_rob_trs * sizeof(int));
+    // int *rob_trs_2 = (int*) malloc(num_rob_trs * sizeof(int));
+    // int *rob_trs_3 = (int*) malloc(num_rob_trs * sizeof(int));
+    // float *rob_pts_x = (float*) malloc(num_confs * num_rob_pts * sizeof(float));
+    // float *rob_pts_y = (float*) malloc(num_confs * num_rob_pts * sizeof(float));
+    // float *rob_pts_z = (float*) malloc(num_confs * num_rob_pts * sizeof(float));
+    // int *obs_trs_1 = (int*) malloc(num_obs_trs * sizeof(int));
+    // int *obs_trs_2 = (int*) malloc(num_obs_trs * sizeof(int));
+    // int *obs_trs_3 = (int*) malloc(num_obs_trs * sizeof(int));
+    // float *obs_pts_x = (float*) malloc(num_obs_pts * sizeof(float));
+    // float *obs_pts_y = (float*) malloc(num_obs_pts * sizeof(float));
+    // float *obs_pts_z = (float*) malloc(num_obs_pts * sizeof(float));
 
-    for (int i = 0; i < num_rob_trs; i++) {
-        rob_trs_1[i] = rob_trs[i].v1;
-        rob_trs_2[i] = rob_trs[i].v2;
-        rob_trs_3[i] = rob_trs[i].v3;
-    }
+    // for (int i = 0; i < num_rob_trs; i++) {
+    //     rob_trs_1[i] = rob_trs[i].v1;
+    //     rob_trs_2[i] = rob_trs[i].v2;
+    //     rob_trs_3[i] = rob_trs[i].v3;
+    // }
 
-    for (int i = 0; i < num_confs * num_rob_pts; i++) {
-        rob_pts_x[i] = rob_pts[i].x;
-        rob_pts_y[i] = rob_pts[i].y;
-        rob_pts_z[i] = rob_pts[i].z;
-    }
+    // for (int i = 0; i < num_confs * num_rob_pts; i++) {
+    //     rob_pts_x[i] = rob_pts[i].x;
+    //     rob_pts_y[i] = rob_pts[i].y;
+    //     rob_pts_z[i] = rob_pts[i].z;
+    // }
 
-    for (int i = 0; i < num_obs_trs; i++) {
-        obs_trs_1[i] = obs_trs[i].v1;
-        obs_trs_2[i] = obs_trs[i].v2;
-        obs_trs_3[i] = obs_trs[i].v3;
-    }
+    // for (int i = 0; i < num_obs_trs; i++) {
+    //     obs_trs_1[i] = obs_trs[i].v1;
+    //     obs_trs_2[i] = obs_trs[i].v2;
+    //     obs_trs_3[i] = obs_trs[i].v3;
+    // }
 
-    for (int i = 0; i < num_obs_pts; i++) {
-        obs_pts_x[i] = obs_pts[i].x;
-        obs_pts_y[i] = obs_pts[i].y;
-        obs_pts_z[i] = obs_pts[i].z;
-    }
+    // for (int i = 0; i < num_obs_pts; i++) {
+    //     obs_pts_x[i] = obs_pts[i].x;
+    //     obs_pts_y[i] = obs_pts[i].y;
+    //     obs_pts_z[i] = obs_pts[i].z;
+    // }
 
-    int device_count;
-    if (cudaGetDeviceCount(&device_count) != 0) {
-        printf("CUDA not loaded properly\n");
-    } else {
-        printf("CUDA loaded for %d device(s)\n", device_count);
-    }
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    cudaError_t err;
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // int device_count;
+    // if (cudaGetDeviceCount(&device_count) != 0) {
+    //     printf("CUDA not loaded properly\n");
+    // } else {
+    //     printf("CUDA loaded for %d device(s)\n", device_count);
+    // }
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // cudaError_t err;
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    // Copy the data onto the device
-    int *d_rob_trs_1;
-    int *d_rob_trs_2;
-    int *d_rob_trs_3;
-    cudaMalloc(&d_rob_trs_1, num_rob_trs * sizeof(int));
-    cudaMalloc(&d_rob_trs_2, num_rob_trs * sizeof(int));
-    cudaMalloc(&d_rob_trs_3, num_rob_trs * sizeof(int));
-    cudaMemcpy(d_rob_trs_1, rob_trs_1, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_rob_trs_2, rob_trs_2, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_rob_trs_3, rob_trs_3, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // // Copy the data onto the device
+    // int *d_rob_trs_1;
+    // int *d_rob_trs_2;
+    // int *d_rob_trs_3;
+    // cudaMalloc(&d_rob_trs_1, num_rob_trs * sizeof(int));
+    // cudaMalloc(&d_rob_trs_2, num_rob_trs * sizeof(int));
+    // cudaMalloc(&d_rob_trs_3, num_rob_trs * sizeof(int));
+    // cudaMemcpy(d_rob_trs_1, rob_trs_1, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_rob_trs_2, rob_trs_2, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_rob_trs_3, rob_trs_3, num_rob_trs * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    float *d_rob_pts_x;
-    float *d_rob_pts_y;
-    float *d_rob_pts_z;
-    cudaMalloc(&d_rob_pts_x, num_confs * num_rob_pts * sizeof(float));
-    cudaMalloc(&d_rob_pts_y, num_confs * num_rob_pts * sizeof(float));
-    cudaMalloc(&d_rob_pts_z, num_confs * num_rob_pts * sizeof(float));
-    cudaMemcpy(d_rob_pts_x, rob_pts_x, num_confs * num_rob_pts * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_rob_pts_y, rob_pts_y, num_confs * num_rob_pts * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_rob_pts_z, rob_pts_z, num_confs * num_rob_pts * sizeof(float), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // float *d_rob_pts_x;
+    // float *d_rob_pts_y;
+    // float *d_rob_pts_z;
+    // cudaMalloc(&d_rob_pts_x, num_confs * num_rob_pts * sizeof(float));
+    // cudaMalloc(&d_rob_pts_y, num_confs * num_rob_pts * sizeof(float));
+    // cudaMalloc(&d_rob_pts_z, num_confs * num_rob_pts * sizeof(float));
+    // cudaMemcpy(d_rob_pts_x, rob_pts_x, num_confs * num_rob_pts * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_rob_pts_y, rob_pts_y, num_confs * num_rob_pts * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_rob_pts_z, rob_pts_z, num_confs * num_rob_pts * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    int *d_obs_trs_1;
-    int *d_obs_trs_2;
-    int *d_obs_trs_3;
-    cudaMalloc(&d_obs_trs_1, num_obs_trs * sizeof(int));
-    cudaMalloc(&d_obs_trs_2, num_obs_trs * sizeof(int));
-    cudaMalloc(&d_obs_trs_3, num_obs_trs * sizeof(int));
-    cudaMemcpy(d_obs_trs_1, obs_trs_1, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_obs_trs_2, obs_trs_2, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_obs_trs_3, obs_trs_3, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // int *d_obs_trs_1;
+    // int *d_obs_trs_2;
+    // int *d_obs_trs_3;
+    // cudaMalloc(&d_obs_trs_1, num_obs_trs * sizeof(int));
+    // cudaMalloc(&d_obs_trs_2, num_obs_trs * sizeof(int));
+    // cudaMalloc(&d_obs_trs_3, num_obs_trs * sizeof(int));
+    // cudaMemcpy(d_obs_trs_1, obs_trs_1, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_obs_trs_2, obs_trs_2, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_obs_trs_3, obs_trs_3, num_obs_trs * sizeof(int), cudaMemcpyHostToDevice);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    float *d_obs_pts_x;
-    float *d_obs_pts_y;
-    float *d_obs_pts_z;
-    cudaMalloc(&d_obs_pts_x, num_confs * num_obs_pts * sizeof(float));
-    cudaMalloc(&d_obs_pts_y, num_confs * num_obs_pts * sizeof(float));
-    cudaMalloc(&d_obs_pts_z, num_confs * num_obs_pts * sizeof(float));
-    cudaMemcpy(d_obs_pts_x, obs_pts_x, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_obs_pts_y, obs_pts_y, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_obs_pts_z, obs_pts_z, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // float *d_obs_pts_x;
+    // float *d_obs_pts_y;
+    // float *d_obs_pts_z;
+    // cudaMalloc(&d_obs_pts_x, num_confs * num_obs_pts * sizeof(float));
+    // cudaMalloc(&d_obs_pts_y, num_confs * num_obs_pts * sizeof(float));
+    // cudaMalloc(&d_obs_pts_z, num_confs * num_obs_pts * sizeof(float));
+    // cudaMemcpy(d_obs_pts_x, obs_pts_x, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_obs_pts_y, obs_pts_y, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaMemcpy(d_obs_pts_z, obs_pts_z, num_confs * num_obs_pts * sizeof(float), cudaMemcpyHostToDevice);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
     bool *d_valid_conf;
     cudaMalloc(&d_valid_conf, num_confs * sizeof(bool));
@@ -1036,8 +1048,8 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
 
     // Call the kernel;
     dim3 thread(COARSEN_SZ, CONFS_PER_BLOCK, 1);
-    narrowPhaseKernel_coarse<<<(num_confs - 1) / CONFS_PER_BLOCK + 1, thread>>>(num_confs, num_rob_trs,
-        num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);
+    // narrowPhaseKernel_coarse<<<(num_confs - 1) / CONFS_PER_BLOCK + 1, thread>>>(num_confs, num_rob_trs,
+    //     num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);
 
     // narrowPhaseKernel_sep<<<(num_confs - 1) / BLOCK_SIZE + 1, BLOCK_SIZE>>>(num_confs, num_rob_trs,
     //     num_rob_pts, num_obs_trs, num_obs_pts, d_rob_trs_1, d_rob_trs_2, d_rob_trs_3, d_rob_pts_x, d_rob_pts_y, d_rob_pts_z, d_obs_trs_1, d_obs_trs_2, d_obs_trs_3, d_obs_pts_x, d_obs_pts_y, d_obs_pts_z, d_valid_conf);
@@ -1048,72 +1060,72 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
         printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
     #endif
 
-    // Copy the data back
-    cudaMemcpy(valid_conf, d_valid_conf, num_confs * sizeof(bool), cudaMemcpyDeviceToHost);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // // Copy the data back
+    // cudaMemcpy(valid_conf, d_valid_conf, num_confs * sizeof(bool), cudaMemcpyDeviceToHost);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    // Free the memory
-    free(rob_trs_1);
-    free(rob_trs_2);
-    free(rob_trs_3);
-    cudaFree(d_rob_trs_1);
-    cudaFree(d_rob_trs_2);
-    cudaFree(d_rob_trs_3);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // // Free the memory
+    // free(rob_trs_1);
+    // free(rob_trs_2);
+    // free(rob_trs_3);
+    // cudaFree(d_rob_trs_1);
+    // cudaFree(d_rob_trs_2);
+    // cudaFree(d_rob_trs_3);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    free(rob_pts_x);
-    free(rob_pts_y);
-    free(rob_pts_z);
-    cudaFree(d_rob_pts_x);
-    cudaFree(d_rob_pts_y);
-    cudaFree(d_rob_pts_z);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // free(rob_pts_x);
+    // free(rob_pts_y);
+    // free(rob_pts_z);
+    // cudaFree(d_rob_pts_x);
+    // cudaFree(d_rob_pts_y);
+    // cudaFree(d_rob_pts_z);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    free(obs_trs_1);
-    free(obs_trs_2);
-    free(obs_trs_3);
-    cudaFree(d_obs_trs_1);
-    cudaFree(d_obs_trs_2);
-    cudaFree(d_obs_trs_3);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // free(obs_trs_1);
+    // free(obs_trs_2);
+    // free(obs_trs_3);
+    // cudaFree(d_obs_trs_1);
+    // cudaFree(d_obs_trs_2);
+    // cudaFree(d_obs_trs_3);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    free(obs_pts_x);
-    free(obs_pts_y);
-    free(obs_pts_z);
-    cudaFree(d_obs_pts_x);
-    cudaFree(d_obs_pts_y);
-    cudaFree(d_obs_pts_z);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    #if VERBOSE
-        err = cudaGetLastError();
-        printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
-    #endif
+    // free(obs_pts_x);
+    // free(obs_pts_y);
+    // free(obs_pts_z);
+    // cudaFree(d_obs_pts_x);
+    // cudaFree(d_obs_pts_y);
+    // cudaFree(d_obs_pts_z);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // #if VERBOSE
+    //     err = cudaGetLastError();
+    //     printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // #endif
 
-    cudaFree(d_valid_conf);
-    cudaDeviceSynchronize();
-    fflush(stdout);
-    err = cudaGetLastError();
-    printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
+    // cudaFree(d_valid_conf);
+    // cudaDeviceSynchronize();
+    // fflush(stdout);
+    // err = cudaGetLastError();
+    // printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
 
 }

@@ -192,9 +192,7 @@ void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vecto
         }
 
         for(int t = 0; t < (n - 2); ++t)
-        {struct Matrix4f {
-    float m[4][4];
-};
+        {
           if((!has_texture) && (!has_normal))
           {
             tri.v1 = atoi(data[0]) - 1;
@@ -221,6 +219,100 @@ void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vecto
             }
           }
           triangles.push_back(tri);
+        }
+      }
+    }
+  }
+}
+
+void loadOBJFile(const char* filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
+                                        std::vector<int>& v1, std::vector<int>& v2, std::vector<int>& v3){
+
+  FILE* file = fopen(filename, "rb");
+  if(!file)
+  {
+    std::cerr << "file not exist" << std::endl;
+    return;
+  }
+
+  bool has_normal = false;
+  bool has_texture = false;
+  char line_buffer[2000];
+  while(fgets(line_buffer, 2000, file))
+  {
+    char* first_token = strtok(line_buffer, "\r\n\t ");
+    if(!first_token || first_token[0] == '#' || first_token[0] == 0)
+      continue;
+
+    switch(first_token[0])
+    {
+    case 'v':
+      {
+        if(first_token[1] == 'n')
+        {
+          strtok(NULL, "\t ");
+          strtok(NULL, "\t ");
+          strtok(NULL, "\t ");
+          has_normal = true;
+        }
+        else if(first_token[1] == 't')
+        {
+          strtok(NULL, "\t ");
+          strtok(NULL, "\t ");
+          has_texture = true;
+        }
+        else
+        {
+          float x_val = (float)atof(strtok(NULL, "\t "));
+          float y_val = (float)atof(strtok(NULL, "\t "));
+          float z_val = (float)atof(strtok(NULL, "\t "));
+          x.push_back(x_val);
+          y.push_back(y_val);
+          z.push_back(z_val);
+        }
+      }
+      break;
+    case 'f':
+      {
+        Triangle tri;
+        char* data[30];
+        int n = 0;
+        while((data[n] = strtok(NULL, "\t \r\n")) != NULL)
+        {
+          if(strlen(data[n]))
+            n++;
+        }
+
+        for(int t = 0; t < (n - 2); ++t)
+        {
+          if((!has_texture) && (!has_normal))
+          {
+            tri.v1 = atoi(data[0]) - 1;
+            tri.v2 = atoi(data[1]) - 1;
+            tri.v3 = atoi(data[2]) - 1;
+          }
+          else
+          {
+            const char *v1;
+            for(int i = 0; i < 3; i++)
+            {
+              // vertex ID
+              if(i == 0)
+                v1 = data[0];
+              else
+                v1 = data[t + i];
+
+              if (i == 0)
+                tri.v1 = atoi(v1) - 1;
+              else if (i == 1)
+                tri.v2 = atoi(v1) - 1;
+              else
+                tri.v3 = atoi(v1) - 1;
+            }
+          }
+          v1.push_back(tri.v1);
+          v2.push_back(tri.v2);
+          v3.push_back(tri.v3);
         }
       }
     }

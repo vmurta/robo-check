@@ -178,3 +178,24 @@ void generateAABBBaseline(Vector3f* vertices, unsigned int numVertices,
         }
     }
 }
+
+// generateAABBBaseline- Generate AABBs for all configurations serially
+void generateAABBBaseline(std::vector<float> &x, std::vector<float> &y, std::vector<float> &z, AABB* botBounds) 
+{
+    // Loop over every vertex in each configuration
+    botBounds[0].x_min = FLT_MAX;
+    botBounds[0].y_min = FLT_MAX;
+    botBounds[0].z_min = FLT_MAX;
+    botBounds[0].x_max = -FLT_MAX;
+    botBounds[0].y_max = -FLT_MAX;
+    botBounds[0].z_max = -FLT_MAX;
+    for(int j = 0; j < x.size(); ++j)
+    {
+        botBounds[0].x_min = min(botBounds[0].x_min, x[j]);
+        botBounds[0].y_min = min(botBounds[0].y_min, y[j]);
+        botBounds[0].z_min = min(botBounds[0].z_min, z[j]);
+        botBounds[0].x_max = max(botBounds[0].x_max, x[j]);
+        botBounds[0].y_max = max(botBounds[0].y_max, y[j]);
+        botBounds[0].z_max = max(botBounds[0].z_max, z[j]);
+    }
+}

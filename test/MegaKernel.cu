@@ -4,7 +4,7 @@
 #define MEGA_BLOCK_SIZE 32
 #define TRIANGLE_BUFFER_SIZE 128
 
-// Set -DLOCAL_TESTING=1 to run CPU tests on local machine (not on rai)
+#ifndef COALESCE
 extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
@@ -464,3 +464,4 @@ void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs){
     checkCudaCall(cudaFree(valid_conf_d));
     std::cout << "Copied back memory and synchronized" << std::endl;
 }
+#endif

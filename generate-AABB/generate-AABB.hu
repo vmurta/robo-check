@@ -13,6 +13,10 @@ Function signatures and support for the AABB generation kernels
 // generateAABB- Generate AABBs for all configurations parallelly
 void generateAABB(Vector3f* vertices, unsigned int numVertices, unsigned int numConfigs, AABB* botBounds);
 
+//helper function to generate a single aabb for a single configuration
+void generateAABBBaseline(std::vector<float> &x, std::vector<float> &y, std::vector<float> &z, AABB* botBounds);
+
+
 // generateAABBBaseline- Generate AABBs for all configurations serially
 void generateAABBBaseline(Vector3f* vertices, unsigned int numVertices, unsigned int numConfigs, AABB* botBounds);
 
