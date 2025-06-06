@@ -1,4 +1,3 @@
-#include "../Utils_rai.h"
 #include "../narrow-phase/narrow-phase.hu"
 #include "../broad-phase/broad-phase-fused.hu"
 

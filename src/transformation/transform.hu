@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../Utils_rai.h"
 
 #define TRANSFORM_SIZE 32
 #define TRANSFORM_BLOCK_SIZE 128

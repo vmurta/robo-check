@@ -4,7 +4,6 @@ Function signatures and support for the AABB generation kernels
 
 #pragma once
 
-#include "../Utils_rai.h"
 
 #define AABB_BLOCK_SIZE 128
 #define AABB_BLOCK_SIZE_X 792
