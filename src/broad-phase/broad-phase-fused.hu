@@ -1,14 +1,14 @@
 #pragma once
 
 #include "../Utils.h"
-// #include "../transformation/transform.hu"
 #include "../generate-AABB/generate-AABB.hu"
-#include "../broad-phase/broad-phase.hu"
+// #include "../broad-phase/broad-phase.hu"
 
 
-void broadPhaseFused(std::vector<Configuration> &confs, bool *valid_conf);
-
-void broadPhaseFused_sep(std::vector<Configuration> &confs, bool *valid_conf);
+void broadPhaseFused(std::vector<Configuration> &confs, bool *valid_conf,
+        const char * rob_file ="./data/models/alpha1.0/robot.obj", const char * obs_file = "./data/models/alpha1.0/obstacle.obj");
+void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf,
+        const char * rob_file ="./data/models/alpha1.0/robot.obj", const char * obs_file = "./data/models/alpha1.0/obstacle.obj");
 
 __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices);
@@ -28,6 +28,6 @@ inline __device__ Vector3f transformVector(const Vector3f &v, const Matrix3f &R,
 
 }
 
-__device__ Vector3f transformVector(Vector3f v, Matrix4f M);
+__device__ Vector3f transformVector(Vector3f &v, Matrix4f &M);
 
 inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax);

@@ -78,14 +78,10 @@ void readConfigurationFromFile(const std::string& filename, std::vector<Configur
         throw std::runtime_error("Failed to open file " + filename);
     }
 
-    int validCount = 0;
-    int invalidCount = 0;
     std::string firstLine;
     std::getline(file, firstLine);
-
     std::istringstream lineStream(firstLine);
     std::string word;
-
 
     Configuration config;
     while (file >> config.x >> config.y >> config.z >> config.pitch >> config.yaw >> config.roll) {
@@ -498,8 +494,6 @@ void checkConfsCPU(std::vector<ConfigurationTagged> &out, const std::vector<Conf
 
     // ************************************************************************//
 
-    int num_valid = 0;
-    int num_invalid = 0;
     // perform collision detection on each of the randomly generated configs
     for(int i = 0; i < confs.size(); i++){
       // std::cout << "starting conf " << i << std::endl;

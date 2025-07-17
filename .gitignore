@@ -16,3 +16,5 @@ tmp/*
 # Python files
 python/env/*
 python/__pycache__/*
+
+build/

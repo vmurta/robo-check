@@ -16,8 +16,6 @@
 #ifndef CONF_FILE
     #define CONF_FILE "./easy_confs10,000.conf"
 #endif
-#define ROB_FILE "./models/alpha1.0/robot.obj"
-#define OBS_FILE "./models/alpha1.0/obstacle.obj"
 
 #define COALESCE 1
 
@@ -43,7 +41,7 @@
 
 
 
-
+//TODO: use eigen types whenever possible
 struct Configuration {
     float x;
     float y;

@@ -1,9 +1,9 @@
-#include "../broad-phase/broad-phase-fused.hu"
-#include "../narrow-phase/narrow-phase.hu"
-#include "./MegaKernel.hu"
+#include "../src/broad-phase/broad-phase-fused.hu"
+#include "../src/narrow-phase/narrow-phase.hu"
+#include "../src/MegaKernel.hu"
 
 #include <fcl/fcl.h>
-#include "../Utils.h"
+#include "../src/Utils.h"
 
 #ifdef COALESCE
 
@@ -95,7 +95,7 @@ bool verify_generateAABB(AABB* botBoundsBaseline, AABB* botBoundsParallel, const
     return true;
 }
 
-void verifyConfs(bool *confs, size_t num_confs) {
+void confirmConfs(bool *confs, size_t num_confs) {
     size_t numValidConfs = 0;
 
     for (size_t i = 0; i < num_confs; i++) {
@@ -105,7 +105,7 @@ void verifyConfs(bool *confs, size_t num_confs) {
     // std::cout << "Valid configurations: " << numValidConfs << " (out of " << num_confs << ")" << std::endl;
 }
 
-void collisionCheckCPU(bool *valid, std::string confFile){
+void collisionCheckCPU(bool *valid, std::string confFile, const char* rob_file= "./data/models/alpha1.0/robot.obj", const char* obs_file=  "./data/models/alpha1.0/obstacle.obj") {
 
     // load configurations, should have  valids and 3010 invalids
     std::vector<Configuration> confs;
@@ -118,8 +118,8 @@ void collisionCheckCPU(bool *valid, std::string confFile){
     std::vector<fcl::Vector3f> obs_vertices;
     std::vector<fcl::Triangle> obs_triangles;
 
-    loadOBJFileFCL("../models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
-    loadOBJFileFCL("../models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
+    loadOBJFileFCL(rob_file, rob_vertices, rob_triangles);
+    loadOBJFileFCL(obs_file, obs_vertices, obs_triangles);
 
     std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
     auto cpu_start_time = std::chrono::high_resolution_clock::now();
@@ -140,9 +140,6 @@ void collisionCheckCPU(bool *valid, std::string confFile){
 
 
     // ************************************************************************//
-
-    int num_valid = 0;
-    int num_invalid = 0;
     // perform collision detection on each of the randomly generated configs
     for(int i = 0; i < confs.size(); i++){
       fcl::Transform3f transform = configurationToTransform(confs[i]);
@@ -174,11 +171,11 @@ void collisionCheckCPU(bool *valid, std::string confFile){
 
 }
 
-void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs){
+void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs, const char* rob_file = "./data/models/alpha1.0/robot.obj") {
     //Load Robot
     std::vector<fcl::Vector3f> fcl_rob_vertices;
     std::vector<fcl::Triangle> fcl_rob_triangles;
-    loadOBJFileFCL("./models/alpha1.0/robot.obj", fcl_rob_vertices, fcl_rob_triangles);
+    loadOBJFileFCL(rob_file, fcl_rob_vertices, fcl_rob_triangles);
     std::cout << "robot has " << fcl_rob_vertices.size() << " vertices " <<std::endl;
 
     std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
@@ -273,7 +270,7 @@ int main(int argc, char *argv[])
     }
 
 
-    verifyConfs(valid_conf, confs.size());
+    confirmConfs(valid_conf, confs.size());
 
     // delete[](gpu_transformed_vertices);
     delete[](bot_bounds_GPU);

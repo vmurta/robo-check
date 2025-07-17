@@ -17,6 +17,8 @@ __global__ void generateAABBPrimitiveKernel(Vector3f* vertices, unsigned int num
         botBoundsLocal.x_min = vertices[configOffset].x;
         botBoundsLocal.y_min = vertices[configOffset].y;
         botBoundsLocal.z_min = vertices[configOffset].z;
+        // could just copy the x_min, y_min, z_min to x_max, y_max, z_max 
+        // to avoid extra global memory access
         botBoundsLocal.x_max = vertices[configOffset].x;
         botBoundsLocal.y_max = vertices[configOffset].y;
         botBoundsLocal.z_max = vertices[configOffset].z;
@@ -37,6 +39,7 @@ __global__ void generateAABBPrimitiveKernel(Vector3f* vertices, unsigned int num
 // generateAABBKernel - Optimized parallel kernel to generate AABBs
 //      - Two dimension block - each yDim corresponds to one config, each xDim corresponds to vertices.
 //      - Uses reduction along xDim to calculate AABBs for each configuration.
+//TODO: Use struct of arrays instead of array of structs to improve memory access patterns.
 __global__ void generateAABBKernel(Vector3f* vertices, unsigned int numVertices, 
                     unsigned int numConfigs, AABB* botBounds) 
 {    

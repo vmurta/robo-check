@@ -1,4 +1,4 @@
-#include "generate-AABB.hu"
+#include "../src/generate-AABB/generate-AABB.hu"
 
 void generateTestVertices(Vector3f* robPts)
 {
@@ -47,13 +47,6 @@ void test_generateAABBBaseline(AABB* botBounds, const int numConfigs)
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     std::cout << "Baseline execution time: " << elapsed_time.count() << " milliseconds" << std::endl;
-
-    // for(int i = 0; i < numConfigs; ++i)
-    // {
-    //     std::cout   << "(" << botBounds[i].x_max << " " << botBounds[i].x_min
-    //                 << " " << botBounds[i].y_max << " " << botBounds[i].y_min
-    //                 << " " << botBounds[i].z_max << " " << botBounds[i].z_min << ")" << std::endl;
-    // }
 }
 
 void test_generateAABB(AABB* botBounds, const int numConfigs)
@@ -71,13 +64,6 @@ void test_generateAABB(AABB* botBounds, const int numConfigs)
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     std::cout << "GPU execution time: " << elapsed_time.count() << " milliseconds" << std::endl;
-
-    // for(int i = 0; i < numConfigs; ++i)
-    // {
-    //     std::cout   << "(" << botBounds[i].x_max << " " << botBounds[i].x_min
-    //                 << " " << botBounds[i].y_max << " " << botBounds[i].y_min
-    //                 << " " << botBounds[i].z_max << " " << botBounds[i].z_min << ")" << std::endl;
-    // }
 }
 
 bool verify_generateAABB(AABB* botBoundsBaseline, AABB* botBoundsParallel, const int numConfigs)
@@ -93,23 +79,4 @@ bool verify_generateAABB(AABB* botBoundsBaseline, AABB* botBoundsParallel, const
             return false;
     }
     return true;
-}
-
-int main()
-{
-    std::cout << "====AABB tests====" << std::endl;
-    const int numConfigs = 2;
-    std::cout << "Running AABB baseline test..." << std::endl;
-    AABB botBoundsBaseline[numConfigs];
-    test_generateAABBBaseline(botBoundsBaseline, numConfigs);
-    std::cout << "Running AABB parallel kernel test..." << std::endl;
-    AABB botBoundsParallel[numConfigs];
-    test_generateAABB(botBoundsParallel, numConfigs);
-    std::cout << "Verifying AABB parallel kernel test..." << std::endl;
-    if(verify_generateAABB(botBoundsBaseline, botBoundsParallel, numConfigs))
-        std::cout << "[PASS] Parallel implementation matches serial implementation." << std::endl;
-    else
-        std::cout << "[FAIL] Parallel implementation does not match serial implementation." << std::endl;
-    std::cout << "==================" << std::endl;
-    return 0;
 }

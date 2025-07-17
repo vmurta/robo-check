@@ -81,7 +81,8 @@ __device__ Matrix3f createRotationMatrix(const Configuration config) {
 
 
 
-__device__ Vector3f transformVector(Vector3f v, Matrix4f M) {
+// //TODO: this is incredibly inefficient, update
+__device__ Vector3f transformVector(Vector3f &v, Matrix4f &M) {
     // Create a 4D homogeneous vector from the 3D vector
     float v_h[4] = {v.x, v.y, v.z, 1};
 
@@ -109,8 +110,6 @@ inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, fl
     // Done without any control divergence!
     return fstMin <= sndMax && sndMin <= fstMax;
 }
-
-// __constant__ Triangle base_obs_triangles[2500];
 
 #ifndef COALESCE
 __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, Vector3f *transformed_robot_vertices,
@@ -208,7 +207,7 @@ __global__ void broadPhaseFusedKernel_sep(Configuration *configs, const AABB *ob
 #endif
 
 #ifndef COALESCE
-void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
+void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, const char *rob_file, const char * obs_file)
 {
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
@@ -216,14 +215,14 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
     //Load Robot
     std::vector<Vector3f> rob_vertices;
     std::vector<Triangle> rob_triangles;
-    loadOBJFile(ROB_FILE, rob_vertices, rob_triangles);
+    loadOBJFile(rob_file, rob_vertices, rob_triangles);
     std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
     std::cout << "Robot has " << rob_triangles.size() << " triangles " <<std::endl;
 
     //Load Obstacles
     std::vector<Vector3f> obs_vertices;
     std::vector<Triangle> obs_triangles;
-    loadOBJFile(OBS_FILE, obs_vertices, obs_triangles);
+    loadOBJFile(obs_file, obs_vertices, obs_triangles);
     std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
     std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
@@ -362,7 +361,7 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf)
 }
 
 #else
-void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf)
+void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, const char *rob_file, const char * obs_file)
 {
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
@@ -376,7 +375,7 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf)
     std::vector<int> rob_trs_1;
     std::vector<int> rob_trs_2;
     std::vector<int> rob_trs_3;
-    loadOBJFile(ROB_FILE, rob_x, rob_y, rob_z, rob_trs_1, rob_trs_2, rob_trs_3);
+    loadOBJFile(rob_file, rob_x, rob_y, rob_z, rob_trs_1, rob_trs_2, rob_trs_3);
 
     // std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
     // std::cout << "Robot has " << rob_triangles.size() << " triangles " <<std::endl;
@@ -388,7 +387,7 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf)
     std::vector<int> obs_trs_1;
     std::vector<int> obs_trs_2;
     std::vector<int> obs_trs_3;
-    loadOBJFile(OBS_FILE, obs_x, obs_y, obs_z, obs_trs_1, obs_trs_2, obs_trs_3);
+    loadOBJFile(obs_file, obs_x, obs_y, obs_z, obs_trs_1, obs_trs_2, obs_trs_3);
 
 
 

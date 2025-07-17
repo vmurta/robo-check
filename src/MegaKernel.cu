@@ -383,21 +383,21 @@ __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB,
     // printf("total number of triangle intersections for block was %d\n", total_num_tris);
 }
 
-void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs){
+void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs, const char *rob_file, const char *obs_file){
     int device_count;
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
 
     //Load Robot
     std::vector<Vector3f> rob_vertices;
     std::vector<Triangle> rob_triangles;
-    loadOBJFile(ROB_FILE, rob_vertices, rob_triangles);
+    loadOBJFile(rob_file, rob_vertices, rob_triangles);
     std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
     std::cout << "Robot has " << rob_triangles.size() << " triangles " <<std::endl;
 
     //Load Obstacles
     std::vector<Vector3f> obs_vertices;
     std::vector<Triangle> obs_triangles;
-    loadOBJFile(OBS_FILE, obs_vertices, obs_triangles);
+    loadOBJFile(obs_file, obs_vertices, obs_triangles);
     std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
     std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
