@@ -21,17 +21,17 @@ __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
 __constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 
 #else
-__constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+__constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+__constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 #endif
 
 
-inline bool verticesEqual(const Vector3f &v1, const fcl::Vector3f &v2){
-  return (fabs(v1.x -v2[0]) +
-            fabs(v1.y -v2[1]) +
-            fabs(v1.z -v2[2]) < 1e-5);
+inline bool verticesEqual(const Eigen::Vector3f &v1, const fcl::Vector3f &v2){
+  return (  fabs(v1(0) -v2[0]) +
+            fabs(v1(1) -v2[1]) +
+            fabs(v1(2) -v2[2]) < 1e-5);
   // return false;
 }
 
@@ -211,7 +211,7 @@ int main(int argc, char *argv[])
     readConfigurationFromFile(confFile, confs);
     std::cout << "Read " << confs.size() << " configurations" << std::endl;
 
-    Vector3f* gpu_transformed_vertices = new Vector3f[confs.size() * 792];
+    Eigen::Vector3f* gpu_transformed_vertices = new Eigen::Vector3f[confs.size() * 792];
     AABB* bot_bounds_GPU = new AABB[confs.size()];
 
     bool *valid_conf = new bool[confs.size()];

@@ -5,9 +5,9 @@
 #define TRIANGLE_BUFFER_SIZE 128
 
 #ifndef COALESCE
-extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
 
@@ -17,7 +17,7 @@ inline __device__ bool overlaps(const AABB &a1, const AABB &a2){
            (a1.z_min <= a2.z_max && a1.z_max >= a2.z_min);
 }
 
-__host__ __device__ AABB generateTriangleAABB(const Vector3f &p1, const Vector3f &p2, const Vector3f &p3){
+__host__ __device__ AABB generateTriangleAABB(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2, const Eigen::Vector3f &p3){
     AABB aabb;
     aabb.x_min = min(p1.x, min(p2.x, p3.x));
     aabb.y_min = min(p1.y, min(p2.y, p3.y));
@@ -28,14 +28,14 @@ __host__ __device__ AABB generateTriangleAABB(const Vector3f &p1, const Vector3f
     return aabb;
 }
 
-void generateTriAABBs(const std::vector<Triangle> &triangles, const std::vector<Vector3f> &points, std::vector<AABB> &aabbs){
+void generateTriAABBs(const std::vector<Triangle> &triangles, const std::vector<Eigen::Vector3f> &points, std::vector<AABB> &aabbs){
     for (int i = 0; i < triangles.size(); i++){
         aabbs.push_back(generateTriangleAABB(points[triangles[i].v1], points[triangles[i].v2], points[triangles[i].v3]));
     }
 }
 __device__ bool triangles_valid(const Triangle &rob_tri, const Triangle &obs_tri,
-                                    const Vector3f *rob_pts) {
-    Vector3f Nr;
+                                    const Eigen::Vector3f *rob_pts) {
+    Eigen::Vector3f Nr;
     float dr;
     bool valid = true;
     bool req_coplanar = false;
@@ -48,18 +48,18 @@ __device__ bool triangles_valid(const Triangle &rob_tri, const Triangle &obs_tri
         //     printf("yes really \n");
         // }
     }
-    Vector3f obs_v1 = base_obs_vertices[obs_tri.v1];
-    Vector3f obs_v2 = base_obs_vertices[obs_tri.v2];
-    Vector3f obs_v3 = base_obs_vertices[obs_tri.v3];
+    Eigen::Vector3f obs_v1 = base_obs_vertices[obs_tri.v1];
+    Eigen::Vector3f obs_v2 = base_obs_vertices[obs_tri.v2];
+    Eigen::Vector3f obs_v3 = base_obs_vertices[obs_tri.v3];
 
-    Vector3f distO = compute_signed_dists(Nr, dr, obs_v1, obs_v2, obs_v3);
+    Eigen::Vector3f distO = compute_signed_dists(Nr, dr, obs_v1, obs_v2, obs_v3);
 
-    // Vector3f distO = compute_signed_dists(Nr, dr, base_obs_vertices[obs_tri.v1], base_obs_vertices[obs_tri.v2], base_obs_vertices[obs_tri.v3]);
+    // Eigen::Vector3f distO = compute_signed_dists(Nr, dr, base_obs_vertices[obs_tri.v1], base_obs_vertices[obs_tri.v2], base_obs_vertices[obs_tri.v3]);
     if (no_overlap(distO)) {
         return true;
     }
 
-    Vector3f No;
+    Eigen::Vector3f No;
     float do_;
     compute_plane(obs_v1, obs_v2, obs_v3, &No, &do_);
 
@@ -68,16 +68,16 @@ __device__ bool triangles_valid(const Triangle &rob_tri, const Triangle &obs_tri
         return true;
     }
 
-    Vector3f distR = compute_signed_dists(No, do_, rob_tri, rob_pts);
+    Eigen::Vector3f distR = compute_signed_dists(No, do_, rob_tri, rob_pts);
     if (no_overlap(distR)) {
         return true;
     }
 
-    Vector3f D, O;
+    Eigen::Vector3f D, O;
     compute_intersect_line(Nr, dr, No, do_, &D, &O);
 
     Triangle ctr, cto;
-    Vector3f cdr, cdo;
+    Eigen::Vector3f cdr, cdo;
     canonicalize_triangle(rob_tri, distR, &ctr, &cdr);
     canonicalize_triangle(obs_tri, distO, &cto, &cdo);
 
@@ -115,18 +115,18 @@ __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB,
 
     //stage one variables
     ////////////////////////////////////////////////////////////////////////////////
-    __shared__ Vector3f transformed_vertices[NUM_ROB_VERTICES];
+    __shared__ Eigen::Vector3f transformed_vertices[NUM_ROB_VERTICES];
     const int num_configs = _num_configs;
     size_t config_idx;
-    __shared__ Vector3f smin[MEGA_BLOCK_SIZE];
-    __shared__ Vector3f smax[MEGA_BLOCK_SIZE];
-    Vector3f transformed_robot_vertex;
-    Matrix3f rotation_matrix;
-    Vector3f translation_vector;
+    __shared__ Eigen::Vector3f smin[MEGA_BLOCK_SIZE];
+    __shared__ Eigen::Vector3f smax[MEGA_BLOCK_SIZE];
+    Eigen::Vector3f transformed_robot_vertex;
+    Eigen::Matrix3d rotation_matrix;
+    Eigen::Vector3f translation_vector;
 
     // local vectors for keeping track of AABBs
-    Vector3f tmin;
-    Vector3f tmax;
+    Eigen::Vector3f tmin;
+    Eigen::Vector3f tmax;
 
     Configuration conf;
     AABB obsAABB = *p_obsAABB;
@@ -173,8 +173,8 @@ __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB,
         // stage one
         // transformation and big AABB checking
         rotation_matrix = createRotationMatrix(conf);
-        translation_vector = Vector3f(conf.x, conf.y, conf.z);
-        // Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
+        translation_vector = Eigen::Vector3f(conf.x, conf.y, conf.z);
+        // Eigen::Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
         valid = true;
         for(int vertex_idx = threadIdx.x ; vertex_idx < NUM_ROB_VERTICES; vertex_idx += MEGA_BLOCK_SIZE)
         {
@@ -182,13 +182,13 @@ __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB,
         }
         __syncthreads();
         // // local variables for AABB computation
-        // Vector3f tmin = transformed_vertices[0];
-        // Vector3f tmax = transformed_vertices[0];
+        // Eigen::Vector3f tmin = transformed_vertices[0];
+        // Eigen::Vector3f tmax = transformed_vertices[0];
 
         // if(threadIdx.x == 0){
 
         //     for(int j = 0; j < NUM_ROB_VERTICES; j++) {
-        //         Vector3f v = transformed_vertices[j];
+        //         Eigen::Vector3f v = transformed_vertices[j];
         //         tmin.x = fminf(tmin.x, v.x);
         //         tmin.y = fminf(tmin.y, v.y);
         //         tmin.z = fminf(tmin.z, v.z);
@@ -212,7 +212,7 @@ __global__ void MegaKernel(const  Configuration *configs, const AABB *p_obsAABB,
 
         // compute AABB for each vertex using thread-local variables
         for(int j = threadIdx.x; j < NUM_ROB_VERTICES; j += MEGA_BLOCK_SIZE) {
-            Vector3f v = transformed_vertices[j];
+            Eigen::Vector3f v = transformed_vertices[j];
             tmin.x = fminf(tmin.x, v.x);
             tmin.y = fminf(tmin.y, v.y);
             tmin.z = fminf(tmin.z, v.z);
@@ -388,35 +388,35 @@ void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs, const
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
 
     //Load Robot
-    std::vector<Vector3f> rob_vertices;
+    std::vector<Eigen::Vector3f> rob_vertices;
     std::vector<Triangle> rob_triangles;
     loadOBJFile(rob_file, rob_vertices, rob_triangles);
     std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
     std::cout << "Robot has " << rob_triangles.size() << " triangles " <<std::endl;
 
     //Load Obstacles
-    std::vector<Vector3f> obs_vertices;
+    std::vector<Eigen::Vector3f> obs_vertices;
     std::vector<Triangle> obs_triangles;
     loadOBJFile(obs_file, obs_vertices, obs_triangles);
     std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
     std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
-    // checkCudaCall(cudaMalloc(&d_rob_transformed_points, rob_vertices.size() * configs.size() * sizeof(Vector3f)));
+    // checkCudaCall(cudaMalloc(&d_rob_transformed_points, rob_vertices.size() * configs.size() * sizeof(Eigen::Vector3f)));
     // checkCudaCall(cudaMalloc(&d_rob_triangles, rob_triangles.size() * sizeof(Triangle)));
-    // checkCudaMem(cudaMemcpy(d_rob_points, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaMem(cudaMemcpy(d_rob_points, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     // checkCudaMem(cudaMemcpy(d_rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f)));
+    checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f)));
     checkCudaMem(cudaMemcpyToSymbol(base_robot_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle)));
     std::cout << "Copied the robot vertices and triangles " << std::endl;
 
-    checkCudaMem(cudaMemcpyToSymbol(base_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f)));
+    checkCudaMem(cudaMemcpyToSymbol(base_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f)));
     checkCudaMem(cudaMemcpyToSymbol(base_obs_triangles, obs_triangles.data(), obs_triangles.size() * sizeof(Triangle)));
-    // Vector3f *d_obs_points;
+    // Eigen::Vector3f *d_obs_points;
     // Triangle *d_obs_triangles;
 
-    // checkCudaCall(cudaMalloc(&d_obs_points, obs_vertices.size() * sizeof(Vector3f)));
+    // checkCudaCall(cudaMalloc(&d_obs_points, obs_vertices.size() * sizeof(Eigen::Vector3f)));
     // checkCudaCall(cudaMalloc(&d_obs_triangles, obs_triangles.size() * sizeof(Triangle)));
-    // checkCudaMem(cudaMemcpy(d_obs_points, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaMem(cudaMemcpy(d_obs_points, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     // checkCudaMem(cudaMemcpy(d_obs_triangles, obs_triangles.data(), obs_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     std::cout << "Copied the obstacle vertices and triangles " << std::endl;
 

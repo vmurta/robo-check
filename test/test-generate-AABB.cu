@@ -1,22 +1,22 @@
 #include "../src/generate-AABB/generate-AABB.hu"
 
-void generateTestVertices(Vector3f* robPts)
+void generateTestVertices(Eigen::Vector3f* robPts)
 {
-    Vector3f pt0(2, 3, 4);
-    Vector3f pt1(0, 1, 2);
-    Vector3f pt2(0, 2, 0);
+    Eigen::Vector3f pt0(2, 3, 4);
+    Eigen::Vector3f pt1(0, 1, 2);
+    Eigen::Vector3f pt2(0, 2, 0);
 
-    Vector3f pt3(2, 2, 2);
-    Vector3f pt4(100, 0, 1);
-    Vector3f pt5(100, 1, 2);
+    Eigen::Vector3f pt3(2, 2, 2);
+    Eigen::Vector3f pt4(100, 0, 1);
+    Eigen::Vector3f pt5(100, 1, 2);
 
-    Vector3f pt6(100, 2, 0);
-    Vector3f pt7(102, 2, 2);
-    Vector3f pt8(102, 2, 80);
+    Eigen::Vector3f pt6(100, 2, 0);
+    Eigen::Vector3f pt7(102, 2, 2);
+    Eigen::Vector3f pt8(102, 2, 80);
 
-    Vector3f pt9(12, 22, 4);
-    Vector3f pt10(16, 6, 2);
-    Vector3f pt11(13, 21, 27);
+    Eigen::Vector3f pt9(12, 22, 4);
+    Eigen::Vector3f pt10(16, 6, 2);
+    Eigen::Vector3f pt11(13, 21, 27);
 
     robPts[0] = pt0;
     robPts[1] = pt1;
@@ -35,7 +35,7 @@ void generateTestVertices(Vector3f* robPts)
 void test_generateAABBBaseline(AABB* botBounds, const int numConfigs)
 {
     const int numVertices = 6;
-    Vector3f robPts[numVertices * numConfigs];
+    Eigen::Vector3f robPts[numVertices * numConfigs];
 
     generateTestVertices(robPts);
 
@@ -52,7 +52,7 @@ void test_generateAABBBaseline(AABB* botBounds, const int numConfigs)
 void test_generateAABB(AABB* botBounds, const int numConfigs)
 {
     const int numVertices = 6;
-    Vector3f robPts[numVertices * numConfigs];
+    Eigen::Vector3f robPts[numVertices * numConfigs];
 
     generateTestVertices(robPts);
 

@@ -3,9 +3,9 @@
 #define TRANSFORM_BLOCK_SIZE 32
 
 #ifndef COALESCE
-extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
 #else
@@ -23,7 +23,7 @@ extern __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 #endif
 
-__device__ Matrix4f createTransformationMatrix(const Configuration config) {
+__device__ Eigen::Matrix4f createTransformationMatrix(const Configuration config) {
 
 
     float cosB = cos(config.pitch);
@@ -33,28 +33,28 @@ __device__ Matrix4f createTransformationMatrix(const Configuration config) {
     float cosC = cos(config.roll);
     float sinC = sin(config.roll);
 
-    Matrix4f transform;
-    transform.m[0][0] = cosA * cosB;
-    transform.m[0][1] = cosA * sinB * sinC - sinA * cosC;
-    transform.m[0][2] = cosA *  sinB * cosC + sinA * sinC;
-    transform.m[0][3] = config.x;
-    transform.m[1][0] = sinA * cosB;
-    transform.m[1][1] = sinA * sinB * sinC + cosA * cosC;
-    transform.m[1][2] = sinA * sinB * cosC - cosA * sinC;
-    transform.m[1][3] = config.y;
-    transform.m[2][0] = -sinB;
-    transform.m[2][1] = cosB * sinC;
-    transform.m[2][2] = cosB * cosC;
-    transform.m[2][3] = config.z;
-    transform.m[3][0] = 0;
-    transform.m[3][1] = 0;
-    transform.m[3][2] = 0;
-    transform.m[3][3] = 1;
+    Eigen::Matrix4f transform;
+    transform(0,0) = cosA * cosB;
+    transform(0,1) = cosA * sinB * sinC - sinA * cosC;
+    transform(0,2) = cosA *  sinB * cosC + sinA * sinC;
+    transform(0,3) = config.x;
+    transform(1,0) = sinA * cosB;
+    transform(1,1) = sinA * sinB * sinC + cosA * cosC;
+    transform(1,2) = sinA * sinB * cosC - cosA * sinC;
+    transform(1,3) = config.y;
+    transform(2,0) = -sinB;
+    transform(2,1) = cosB * sinC;
+    transform(2,2) = cosB * cosC;
+    transform(2,3) = config.z;
+    transform(3,0) = 0;
+    transform(3,1) = 0;
+    transform(3,2) = 0;
+    transform(3,3) = 1;
 
     return transform;
 }
 
-__device__ Matrix3f createRotationMatrix(const Configuration config) {
+__device__ Eigen::Matrix3f createRotationMatrix(const Configuration config) {
 
 
     float cosB = cos(config.pitch);
@@ -64,46 +64,21 @@ __device__ Matrix3f createRotationMatrix(const Configuration config) {
     float cosC = cos(config.roll);
     float sinC = sin(config.roll);
 
-    Matrix3f rotate;
-    rotate.m[0][0] = cosA * cosB;
-    rotate.m[0][1] = cosA * sinB * sinC - sinA * cosC;
-    rotate.m[0][2] = cosA *  sinB * cosC + sinA * sinC;
-    rotate.m[1][0] = sinA * cosB;
-    rotate.m[1][1] = sinA * sinB * sinC + cosA * cosC;
-    rotate.m[1][2] = sinA * sinB * cosC - cosA * sinC;
-    rotate.m[2][0] = -sinB;
-    rotate.m[2][1] = cosB * sinC;
-    rotate.m[2][2] = cosB * cosC;
+    Eigen::Matrix3f rotate;
+    rotate(0,0) = cosA * cosB;
+    rotate(0,1) = cosA * sinB * sinC - sinA * cosC;
+    rotate(0,2) = cosA *  sinB * cosC + sinA * sinC;
+    rotate(1,0) = sinA * cosB;
+    rotate(1,1) = sinA * sinB * sinC + cosA * cosC;
+    rotate(1,2) = sinA * sinB * cosC - cosA * sinC;
+    rotate(2,0) = -sinB;
+    rotate(2,1) = cosB * sinC;
+    rotate(2,2) = cosB * cosC;
 
     return rotate;
 }
 
 
-
-
-// //TODO: this is incredibly inefficient, update
-__device__ Vector3f transformVector(Vector3f &v, Matrix4f &M) {
-    // Create a 4D homogeneous vector from the 3D vector
-    float v_h[4] = {v.x, v.y, v.z, 1};
-
-    // Compute the transformed 4D vector by matrix multiplication
-    float v_h_prime[4] = {0};
-    for (int i = 0; i < 4; i++) {
-        for (int j = 0; j < 4; j++) {
-            v_h_prime[i] += M.m[i][j] * v_h[j];
-        }
-    }
-
-    // printf("v_h_prime: %f %f %f %f\n", v_h_prime[0], v_h_prime[1], v_h_prime[2], v_h_prime[3]);
-    // Convert the transformed 4D vector back to a 3D vector
-    Vector3f v_prime = {
-        v_h_prime[0],
-        v_h_prime[1],
-        v_h_prime[2]
-    };
-
-    return v_prime;
-}
 
 // Check if two objects are colliding along a certain dimension
 inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, float sndMin, float sndMax) {
@@ -111,15 +86,43 @@ inline __host__ __device__ bool dimensionCollides(float fstMin, float fstMax, fl
     return fstMin <= sndMax && sndMin <= fstMax;
 }
 
+// //TODO: this is incredibly inefficient, update
+__device__ Eigen::Vector3f transformVector(Eigen::Vector3f &v, Eigen::Matrix4f &M) {
+    // Create a 4D homogeneous vector from the 3D vector
+    // float v_h[4] = {v.x, v.y, v.z, 1};
+    Eigen::Vector3f v_prime;
+    v_prime(0) = v(0) * M(0,0) + v(1) * M(0,1) + v(2) * M(0,2) + M(0,3);
+    v_prime(1) = v(0) * M(1,0) + v(1) * M(1,1) + v(2) * M(1,2) + M(1,3);
+    v_prime(2) = v(0) * M(2,0) + v(1) * M(2,1) + v(2) * M(2,2) + M(2,3);
+
+
+    // Compute the transformed 4D vector by matrix multiplication
+    // float v_h_prime[4] = {0};
+    // for (int i = 0; i < 4; i++) {
+    //     for (int j = 0; j < 4; j++) {
+    //         v_h_prime[i] += M.m[i][j] * v_h[j];
+    //     }
+    // }
+
+    // // printf("v_h_prime: %f %f %f %f\n", v_h_prime[0], v_h_prime[1], v_h_prime[2], v_h_prime[3]);
+    // // Convert the transformed 4D vector back to a 3D vector
+    // Vector3f v_prime = {
+    //     v_h_prime[0],
+    //     v_h_prime[1],
+    //     v_h_prime[2]
+    // };
+
+    return v_prime;
+}
+
 #ifndef COALESCE
-__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, Vector3f *transformed_robot_vertices,
+__global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstacle, Eigen::Vector3f *transformed_robot_vertices,
                                      bool *valid_conf, const int num_configs, const int num_robot_vertices)
 {
-    size_t config_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    size_t config_idx = blockIdx.x * blockDim.x + threadIdx(0)(1);
+    if(config_idx >= num_configs) re(2);
 
-    if(config_idx >= num_configs) return;
-
-    Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
+    Eigen::Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
 
     AABB bot_bounds_local;
     bot_bounds_local.x_min = FLT_MAX;
@@ -129,17 +132,17 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
     bot_bounds_local.y_max = -FLT_MAX;
     bot_bounds_local.z_max = -FLT_MAX;
 
-    Vector3f transformed_robot_vertex;
+    Eigen::Vector3f transformed_robot_vertex;
     for(int vertex_idx = 0; vertex_idx < num_robot_vertices; ++vertex_idx)
     {
       transformed_robot_vertex = transformVector(base_robot_vertices[vertex_idx], transform_matrix);
       transformed_robot_vertices[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex;
-      bot_bounds_local.x_min = min(bot_bounds_local.x_min, transformed_robot_vertex.x);
-      bot_bounds_local.y_min = min(bot_bounds_local.y_min, transformed_robot_vertex.y);
-      bot_bounds_local.z_min = min(bot_bounds_local.z_min, transformed_robot_vertex.z);
-      bot_bounds_local.x_max = max(bot_bounds_local.x_max, transformed_robot_vertex.x);
-      bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex.y);
-      bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.z);
+      bot_bounds_local.x_min = min(bot_bounds_local.x_min, transformed_robot_vertex(0));
+      bot_bounds_local.y_min = min(bot_bounds_local.y_min, transformed_robot_vertex(1););
+      bot_bounds_local.z_min = min(bot_bounds_local.z_min, transformed_robot_vertex.(2);
+      bot_bounds_local.x_max = max(bot_bounds_local.x_max, transformed_robot_vertex(0));
+      bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex(1););
+      bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.(2);
     }
     // bot_bounds[config_idx] = bot_bounds_local;
 
@@ -158,10 +161,10 @@ __global__ void broadPhaseFusedKernel_sep(Configuration *configs, const AABB *ob
     bool *valid_conf, const int num_configs, const int num_robot_vertices)
 {
     size_t config_idx = blockIdx.x * blockDim.x + threadIdx.x;
-
+    
     if(config_idx >= num_configs) return;
 
-    Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
+    Eigen::Matrix4f transform_matrix = createTransformationMatrix(configs[config_idx]);
 
     AABB bot_bounds_local;
     bot_bounds_local.x_min = FLT_MAX;
@@ -171,23 +174,23 @@ __global__ void broadPhaseFusedKernel_sep(Configuration *configs, const AABB *ob
     bot_bounds_local.y_max = -FLT_MAX;
     bot_bounds_local.z_max = -FLT_MAX;
 
-    Vector3f transformed_robot_vertex;
-    Vector3f local_vertex;
+    Eigen::Vector3f transformed_robot_vertex;
+    Eigen::Vector3f local_vertex;
     for(int vertex_idx = 0; vertex_idx < num_robot_vertices; ++vertex_idx)
     {      
       local_vertex = {base_rob_x[vertex_idx], base_rob_y[vertex_idx], base_rob_z[vertex_idx]};
     //   printf("local_vertex is %f %f %f\n", local_vertex.x, local_vertex.y, local_vertex.z);
       transformed_robot_vertex = transformVector(local_vertex, transform_matrix);
-      rob_pts_x[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex.x;
-      rob_pts_y[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex.y;
-      rob_pts_z[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex.z;
+      rob_pts_x[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex(0);
+      rob_pts_y[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex(1);
+      rob_pts_z[config_idx * num_robot_vertices + vertex_idx] = transformed_robot_vertex(2);
       
-      bot_bounds_local.x_min = min(bot_bounds_local.x_min, transformed_robot_vertex.x);
-      bot_bounds_local.y_min = min(bot_bounds_local.y_min, transformed_robot_vertex.y);
-      bot_bounds_local.z_min = min(bot_bounds_local.z_min, transformed_robot_vertex.z);
-      bot_bounds_local.x_max = max(bot_bounds_local.x_max, transformed_robot_vertex.x);
-      bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex.y);
-      bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex.z);
+      bot_bounds_local.x_min = min(bot_bounds_local.x_min, transformed_robot_vertex(0));
+      bot_bounds_local.y_min = min(bot_bounds_local.y_min, transformed_robot_vertex(1));
+      bot_bounds_local.z_min = min(bot_bounds_local.z_min, transformed_robot_vertex(2));
+      bot_bounds_local.x_max = max(bot_bounds_local.x_max, transformed_robot_vertex(0));
+      bot_bounds_local.y_max = max(bot_bounds_local.y_max, transformed_robot_vertex(1));
+      bot_bounds_local.z_max = max(bot_bounds_local.z_max, transformed_robot_vertex(2));
     } 
     // bot_bounds[config_idx] = bot_bounds_local;
 
@@ -213,14 +216,14 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, cons
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
 
     //Load Robot
-    std::vector<Vector3f> rob_vertices;
+    std::vector<Eigen::Vector3f> rob_vertices;
     std::vector<Triangle> rob_triangles;
     loadOBJFile(rob_file, rob_vertices, rob_triangles);
     std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
     std::cout << "Robot has " << rob_triangles.size() << " triangles " <<std::endl;
 
     //Load Obstacles
-    std::vector<Vector3f> obs_vertices;
+    std::vector<Eigen::Vector3f> obs_vertices;
     std::vector<Triangle> obs_triangles;
     loadOBJFile(obs_file, obs_vertices, obs_triangles);
     std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
@@ -235,25 +238,25 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, cons
     //     count++;
     // }
     // std::cout <base_robot_trianglesb_points;
-    Vector3f *d_rob_transformed_points;
+    Eigen::Vector3f *d_rob_transformed_points;
     Triangle *d_rob_triangles;
-    Vector3f *d_rob_points;
+    Eigen::Vector3f *d_rob_points;
 
-    checkCudaCall(cudaMalloc(&d_rob_transformed_points, rob_vertices.size() * configs.size() * sizeof(Vector3f)));
+    checkCudaCall(cudaMalloc(&d_rob_transformed_points, rob_vertices.size() * configs.size() * sizeof(Eigen::Vector3f)));
     checkCudaCall(cudaMalloc(&d_rob_triangles, rob_triangles.size() * sizeof(Triangle)));
-    // checkCudaMem(cudaMemcpy(d_rob_points, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaMem(cudaMemcpy(d_rob_points, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f)));
+    checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f)));
     // checkCudaMem(cudaMemcpyToSymbol(base_robot_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle)));
     std::cout << "Copied the robot vertices and triangles " << std::endl;
 
-    checkCudaMem(cudaMemcpyToSymbol(base_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f)));
-    Vector3f *d_obs_points;
+    checkCudaMem(cudaMemcpyToSymbol(base_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f)));
+    Eigen::Vector3f *d_obs_points;
     Triangle *d_obs_triangles;
 
-    checkCudaCall(cudaMalloc(&d_obs_points, obs_vertices.size() * sizeof(Vector3f)));
+    checkCudaCall(cudaMalloc(&d_obs_points, obs_vertices.size() * sizeof(Eigen::Vector3f)));
     checkCudaCall(cudaMalloc(&d_obs_triangles, obs_triangles.size() * sizeof(Triangle)));
-    checkCudaMem(cudaMemcpy(d_obs_points, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_obs_points, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_obs_triangles, obs_triangles.data(), obs_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     std::cout << "Copied the obstacle vertices and triangles " << std::endl;
 
@@ -285,12 +288,12 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, cons
     // checkCudaCall(cudaDeviceSynchronize());
     std::cout << "About to call narrow phase" << std::endl;
 
-    // Vector3f test_rob_points[3];
+    // Eigen::Vector3f test_rob_points[3];
     // test_rob_points[0] = {1.441547, -14.800514, 62.841087};
     // test_rob_points[1] = {-4.215309, 8.199282, 23.057938};
     // test_rob_points[2] = {1.883977, -15.487457, 62.381035};
 
-    // Vector3f test_obs_points[3];
+    // Eigen::Vector3f test_obs_points[3];
     // test_obs_points[0] = {1.681669, 2.616245, 1.069425};
     // test_obs_points[1] = {3.561536, 0.677467, 1.707230};
     // test_obs_points[2] = {1.172210, 2.534812, 1.852433};
@@ -298,20 +301,20 @@ void broadPhaseFused(std::vector<Configuration> &configs, bool *valid_conf, cons
     // Triangle test_rob_triangles = {0, 1, 2};
     // Triangle test_obs_triangles = {0, 1, 2};
 
-    // Vector3f *d_test_rob_points;
-    // Vector3f *d_test_obs_points;
+    // Eigen::Vector3f *d_test_rob_points;
+    // Eigen::Vector3f *d_test_obs_points;
     // Triangle *d_test_rob_triangles;
     // Triangle *d_test_obs_triangles;
 
-    // checkCudaCall(cudaMalloc(&d_test_rob_points, 3 * sizeof(Vector3f)));
+    // checkCudaCall(cudaMalloc(&d_test_rob_points, 3 * sizeof(Eigen::Vector3f)));
     // checkCudaCall(cudaMalloc(&d_test_rob_triangles, sizeof(Triangle)));
-    // checkCudaCall(cudaMemcpy(d_test_rob_points, test_rob_points, 3 * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaCall(cudaMemcpy(d_test_rob_points, test_rob_points, 3 * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     // checkCudaCall(cudaMemcpy(d_test_rob_triangles, &test_rob_triangles, sizeof(Triangle), cudaMemcpyHostToDevice));
 
 
-    // checkCudaCall(cudaMalloc(&d_test_obs_points, 3 * sizeof(Vector3f)));
+    // checkCudaCall(cudaMalloc(&d_test_obs_points, 3 * sizeof(Eigen::Vector3f)));
     // checkCudaCall(cudaMalloc(&d_test_obs_triangles, sizeof(Triangle)));
-    // checkCudaMem(cudaMemcpy(d_test_obs_points, test_obs_points, 3 * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaMem(cudaMemcpy(d_test_obs_points, test_obs_points, 3 * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     // checkCudaMem(cudaMemcpy(d_test_obs_triangles, &test_obs_triangles, sizeof(Triangle), cudaMemcpyHostToDevice));
     
     // narrowPhaseKernel<<<1, 1>>>(
@@ -367,7 +370,7 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
     if (cudaGetDeviceCount(&device_count) != 0) std::cout << "CUDA not loaded properly" << std::endl;
 
     //Load Robot
-    // std::vector<Vector3f> rob_vertices;
+    // std::vector<Eigen::Vector3f> rob_vertices;
     // std::vector<Triangle> rob_triangles;
     std::vector<float> rob_x;
     std::vector<float> rob_y;
@@ -391,7 +394,7 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
 
 
 
-    // std::vector<Vector3f> obs_vertices;
+    // std::vector<Eigen::Vector3f> obs_vertices;
     // std::vector<Triangle> obs_triangles;
     // loadOBJFile(OBS_FILE, obs_vertices, obs_triangles);
     // std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
@@ -414,7 +417,7 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
     // int *d_rob_trs_3;
     
     // Triangle *d_rob_triangles;
-    // Vector3f *d_rob_points;
+    // Eigen::Vector3f *d_rob_points;
 
     //allocate robot
     checkCudaCall(cudaMalloc(&d_rob_transformed_points_x, rob_x.size() * configs.size() * sizeof(float)));
@@ -425,9 +428,9 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
     // checkCudaCall(cudaMalloc(&d_rob_trs_3, rob_trs_3.size() * sizeof(int)));
 
     // checkCudaCall(cudaMalloc(&d_rob_triangles, rob_triangles.size() * sizeof(Triangle)));
-    // checkCudaMem(cudaMemcpy(d_rob_points, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaMem(cudaMemcpy(d_rob_points, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     // checkCudaMem(cudaMemcpy(d_rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-    // checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Vector3f)));
+    // checkCudaMem(cudaMemcpyToSymbol(base_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f)));
     // checkCudaMem(cudaMemcpyToSymbol(base_robot_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle)));
     
     checkCudaCall(cudaMemcpyToSymbol(base_rob_x, rob_x.data(), rob_x.size() * sizeof(float)));
@@ -439,11 +442,11 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
   
     std::cout << "Copied the robot vertices and triangles " << std::endl;
     
-    // checkCudaMem(cudaMemcpyToSymbol(base_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f)));
+    // checkCudaMem(cudaMemcpyToSymbol(base_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f)));
 
-    // checkCudaCall(cudaMalloc(&d_obs_points, obs_vertices.size() * sizeof(Vector3f)));
+    // checkCudaCall(cudaMalloc(&d_obs_points, obs_vertices.size() * sizeof(Eigen::Vector3f)));
     // checkCudaCall(cudaMalloc(&d_obs_triangles, obs_triangles.size() * sizeof(Triangle)));
-    // checkCudaMem(cudaMemcpy(d_obs_points, obs_vertices.data(), obs_vertices.size() * sizeof(Vector3f), cudaMemcpyHostToDevice));
+    // checkCudaMem(cudaMemcpy(d_obs_points, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     // checkCudaMem(cudaMemcpy(d_obs_triangles, obs_triangles.data(), obs_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     checkCudaCall(cudaMemcpyToSymbol(base_obs_x, obs_x.data(), obs_x.size() * sizeof(float)));
     checkCudaCall(cudaMemcpyToSymbol(base_obs_y, obs_y.data(), obs_y.size() * sizeof(float)));

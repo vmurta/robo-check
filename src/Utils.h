@@ -12,6 +12,7 @@
 #include <fcl/geometry/shape/utility.h>
 #include <fcl/fcl.h>
 
+#include <Eigen/Dense>
 
 #ifndef CONF_FILE
     #define CONF_FILE "./easy_confs10,000.conf"
@@ -61,19 +62,19 @@ struct ConfigurationTagged {
     bool valid;
 };
 
-struct Matrix4f {
-    float m[4][4];
-};
+// struct Matrix4f {
+//     float m[4][4];
+// };
 
-struct Matrix3f {
-    float m[3][3];
-};
+// struct Eigen::Matrix3f {
+//     float m[3][3];
+// };
 
-struct Vector3f {
-  float x, y, z;
-  __device__ __host__ Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}\
-  __device__ __host__ Vector3f(){};
-};
+// struct Eigen::Vector3f {
+//   float x, y, z;
+//   __device__ __host__ Eigen::Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}\
+//   __device__ __host__ Eigen::Vector3f(){};
+// };
 
 struct Triangle {
   int v1, v2, v3;
@@ -91,9 +92,9 @@ struct AABB
 
 #define NUM_ROB_VERTICES 792
 #define MAX_NUM_ROBOT_TRIANGLES 1008
-extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
 // extern __constant__ float base_robot_vertices_x[NUM_ROB_VERTICES];
@@ -129,7 +130,7 @@ void readConfigurationFromFile(const std::string& filename, std::vector<Configur
 ConfigurationTagged makeTagged(const Configuration& conf);
 
 void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs, bool hard);
-void loadOBJFile(const char* filename,  std::vector<Vector3f>& points, std::vector<Triangle>& triangles);
+void loadOBJFile(const char* filename,  std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles);
 void loadOBJFile(const char* filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
                                         std::vector<int>& v1, std::vector<int>& v2, std::vector<int>& v3);
 

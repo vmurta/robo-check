@@ -4,33 +4,33 @@
 //      - Single dimension block.
 //      - Parallellizes over configurations i.e. each thread handles one configuration.
 //      - Each thread loops over all vertices to calculate the AABB.
-__global__ void generateAABBPrimitiveKernel(Vector3f* vertices, unsigned int numVertices, 
+__global__ void generateAABBPrimitiveKernel(Eigen::Vector3f* vertices, unsigned int numVertices, 
                     unsigned int numConfigs, AABB* botBounds) 
 {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     AABB botBoundsLocal;
-    Vector3f vertex;
+    Eigen::Vector3f vertex;
 
     if(tid < numConfigs)
     {
         unsigned int configOffset = tid * numVertices;
-        botBoundsLocal.x_min = vertices[configOffset].x;
-        botBoundsLocal.y_min = vertices[configOffset].y;
-        botBoundsLocal.z_min = vertices[configOffset].z;
+        botBoundsLocal.x_min = vertices[configOffset](0);
+        botBoundsLocal.y_min = vertices[configOffset](1);
+        botBoundsLocal.z_min = vertices[configOffset](2);
         // could just copy the x_min, y_min, z_min to x_max, y_max, z_max 
         // to avoid extra global memory access
-        botBoundsLocal.x_max = vertices[configOffset].x;
-        botBoundsLocal.y_max = vertices[configOffset].y;
-        botBoundsLocal.z_max = vertices[configOffset].z;
+        botBoundsLocal.x_max = vertices[configOffset](0);
+        botBoundsLocal.y_max = vertices[configOffset](1);
+        botBoundsLocal.z_max = vertices[configOffset](2);
         for(int j = 0; j < numVertices; ++j)
         {
             vertex = vertices[configOffset + j];
-            botBoundsLocal.x_min = min(botBoundsLocal.x_min, vertex.x);
-            botBoundsLocal.y_min = min(botBoundsLocal.y_min, vertex.y);
-            botBoundsLocal.z_min = min(botBoundsLocal.z_min, vertex.z);
-            botBoundsLocal.x_max = max(botBoundsLocal.x_max, vertex.x);
-            botBoundsLocal.y_max = max(botBoundsLocal.y_max, vertex.y);
-            botBoundsLocal.z_max = max(botBoundsLocal.z_max, vertex.z);
+            botBoundsLocal.x_min = min(botBoundsLocal.x_min, vertex(0));
+            botBoundsLocal.y_min = min(botBoundsLocal.y_min, vertex(1));
+            botBoundsLocal.z_min = min(botBoundsLocal.z_min, vertex(2));
+            botBoundsLocal.x_max = max(botBoundsLocal.x_max, vertex(0));
+            botBoundsLocal.y_max = max(botBoundsLocal.y_max, vertex(1));
+            botBoundsLocal.z_max = max(botBoundsLocal.z_max, vertex(2));
         }
         botBounds[tid] = botBoundsLocal;
     }
@@ -40,14 +40,14 @@ __global__ void generateAABBPrimitiveKernel(Vector3f* vertices, unsigned int num
 //      - Two dimension block - each yDim corresponds to one config, each xDim corresponds to vertices.
 //      - Uses reduction along xDim to calculate AABBs for each configuration.
 //TODO: Use struct of arrays instead of array of structs to improve memory access patterns.
-__global__ void generateAABBKernel(Vector3f* vertices, unsigned int numVertices, 
+__global__ void generateAABBKernel(Eigen::Vector3f* vertices, unsigned int numVertices, 
                     unsigned int numConfigs, AABB* botBounds) 
 {    
-    // __shared__ Vector3f partialMin[2 * AABB_BLOCK_SIZE_X];
-    // __shared__ Vector3f partialMax[2 * AABB_BLOCK_SIZE_X];
-    extern __shared__ Vector3f sharedMem[];
-    Vector3f* partialMin = &sharedMem[0];
-    Vector3f* partialMax = &sharedMem[2 * AABB_BLOCK_SIZE_X];
+    // __shared__ Eigen::Vector3f partialMin[2 * AABB_BLOCK_SIZE_X];
+    // __shared__ Eigen::Vector3f partialMax[2 * AABB_BLOCK_SIZE_X];
+    extern __shared__ Eigen::Vector3f sharedMem[];
+    Eigen::Vector3f* partialMin = &sharedMem[0];
+    Eigen::Vector3f* partialMax = &sharedMem[2 * AABB_BLOCK_SIZE_X];
     AABB botBoundsLocal;
 
     unsigned int ty = blockIdx.y * blockDim.y + threadIdx.y;
@@ -70,28 +70,28 @@ __global__ void generateAABBKernel(Vector3f* vertices, unsigned int numVertices,
             }
             else
             {
-                partialMin[tx + blockDim.x] = Vector3f(0,0,0);
-                partialMax[tx + blockDim.x] = Vector3f(0,0,0);
+                partialMin[tx + blockDim.x] = Eigen::Vector3f(0,0,0);
+                partialMax[tx + blockDim.x] = Eigen::Vector3f(0,0,0);
             }
         }
         else
         {
-            partialMin[tx] = Vector3f(0,0,0);
-            partialMin[tx + blockDim.x] = Vector3f(0,0,0);
-            partialMax[tx] = Vector3f(0,0,0);
-            partialMax[tx + blockDim.x] = Vector3f(0,0,0);
+            partialMin[tx] = Eigen::Vector3f(0,0,0);
+            partialMin[tx + blockDim.x] = Eigen::Vector3f(0,0,0);
+            partialMax[tx] = Eigen::Vector3f(0,0,0);
+            partialMax[tx + blockDim.x] = Eigen::Vector3f(0,0,0);
         }
         for(unsigned int stride = blockDim.x; stride >= 1; stride /= 2)
         {
             __syncthreads();
             if(tx < stride)
             {
-                partialMin[tx].x = min(partialMin[tx].x, partialMin[tx + stride].x);
-                partialMin[tx].y = min(partialMin[tx].y, partialMin[tx + stride].y);
-                partialMin[tx].z = min(partialMin[tx].z, partialMin[tx + stride].z);
-                partialMax[tx].x = max(partialMax[tx].x, partialMax[tx + stride].x);
-                partialMax[tx].y = max(partialMax[tx].y, partialMax[tx + stride].y);
-                partialMax[tx].z = max(partialMax[tx].z, partialMax[tx + stride].z);
+                partialMin[tx](0) = min(partialMin[tx](0), partialMin[tx + stride](0));
+                partialMin[tx](1) = min(partialMin[tx](1), partialMin[tx + stride](1));
+                partialMin[tx](2) = min(partialMin[tx](2), partialMin[tx + stride](2));
+                partialMax[tx](0) = max(partialMax[tx](0), partialMax[tx + stride](0));
+                partialMax[tx](1) = max(partialMax[tx](1), partialMax[tx + stride](1));
+                partialMax[tx](2) = max(partialMax[tx](2), partialMax[tx + stride](2));
             }
         }
         __syncthreads();
@@ -106,19 +106,19 @@ __global__ void generateAABBKernel(Vector3f* vertices, unsigned int numVertices,
 
         if(tx == 0)
         {
-            botBoundsLocal.x_min = partialMin[tx].x;
-            botBoundsLocal.y_min = partialMin[tx].y;
-            botBoundsLocal.z_min = partialMin[tx].z;
-            botBoundsLocal.x_max = partialMax[tx].x;
-            botBoundsLocal.y_max = partialMax[tx].y;
-            botBoundsLocal.z_max = partialMax[tx].z;
+            botBoundsLocal.x_min = partialMin[tx](0);
+            botBoundsLocal.y_min = partialMin[tx](1);
+            botBoundsLocal.z_min = partialMin[tx](2);
+            botBoundsLocal.x_max = partialMax[tx](0);
+            botBoundsLocal.y_max = partialMax[tx](1);
+            botBoundsLocal.z_max = partialMax[tx](2);
             botBounds[ty] = botBoundsLocal;
         }
     }
 }
 
 // generateAABB- Generate AABBs for all configurations parallelly
-void generateAABB(Vector3f* vertices, unsigned int numVertices, 
+void generateAABB(Eigen::Vector3f* vertices, unsigned int numVertices, 
                     unsigned int numConfigs, AABB* botBounds) 
 {
     int device_count;
@@ -128,9 +128,9 @@ void generateAABB(Vector3f* vertices, unsigned int numVertices,
         printf("CUDA loaded for %d device(s)\n", device_count);
     }
 
-    Vector3f* d_vertices;
-    cudaMalloc(&d_vertices, numConfigs * numVertices * sizeof(Vector3f));
-    cudaMemcpy(d_vertices, vertices, numConfigs * numVertices * sizeof(Vector3f), cudaMemcpyHostToDevice);
+    Eigen::Vector3f* d_vertices;
+    cudaMalloc(&d_vertices, numConfigs * numVertices * sizeof(Eigen::Vector3f));
+    cudaMemcpy(d_vertices, vertices, numConfigs * numVertices * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);
 
     AABB* d_bot_bounds;
     cudaMalloc(&d_bot_bounds, numConfigs * sizeof(AABB));
@@ -156,7 +156,7 @@ void generateAABB(Vector3f* vertices, unsigned int numVertices,
 }
 
 // generateAABBBaseline- Generate AABBs for all configurations serially
-void generateAABBBaseline(Vector3f* vertices, unsigned int numVertices, 
+void generateAABBBaseline(Eigen::Vector3f* vertices, unsigned int numVertices, 
                     unsigned int numConfigs, AABB* botBounds) 
 {
     // Loop over every configuration
@@ -164,20 +164,20 @@ void generateAABBBaseline(Vector3f* vertices, unsigned int numVertices,
     {
         // Loop over every vertex in each configuration
         unsigned int configOffset = i * numVertices;
-        botBounds[i].x_min = vertices[configOffset].x;
-        botBounds[i].y_min = vertices[configOffset].y;
-        botBounds[i].z_min = vertices[configOffset].z;
-        botBounds[i].x_max = vertices[configOffset].x;
-        botBounds[i].y_max = vertices[configOffset].y;
-        botBounds[i].z_max = vertices[configOffset].z;
+        botBounds[i].x_min = vertices[configOffset](0);
+        botBounds[i].y_min = vertices[configOffset](1);
+        botBounds[i].z_min = vertices[configOffset](2);
+        botBounds[i].x_max = vertices[configOffset](0);
+        botBounds[i].y_max = vertices[configOffset](1);
+        botBounds[i].z_max = vertices[configOffset](2);
         for(int j = 0; j < numVertices; ++j)
         {
-            botBounds[i].x_min = min(botBounds[i].x_min, vertices[configOffset + j].x);
-            botBounds[i].y_min = min(botBounds[i].y_min, vertices[configOffset + j].y);
-            botBounds[i].z_min = min(botBounds[i].z_min, vertices[configOffset + j].z);
-            botBounds[i].x_max = max(botBounds[i].x_max, vertices[configOffset + j].x);
-            botBounds[i].y_max = max(botBounds[i].y_max, vertices[configOffset + j].y);
-            botBounds[i].z_max = max(botBounds[i].z_max, vertices[configOffset + j].z);
+            botBounds[i].x_min = min(botBounds[i].x_min, vertices[configOffset + j](0));
+            botBounds[i].y_min = min(botBounds[i].y_min, vertices[configOffset + j](1));
+            botBounds[i].z_min = min(botBounds[i].z_min, vertices[configOffset + j](2));
+            botBounds[i].x_max = max(botBounds[i].x_max, vertices[configOffset + j](0));
+            botBounds[i].y_max = max(botBounds[i].y_max, vertices[configOffset + j](1));
+            botBounds[i].z_max = max(botBounds[i].z_max, vertices[configOffset + j](2));
         }
     }
 }

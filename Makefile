@@ -24,6 +24,9 @@ Full-Integration-Test: $(BUILD_DIR)/full-integration-test.o $(BUILD_DIR)/Utils.o
 Generate-Tests: $(BUILD_DIR)/generate-tests.o $(BUILD_DIR)/Utils.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
+Eigen: $(BUILD_DIR)/obb_test.o
+	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
+
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
 
@@ -57,6 +60,8 @@ $(BUILD_DIR)/narrow-phase.o: ${NAR_DIR}/narrow-phase.cu | $(BUILD_DIR)
 $(BUILD_DIR)/MegaKernel.o: ${SRC_DIR}/MegaKernel.cu | $(BUILD_DIR)
 	$(CU) $(CUFLAGS) -dc $< -o $@ -I. -I./narrow-phase -I./broad-phase
 
+$(BUILD_DIR)/obb_test.o: ${SRC_DIR}/obb_test.cu | $(BUILD_DIR)
+	$(CU) $(CUFLAGS) -dc $< -o $@ 
 
 clean:
-	rm -rf *.o Full-Integration-Test Generate-Tests build
+	rm -rf *.o Full-Integration-Test Generate-Tests build Eigen

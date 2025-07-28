@@ -7,27 +7,27 @@ Function signatures and support for the narrow-phase kernel
 
 // Helper functions
 bool isclose(float v1, float v2);
-bool veq(const Vector3f v1, const Vector3f v2);
-bool teq(const Triangle self_tr, const Vector3f *self_pts,
-        const Triangle other_tr, const Vector3f *other_pts);
-void compute_plane(const Triangle tr, const Vector3f *pts, Vector3f *N,
+bool veq(const Eigen::Vector3f v1, const Eigen::Vector3f v2);
+bool teq(const Triangle self_tr, const Eigen::Vector3f *self_pts,
+        const Triangle other_tr, const Eigen::Vector3f *other_pts);
+void compute_plane(const Triangle tr, const Eigen::Vector3f *pts, Eigen::Vector3f *N,
     float *d);
 void compute_plane_sep(const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float *Nx, float *Ny, float *Nz, float *d);
-Vector3f compute_signed_dists(const Vector3f N, const float d, const Triangle tr, const Vector3f *pts);
+Eigen::Vector3f compute_signed_dists(const Eigen::Vector3f N, const float d, const Triangle tr, const Eigen::Vector3f *pts);
 void compute_signed_dists_sep(const float Nx, const float Ny, const float Nz, const float d, const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float* dists_x, float* dists_y, float* dists_z);
-bool no_overlap(const Vector3f dists);
+bool no_overlap(const Eigen::Vector3f dists);
 bool no_overlap_sep(const float dists_x, const float dists_y, const float dists_z);
 void la_solve(const float A1, const float A2, const float A3, const float A4,
         const float b1, const float b2, float *x1, float *x2);
-void compute_intersect_line(const Vector3f N1, const float d1,
-        const Vector3f N2, const float d2, Vector3f *D, Vector3f *O);
+void compute_intersect_line(const Eigen::Vector3f N1, const float d1,
+        const Eigen::Vector3f N2, const float d2, Eigen::Vector3f *D, Eigen::Vector3f *O);
 void compute_intersect_line_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2, float *Dx, float *Dy, float *Dz, float *Ox, float *Oy, float *Oz);
-float project_vertex(const Vector3f V, const Vector3f D, const Vector3f O);
+float project_vertex(const Eigen::Vector3f V, const Eigen::Vector3f D, const Eigen::Vector3f O);
 float project_vertex_sep(const float Vx, const float Vy, const float Vz, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
-void canonicalize_triangle(const Triangle t, const Vector3f dists, Triangle *new_t, Vector3f *new_dists);
+void canonicalize_triangle(const Triangle t, const Eigen::Vector3f dists, Triangle *new_t, Eigen::Vector3f *new_dists);
 void canonicalize_triangle_sep(const float dists_x, const float dists_y, const float dists_z, int *v1, int *v2, int *v3);
-float compute_parametric_variable(const Vector3f v0, const Vector3f v1,
-        const float d0, const float d1, const Vector3f D, const Vector3f O);
+float compute_parametric_variable(const Eigen::Vector3f v0, const Eigen::Vector3f v1,
+        const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O);
 float compute_parametric_variable_sep(const float v0_x, const float v0_y, const float v0_z, const float v1_x, const float v1_y, const float v1_z, const float d0, const float d1, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
-bool is_coplanar(const Vector3f N1, const float d1, const Vector3f N2, const float d2);
+bool is_coplanar(const Eigen::Vector3f N1, const float d1, const Eigen::Vector3f N2, const float d2);
 bool is_coplanar_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2);

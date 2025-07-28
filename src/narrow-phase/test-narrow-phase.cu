@@ -26,24 +26,24 @@ void unit_tests() {
         printf("All isclose tests passed\n");
     }
 
-    Vector3f pts[100];
-    Vector3f pt0(1, 2, 3);
+    Eigen::Vector3f pts[100];
+    Eigen::Vector3f pt0(1, 2, 3);
     pts[0] = pt0;
-    Vector3f pt1(2, 2, 3.5);
+    Eigen::Vector3f pt1(2, 2, 3.5);
     pts[1] = pt1;
-    Vector3f pt2(2, 2.5, 3);
+    Eigen::Vector3f pt2(2, 2.5, 3);
     pts[2] = pt2;
-    Vector3f pt3(1, 3, 4);
+    Eigen::Vector3f pt3(1, 3, 4);
     pts[3] = pt3;
-    Vector3f pt4(4, 7, 2);
+    Eigen::Vector3f pt4(4, 7, 2);
     pts[4] = pt4;
-    Vector3f pt5(5, 1, 3);
+    Eigen::Vector3f pt5(5, 1, 3);
     pts[5] = pt5;
-    Vector3f pt6(100, 300, 400);
+    Eigen::Vector3f pt6(100, 300, 400);
     pts[6] = pt6;
-    Vector3f pt7(400, 700, 200);
+    Eigen::Vector3f pt7(400, 700, 200);
     pts[7] = pt7;
-    Vector3f pt8(500, 100, 300);
+    Eigen::Vector3f pt8(500, 100, 300);
     pts[8] = pt8;
 
     // Test veq
@@ -83,12 +83,12 @@ void unit_tests() {
     }
 
     // Test compute_plane
-    Vector3f N1;
+    Eigen::Vector3f N1;
     float d1;
     compute_plane(t1, pts, &N1, &d1);
 
     passed = true;
-    Vector3f N1_corr(-0.25, 0.5, 0.5);
+    Eigen::Vector3f N1_corr(-0.25, 0.5, 0.5);
     if (!veq(N1, N1_corr)) {
         passed = false;
         printf("Failed veq(N1, N1_corr)\n");
@@ -122,10 +122,10 @@ void unit_tests() {
     }
 
     // Test compute_signed_dists
-    Vector3f dists12 = compute_signed_dists(N1, d1, t2, pts);
+    Eigen::Vector3f dists12 = compute_signed_dists(N1, d1, t2, pts);
 
     passed = true;
-    Vector3f dists_corr(1, 1.25, -1.5);
+    Eigen::Vector3f dists_corr(1, 1.25, -1.5);
     if (!veq(dists12, dists_corr)) {
         passed = false;
         printf("Failed veq(dists12, dists_corr)\n");
@@ -176,13 +176,13 @@ void unit_tests() {
         printf("Failed no_overlap(dists12)\n");
     }
 
-    Vector3f dists13 = compute_signed_dists(N1, d1, t3, pts);
+    Eigen::Vector3f dists13 = compute_signed_dists(N1, d1, t3, pts);
     if (!no_overlap_sep(dists13.x, dists13.y, dists13.z)) {
         passed = false;
         printf("Failed no_overlap(compute_signed_dists(N1, d1, t3, pts))\n");
     }
 
-    Vector3f dists11 = compute_signed_dists(N1, d1, t1, pts);
+    Eigen::Vector3f dists11 = compute_signed_dists(N1, d1, t1, pts);
     if (!no_overlap_sep(dists11.x, dists11.y, dists11.z)) {
         passed = false;
         printf("Failed no_overlap(compute_signed_dists(N1, d1, t1, pts))\n");
@@ -223,63 +223,63 @@ void unit_tests() {
     }
 
     // Test compute_intersect_line
-    Vector3f D, O;
-    Vector3f XY_plane(0, 0, 1);
-    Vector3f YZ_plane(1, 0, 0);
-    Vector3f XZ_plane(0, 1, 0);
+    Eigen::Vector3f D, O;
+    Eigen::Vector3f XY_plane(0, 0, 1);
+    Eigen::Vector3f YZ_plane(1, 0, 0);
+    Eigen::Vector3f XZ_plane(0, 1, 0);
 
     passed = true;
     compute_intersect_line(XY_plane, -1, YZ_plane, -2, &D, &O);
-    Vector3f D_XYYZ_corr(0, 1, 0);
+    Eigen::Vector3f D_XYYZ_corr(0, 1, 0);
     if (!veq(D, D_XYYZ_corr)) {
         passed = false;
         printf("Failed veq(D, D_XYYZ_corr)\n");
     }
 
-    Vector3f O_XYYZ_corr(2, 0, 1);
+    Eigen::Vector3f O_XYYZ_corr(2, 0, 1);
     if (!veq(O, O_XYYZ_corr)) {
         passed = false;
         printf("Failed veq(O, O_XYYZ_corr)\n");
     }
 
     compute_intersect_line(YZ_plane, -1, XZ_plane, -2, &D, &O);
-    Vector3f D_YZXZ_corr(0, 0, 1);
+    Eigen::Vector3f D_YZXZ_corr(0, 0, 1);
     if (!veq(D, D_YZXZ_corr)) {
         passed = false;
         printf("Failed veq(D, D_YZXZ_corr)\n");
     }
 
-    Vector3f O_YZXZ_corr(1, 2, 0);
+    Eigen::Vector3f O_YZXZ_corr(1, 2, 0);
     if (!veq(O, O_YZXZ_corr)) {
         passed = false;
         printf("Failed veq(O, O_YZXZ_corr)\n");
     }
 
     compute_intersect_line(XZ_plane, -1, XY_plane, -2, &D, &O);
-    Vector3f D_XZXY_corr(1, 0, 0);
+    Eigen::Vector3f D_XZXY_corr(1, 0, 0);
     if (!veq(D, D_XZXY_corr)) {
         passed = false;
         printf("Failed veq(D, D_XZXY_corr)\n");
     }
 
-    Vector3f O_XZXY_corr(0, 1, 2);
+    Eigen::Vector3f O_XZXY_corr(0, 1, 2);
     if (!veq(O, O_XZXY_corr)) {
         passed = false;
         printf("Failed veq(O, O_XZXY_corr)\n");
     }
 
     // Example from https://math.stackexchange.com/questions/475953/how-to-calculate-the-intersection-of-two-planes
-    Vector3f N2(2, 3, -2);
-    Vector3f N3(1, 2, 1);
+    Eigen::Vector3f N2(2, 3, -2);
+    Eigen::Vector3f N3(1, 2, 1);
     compute_intersect_line(N2, 2, N3, -1, &D, &O);
 
-    Vector3f D_N2N3_corr(7, -4, 1);
+    Eigen::Vector3f D_N2N3_corr(7, -4, 1);
     if (!veq(D, D_N2N3_corr)) {
         passed = false;
         printf("Failed veq(D, D_N2N3_corr)\n");
     }
 
-    Vector3f O_N2N3_corr(-7, 4, 0);
+    Eigen::Vector3f O_N2N3_corr(-7, 4, 0);
     if (!veq(O, O_N2N3_corr)) {
         passed = false;
         printf("Failed veq(O, O_N2N3_corr)\n");
@@ -343,9 +343,9 @@ void unit_tests() {
     }
 
     // Test project_vertex
-    Vector3f V_pv(1, 2, 2);
-    Vector3f O_pv(2, 2, 4);
-    Vector3f D_pv(3, 4, 5);
+    Eigen::Vector3f V_pv(1, 2, 2);
+    Eigen::Vector3f O_pv(2, 2, 4);
+    Eigen::Vector3f D_pv(3, 4, 5);
 
     passed = true;
     if (!isclose(project_vertex(V_pv, D_pv, O_pv), -13)) {
@@ -370,19 +370,19 @@ void unit_tests() {
 
 
     // Test canonicalize_triangle
-    Vector3f dists1(-1, -1, 1);
-    Vector3f dists2(-1, 1, 1);
-    Vector3f dists3(-1, 1, -1);
-    Vector3f dists4(1, 1, -1);
-    Vector3f dists5(1, -1, -1);
-    Vector3f dists6(1, -1, 1);
+    Eigen::Vector3f dists1(-1, -1, 1);
+    Eigen::Vector3f dists2(-1, 1, 1);
+    Eigen::Vector3f dists3(-1, 1, -1);
+    Eigen::Vector3f dists4(1, 1, -1);
+    Eigen::Vector3f dists5(1, -1, -1);
+    Eigen::Vector3f dists6(1, -1, 1);
     Triangle t_ct = {0, 1, 2};
 
-    Vector3f dists_n1n1_corr(-1, 1, -1);
-    Vector3f dists_11_corr(1, -1, 1);
+    Eigen::Vector3f dists_n1n1_corr(-1, 1, -1);
+    Eigen::Vector3f dists_11_corr(1, -1, 1);
 
     Triangle new_t;
-    Vector3f new_dists;
+    Eigen::Vector3f new_dists;
     passed = true;
 
     canonicalize_triangle(t_ct, dists1, &new_t, &new_dists);
@@ -501,11 +501,11 @@ void unit_tests() {
     // Test compute_parametric_variable
     float d2;
     compute_plane(t2, pts, &N2, &d2);
-    Vector3f dists21 = compute_signed_dists(N2, d2, t1, pts);
+    Eigen::Vector3f dists21 = compute_signed_dists(N2, d2, t1, pts);
     compute_intersect_line(N1, d1, N2, d2, &D, &O);
 
     Triangle ct1, ct2;
-    Vector3f cdists12, cdists21;
+    Eigen::Vector3f cdists12, cdists21;
     canonicalize_triangle(t1, dists21, &ct1, &cdists21);
     canonicalize_triangle(t2, dists12, &ct2, &cdists12);
 
@@ -584,7 +584,7 @@ void unit_tests() {
 
     N3.x = 0;
 
-    Vector3f N4 = {0, N1.y, N1.z};
+    Eigen::Vector3f N4 = {0, N1.y, N1.z};
     if (!is_coplanar(N4, d1, N3, d1 * 2)) {
         passed = false;
         printf("Failed is_coplanar(N4, d1, N3, d1 * 2)\n");
@@ -638,15 +638,15 @@ void test_baseline() {
     obs_trs[2] = {0, 2, 3};
     obs_trs[3] = {1, 2, 3};
 
-    Vector3f rob_pts[8];
-    Vector3f pt0(0, 0, 0);
-    Vector3f pt1(0, 1, 2);
-    Vector3f pt2(0, 2, 0);
-    Vector3f pt3(2, 2, 2);
-    Vector3f pt4(100, 0, 0);
-    Vector3f pt5(100, 1, 2);
-    Vector3f pt6(100, 2, 0);
-    Vector3f pt7(102, 2, 2);
+    Eigen::Vector3f rob_pts[8];
+    Eigen::Vector3f pt0(0, 0, 0);
+    Eigen::Vector3f pt1(0, 1, 2);
+    Eigen::Vector3f pt2(0, 2, 0);
+    Eigen::Vector3f pt3(2, 2, 2);
+    Eigen::Vector3f pt4(100, 0, 0);
+    Eigen::Vector3f pt5(100, 1, 2);
+    Eigen::Vector3f pt6(100, 2, 0);
+    Eigen::Vector3f pt7(102, 2, 2);
     rob_pts[0] = pt0;
     rob_pts[1] = pt1;
     rob_pts[2] = pt2;
@@ -656,11 +656,11 @@ void test_baseline() {
     rob_pts[6] = pt6;
     rob_pts[7] = pt7;
 
-    Vector3f obs_pts[4];
-    Vector3f pto0(1, 0.1, 0);
-    Vector3f pto1(1.5, 1, 2.2);
-    Vector3f pto2(1, 2.4, 0);
-    Vector3f pto3(3.3, 2, 2);
+    Eigen::Vector3f obs_pts[4];
+    Eigen::Vector3f pto0(1, 0.1, 0);
+    Eigen::Vector3f pto1(1.5, 1, 2.2);
+    Eigen::Vector3f pto2(1, 2.4, 0);
+    Eigen::Vector3f pto3(3.3, 2, 2);
     obs_pts[0] = pto0;
     obs_pts[1] = pto1;
     obs_pts[2] = pto2;
@@ -686,20 +686,20 @@ void test_baseline() {
 }
 
 void test_single_triangle() {
-    Vector3f rob_pts[3];
-    Vector3f ptr0(1.441547, -14.800514, 62.841087);
+    Eigen::Vector3f rob_pts[3];
+    Eigen::Vector3f ptr0(1.441547, -14.800514, 62.841087);
     rob_pts[0] = ptr0;
-    Vector3f ptr1(-4.215309, 8.199282, 23.057938);
+    Eigen::Vector3f ptr1(-4.215309, 8.199282, 23.057938);
     rob_pts[1] = ptr1;
-    Vector3f ptr2(1.883977, -15.487457, 62.381035);
+    Eigen::Vector3f ptr2(1.883977, -15.487457, 62.381035);
     rob_pts[2] = ptr2;
 
-    Vector3f obj_pts[3];
-    Vector3f pto0(1.681669, 2.616245, 1.069425);
+    Eigen::Vector3f obj_pts[3];
+    Eigen::Vector3f pto0(1.681669, 2.616245, 1.069425);
     obj_pts[0] = pto0;
-    Vector3f pto1(3.561536, 0.677467, 1.707230);
+    Eigen::Vector3f pto1(3.561536, 0.677467, 1.707230);
     obj_pts[1] = pto1;
-    Vector3f pto2(1.172210, 2.534812, 1.852433);
+    Eigen::Vector3f pto2(1.172210, 2.534812, 1.852433);
     obj_pts[2] = pto2;
 
     Triangle rob_trs[1];
@@ -752,27 +752,27 @@ void test_gpu() {
     obs_trs[2] = {0, 2, 3};
     obs_trs[3] = {1, 2, 3};
 
-    Vector3f pt0(0, 0, 0);
-    Vector3f pt1(0, 1, 2);
-    Vector3f pt2(0, 2, 0);
-    Vector3f pt3(2, 2, 2);
-    Vector3f pt4(100, 0, 0);
-    Vector3f pt5(100, 1, 2);
-    Vector3f pt6(100, 2, 0);
-    Vector3f pt7(102, 2, 2);
+    Eigen::Vector3f pt0(0, 0, 0);
+    Eigen::Vector3f pt1(0, 1, 2);
+    Eigen::Vector3f pt2(0, 2, 0);
+    Eigen::Vector3f pt3(2, 2, 2);
+    Eigen::Vector3f pt4(100, 0, 0);
+    Eigen::Vector3f pt5(100, 1, 2);
+    Eigen::Vector3f pt6(100, 2, 0);
+    Eigen::Vector3f pt7(102, 2, 2);
 
-    Vector3f obs_pts[4];
-    Vector3f pto0(1, 0.1, 0);
-    Vector3f pto1(1.5, 1, 2.2);
-    Vector3f pto2(1, 2.4, 0);
-    Vector3f pto3(3.3, 2, 2);
+    Eigen::Vector3f obs_pts[4];
+    Eigen::Vector3f pto0(1, 0.1, 0);
+    Eigen::Vector3f pto1(1.5, 1, 2.2);
+    Eigen::Vector3f pto2(1, 2.4, 0);
+    Eigen::Vector3f pto3(3.3, 2, 2);
     obs_pts[0] = pto0;
     obs_pts[1] = pto1;
     obs_pts[2] = pto2;
     obs_pts[3] = pto3;
 
     // Generate the correct number of configurations
-    Vector3f real_rob_pts[NUM_NP_TEST_CONFS * 4];
+    Eigen::Vector3f real_rob_pts[NUM_NP_TEST_CONFS * 4];
     for (int i = 0; i < NUM_NP_TEST_CONFS; i++) {
         if (i % 2 == 0) {
             real_rob_pts[i * 4] = pt0;

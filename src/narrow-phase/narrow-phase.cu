@@ -3,9 +3,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-extern __constant__ Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 
 extern __constant__ float base_rob_x[NUM_ROB_VERTICES];
@@ -34,29 +34,29 @@ __host__ __device__ bool isclose(float v1, float v2) {
     }
 }
 
-__host__ __device__ bool veq(const Vector3f v1, const Vector3f v2) {
-    return isclose(v1.x, v2.x) && isclose(v1.y, v2.y) && isclose(v1.z, v2.z);
+__host__ __device__ bool veq(const Eigen::Vector3f v1, const Eigen::Vector3f v2) {
+    return isclose(v1(0), v2(0)) && isclose(v1(1), v2(1)) && isclose(v1(2), v2(2));
 }
 
-__host__ __device__ bool teq(const Triangle self_tr, const Vector3f *self_pts,
-        const Triangle other_tr, const Vector3f *other_pts) {
+__host__ __device__ bool teq(const Triangle self_tr, const Eigen::Vector3f *self_pts,
+        const Triangle other_tr, const Eigen::Vector3f *other_pts) {
     return veq(self_pts[self_tr.v1], other_pts[other_tr.v1]) &&
         veq(self_pts[self_tr.v2], other_pts[other_tr.v2]) &&
         veq(self_pts[self_tr.v3], other_pts[other_tr.v3]);
 }
 
-__host__ __device__ void compute_plane(const Triangle tr, const Vector3f *pts, Vector3f *N,
+__host__ __device__ void compute_plane(const Triangle tr, const Eigen::Vector3f *pts, Eigen::Vector3f *N,
     float *d) {
-    Vector3f v2_v1(pts[tr.v2].x - pts[tr.v1].x, pts[tr.v2].y - pts[tr.v1].y,
-        pts[tr.v2].z - pts[tr.v1].z);
-    Vector3f v3_v2(pts[tr.v3].x - pts[tr.v2].x, pts[tr.v3].y - pts[tr.v2].y,
-        pts[tr.v3].z - pts[tr.v2].z);
+    Eigen::Vector3f v2_v1(pts[tr.v2](0) - pts[tr.v1](0), pts[tr.v2](1) - pts[tr.v1](1),
+        pts[tr.v2](2) - pts[tr.v1](2));
+    Eigen::Vector3f v3_v2(pts[tr.v3](0) - pts[tr.v2](0), pts[tr.v3](1) - pts[tr.v2](1),
+        pts[tr.v3](2) - pts[tr.v2](2));
 
-    N->x = v2_v1.y * v3_v2.z - v2_v1.z * v3_v2.y;
-    N->y = v2_v1.z * v3_v2.x - v2_v1.x * v3_v2.z;
-    N->z = v2_v1.x * v3_v2.y - v2_v1.y * v3_v2.x;
+    (*N)(0) = v2_v1(1) * v3_v2(2) - v2_v1(2) * v3_v2(1);
+    (*N)(1) = v2_v1(2) * v3_v2(0) - v2_v1(0) * v3_v2(2);
+    (*N)(2) = v2_v1(0) * v3_v2(1) - v2_v1(1) * v3_v2(0);
 
-    *d = -1 * (N->x * pts[tr.v1].x + N->y * pts[tr.v1].y + N->z * pts[tr.v1].z);
+    *d = -1 * (*N)(0) * pts[tr.v1](0) + (*N)(1) * pts[tr.v1](1) + (*N)(2) * pts[tr.v1](2);
 }
 
 __host__ __device__ void compute_plane_sep(const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float *Nx, float *Ny, float *Nz, float *d) {
@@ -75,24 +75,28 @@ __host__ __device__ void compute_plane_sep(const float pt1_x, const float pt1_y,
     *d = -1 * (*Nx * pt1_x + *Ny * pt1_y + *Nz * pt1_z);
 }
 
-__host__ __device__ Vector3f compute_signed_dists(const Vector3f N, const float d, const Triangle tr,
-        const Vector3f *pts) {
-    Vector3f dists;
-    dists.x = N.x * pts[tr.v1].x + N.y * pts[tr.v1].y + N.z * pts[tr.v1].z + d;
-    dists.y = N.x * pts[tr.v2].x + N.y * pts[tr.v2].y + N.z * pts[tr.v2].z + d;
-    dists.z = N.x * pts[tr.v3].x + N.y * pts[tr.v3].y + N.z * pts[tr.v3].z + d;
+__host__ __device__ Eigen::Vector3f compute_signed_dists(const Eigen::Vector3f N, const float d, const Triangle tr,
+        const Eigen::Vector3f *pts) {
+    Eigen::Vector3f dists;
+    dists(0) = N(0) * pts[tr.v1](0) + N(1) * pts[tr.v1](1) + N(2) * pts[tr.v1](2) + d;
+    dists(1) = N(0) * pts[tr.v2](0) + N(1) * pts[tr.v2](1) + N(2) * pts[tr.v2](2) + d;
+    dists(2) = N(0) * pts[tr.v3](0) + N(1) * pts[tr.v3](1) + N(2) * pts[tr.v3](2) + d;
     return dists;
 }
 
-__host__ __device__ void compute_signed_dists_sep(const float Nx, const float Ny, const float Nz, const float d, const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float* dists_x, float* dists_y, float* dists_z) {
+__host__ __device__ void compute_signed_dists_sep(const float Nx, const float Ny, const float Nz, const float d, 
+            const float pt1_x, const float pt1_y, const float pt1_z,
+            const float pt2_x, const float pt2_y, const float pt2_z, 
+            const float pt3_x, const float pt3_y, const float pt3_z, 
+            float* dists_x, float* dists_y, float* dists_z) {
     *dists_x = Nx * pt1_x + Ny * pt1_y + Nz * pt1_z + d;
     *dists_y = Nx * pt2_x + Ny * pt2_y + Nz * pt2_z + d;
     *dists_z = Nx * pt3_x + Ny * pt3_y + Nz * pt3_z + d;
 }
 
-__host__ __device__ bool no_overlap(const Vector3f dists) {
-    bool gz = dists.x >= TOL || dists.y >= TOL || dists.z >= TOL;
-    bool lz = dists.x <= -1 * TOL || dists.y <= -1 * TOL || dists.z <= -1 * TOL;
+__host__ __device__ bool no_overlap(const Eigen::Vector3f dists) {
+    bool gz = dists(0) >= TOL || dists(1) >= TOL || dists(2) >= TOL;
+    bool lz = dists(0) <= -1 * TOL || dists(1) <= -1 * TOL || dists(2) <= -1 * TOL;
 
     return !(gz && lz);
 }
@@ -124,32 +128,32 @@ __host__ __device__ void la_solve(const float A1, const float A2, const float A3
     }
 }
 
-__host__ __device__ void compute_intersect_line(const Vector3f N1, const float d1,
-        const Vector3f N2, const float d2, Vector3f *D, Vector3f *O) {
+__host__ __device__ void compute_intersect_line(const Eigen::Vector3f N1, const float d1,
+        const Eigen::Vector3f N2, const float d2, Eigen::Vector3f *D, Eigen::Vector3f *O) {
 
-    D->x = N1.y * N2.z - N1.z * N2.y;
-    D->y = N1.z * N2.x - N1.x * N2.z;
-    D->z = N1.x * N2.y - N1.y * N2.x;
+    (*D)(0) = N1(1) * N2(2) - N1(2) * N2(1);
+    (*D)(1) = N1(2) * N2(0) - N1(0) * N2(2);
+    (*D)(2) = N1(0) * N2(1) - N1(1) * N2(0);
 
     // Set t = 1
     float x1, x2;
-    if (!isclose(D->z, 0)) {
-        la_solve(N1.x, N1.y, N2.x, N2.y, -d1, -d2, &x1, &x2);
-        O->x = x1;
-        O->y = x2;
-        O->z = 0;
+    if (!isclose((*D)(2), 0)) {
+        la_solve(N1(0), N1(1), N2(0), N2(1), -d1, -d2, &x1, &x2);
+        (*O)(0) = x1;
+        (*O)(1) = x2;
+        (*O)(2) = 0;
 
-    } else if (!isclose(D->y, 0)) {
-        la_solve(N1.x, N1.z, N2.x, N2.z, -d1, -d2, &x1, &x2);
-        O->x = x1;
-        O->y = 0;
-        O->z = x2;
+    } else if (!isclose((*D)(1), 0)) {
+        la_solve(N1(0), N1(2), N2(0), N2(2), -d1, -d2, &x1, &x2);
+        (*O)(0) = x1;
+        (*O)(1) = 0;
+        (*O)(2) = x2;
 
     } else {
-        la_solve(N1.y, N1.z, N2.y, N2.z, -d1, -d2, &x1, &x2);
-        O->x = 0;
-        O->y = x1;
-        O->z = x2;
+        la_solve(N1(1), N1(2), N2(1), N2(2), -d1, -d2, &x1, &x2);
+        (*O)(0) = 0;
+        (*O)(1) = x1;
+        (*O)(2) = x2;
     }
 }
 
@@ -181,44 +185,44 @@ __host__ __device__ void compute_intersect_line_sep(const float N1_x, const floa
     }
 }
 
-__host__ __device__ float project_vertex(const Vector3f V, const Vector3f D, const Vector3f O) {
-    return D.x * (V.x - O.x) + D.y * (V.y - O.y) + D.z * (V.z - O.z);
+__host__ __device__ float project_vertex(const Eigen::Vector3f V, const Eigen::Vector3f D, const Eigen::Vector3f O) {
+    return D(0) * (V(0) - O(0)) + D(1) * (V(1) - O(1)) + D(2) * (V(2) - O(2));
 }
 
 __host__ __device__ float project_vertex_sep(const float Vx, const float Vy, const float Vz, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz) {
     return Dx * (Vx - Ox) + Dy * (Vy - Oy) + Dz * (Vz - Oz);
 }
 
-__host__ __device__ void canonicalize_triangle(const Triangle t, const Vector3f dists, Triangle *new_t, Vector3f *new_dists) {
-    if (dists.x > 0 && dists.y > 0 || dists.x < 0 && dists.y < 0) {
+__host__ __device__ void canonicalize_triangle(const Triangle t, const Eigen::Vector3f dists, Triangle *new_t, Eigen::Vector3f *new_dists) {
+    if (dists(0) > 0 && dists(1) > 0 || dists(0) < 0 && dists(1) < 0) {
         new_t->v1 = t.v1;
         new_t->v2 = t.v3;
         new_t->v3 = t.v2;
 
-        new_dists->x = dists.x;
-        new_dists->y = dists.z;
-        new_dists->z = dists.y;
-    } else if (dists.x > 0 && dists.z > 0 || dists.x < 0 && dists.z < 0) {
+        (*new_dists)(0) = dists(0);
+        (*new_dists)(1) = dists(2);
+        (*new_dists)(2) = dists(1);
+    } else if (dists(0) > 0 && dists(2) > 0 || dists(0) < 0 && dists(2) < 0) {
         new_t->v1 = t.v1;
         new_t->v2 = t.v2;
         new_t->v3 = t.v3;
 
-        new_dists->x = dists.x;
-        new_dists->y = dists.y;
-        new_dists->z = dists.z;
+        (*new_dists)(0) = dists(0);
+        (*new_dists)(1) = dists(1);
+        (*new_dists)(2) = dists(2);
     } else {
         new_t->v1 = t.v2;
         new_t->v2 = t.v1;
         new_t->v3 = t.v3;
 
-        new_dists->x = dists.y;
-        new_dists->y = dists.x;
-        new_dists->z = dists.z;
+        (*new_dists)(0) = dists(1);
+        (*new_dists)(1) = dists(0);
+        (*new_dists)(2) = dists(2);
     }
 }
 
 __host__ __device__ void canonicalize_triangle_sep(const float dists_x, const float dists_y, const float dists_z, int *v1, int *v2, int *v3) {
-    if (dists_x > 0 && dists_y > 0 || dists_x < 0 && dists_y < 0) {
+    if (dists_x > 0 && dists_y> 0 || dists_x < 0 && dists_y < 0) {
         *v1 = 0;
         *v2 = 2;
         *v3 = 1;
@@ -235,8 +239,8 @@ __host__ __device__ void canonicalize_triangle_sep(const float dists_x, const fl
     }
 }
 
-__host__ __device__ float compute_parametric_variable(const Vector3f v0, const Vector3f v1,
-        const float d0, const float d1, const Vector3f D, const Vector3f O) {
+__host__ __device__ float compute_parametric_variable(const Eigen::Vector3f v0, const Eigen::Vector3f v1,
+        const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O) {
     float p_v0 = project_vertex(v0, D, O);
     float p_v1 = project_vertex(v1, D, O);
 
@@ -250,20 +254,20 @@ __host__ __device__ float compute_parametric_variable_sep(const float v0_x, cons
     return p_v0 + (p_v1 - p_v0) * d0 / (d0 - d1);
 }
 
-__host__ __device__ bool is_coplanar(const Vector3f N1, const float d1, const Vector3f N2, const float d2) {
+__host__ __device__ bool is_coplanar(const Eigen::Vector3f N1, const float d1, const Eigen::Vector3f N2, const float d2) {
     float ratio;
     bool started_ratio = false;
     for (int i = 0; i < 4; i++) {
         float p1, p2;
         if (i == 0) {
-            p1 = N1.x;
-            p2 = N2.x;
+            p1 = N1(0);
+            p2 = N2(0);
         } else if (i == 1) {
-            p1 = N1.y;
-            p2 = N2.y;
+            p1 = N1(1);
+            p2 = N2(1);
         } else if (i == 2) {
-            p1 = N1.z;
-            p2 = N2.z;
+            p1 = N1(2);
+            p2 = N2(2);
         } else {
             p1 = d1;
             p2 = d2;
@@ -341,7 +345,7 @@ __host__ __device__ bool is_coplanar_sep(const float N1_x, const float N1_y, con
 // true if no collision
 void narrowPhaseBaseline(int num_confs, int num_rob_trs, int num_rob_pts,
     int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
-    const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
+    const Eigen::Vector3f *rob_pts, const Triangle *obs_trs, const Eigen::Vector3f *obs_pts,
     bool *valid_conf) {
 
     for (int i = 0; i < num_confs; i++) {
@@ -351,17 +355,17 @@ void narrowPhaseBaseline(int num_confs, int num_rob_trs, int num_rob_pts,
         // not these intersect
         bool req_coplanar = false;
         for (int j = 0; j < num_rob_trs; j++) {
-            Vector3f Nr;
+            Eigen::Vector3f Nr;
             float dr;
             compute_plane(rob_trs[j], &rob_pts[i * num_rob_pts], &Nr, &dr);
 
             for (int k = 0; k < num_obs_trs; k++) {
-                Vector3f distO = compute_signed_dists(Nr, dr, obs_trs[k], obs_pts);
+                Eigen::Vector3f distO = compute_signed_dists(Nr, dr, obs_trs[k], obs_pts);
                 if (no_overlap(distO)) {
                     continue;
                 }
 
-                Vector3f No;
+                Eigen::Vector3f No;
                 float do_;
                 compute_plane(obs_trs[k], obs_pts, &No, &do_);
 
@@ -370,30 +374,30 @@ void narrowPhaseBaseline(int num_confs, int num_rob_trs, int num_rob_pts,
                     continue;
                 }
 
-                Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
+                Eigen::Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
                 if (no_overlap(distR)) {
                     continue;
                 }
 
-                Vector3f D, O;
+                Eigen::Vector3f D, O;
                 compute_intersect_line(Nr, dr, No, do_, &D, &O);
 
                 Triangle ctr, cto;
-                Vector3f cdr, cdo;
+                Eigen::Vector3f cdr, cdo;
                 canonicalize_triangle(rob_trs[j], distR, &ctr, &cdr);
                 canonicalize_triangle(obs_trs[k], distO, &cto, &cdo);
 
                 float t_r01 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v1],
-                    rob_pts[i * num_rob_pts + ctr.v2], cdr.x, cdr.y, D, O);
+                    rob_pts[i * num_rob_pts + ctr.v2], cdr(0), cdr(1), D, O);
 
                 float t_r12 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v2],
-                    rob_pts[i * num_rob_pts + ctr.v3], cdr.y, cdr.z, D, O);
+                    rob_pts[i * num_rob_pts + ctr.v3], cdr(1), cdr(2), D, O);
 
                 float t_o01 = compute_parametric_variable(obs_pts[cto.v1],
-                    obs_pts[cto.v2], cdo.x, cdo.y, D, O);
+                    obs_pts[cto.v2], cdo(0), cdo(1), D, O);
 
                 float t_o12 = compute_parametric_variable(obs_pts[cto.v2],
-                    obs_pts[cto.v3], cdo.y, cdo.z, D, O);
+                    obs_pts[cto.v3], cdo(1), cdo(2), D, O);
 
                 // There is no overlap
                 if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
@@ -689,7 +693,7 @@ __global__ void narrowPhaseKernel_coarse(int num_confs, int num_rob_trs, int num
 
 __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pts,
         int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
-        const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
+        const Eigen::Vector3f *rob_pts, const Triangle *obs_trs, const Eigen::Vector3f *obs_pts,
         bool *valid_conf) {
 
     int i = blockDim.x * blockIdx.x + threadIdx.x;
@@ -704,23 +708,23 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
         // not these intersect
         bool req_coplanar = false;
         for (int j = 0; j < num_rob_trs; j++) {
-            Vector3f Nr;
+            Eigen::Vector3f Nr;
             float dr;
             //delete these when testing
             Triangle t = rob_trs[j];
-            const Vector3f* robot_pts = &rob_pts[i * num_rob_pts];
-            Vector3f *pNr = &Nr;
+            const Eigen::Vector3f* robot_pts = &rob_pts[i * num_rob_pts];
+            Eigen::Vector3f *pNr = &Nr;
             float *pdr = &dr;
             compute_plane(t, robot_pts, pNr, pdr);
             // compute_plane(rob_trs[j], &rob_pts[i * num_rob_pts], &Nr, &dr);
 
             for (int k = 0; k < num_obs_trs; k++) {
-                Vector3f distO = compute_signed_dists(Nr, dr, obs_trs[k], obs_pts);
+                Eigen::Vector3f distO = compute_signed_dists(Nr, dr, obs_trs[k], obs_pts);
                 if (no_overlap(distO)) {
                     continue;
                 }
 
-                Vector3f No;
+                Eigen::Vector3f No;
                 float do_;
                 compute_plane(obs_trs[k], obs_pts, &No, &do_);
 
@@ -729,30 +733,30 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
                     continue;
                 }
 
-                Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
+                Eigen::Vector3f distR = compute_signed_dists(No, do_, rob_trs[j], &rob_pts[i * num_rob_pts]);
                 if (no_overlap(distR)) {
                     continue;
                 }
 
-                Vector3f D, O;
+                Eigen::Vector3f D, O;
                 compute_intersect_line(Nr, dr, No, do_, &D, &O);
 
                 Triangle ctr, cto;
-                Vector3f cdr, cdo;
+                Eigen::Vector3f cdr, cdo;
                 canonicalize_triangle(rob_trs[j], distR, &ctr, &cdr);
                 canonicalize_triangle(obs_trs[k], distO, &cto, &cdo);
 
                 float t_r01 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v1],
-                    rob_pts[i * num_rob_pts + ctr.v2], cdr.x, cdr.y, D, O);
+                    rob_pts[i * num_rob_pts + ctr.v2], cdr(0), cdr(1), D, O);
 
                 float t_r12 = compute_parametric_variable(rob_pts[i * num_rob_pts + ctr.v2],
-                    rob_pts[i * num_rob_pts + ctr.v3], cdr.y, cdr.z, D, O);
+                    rob_pts[i * num_rob_pts + ctr.v3], cdr(1), cdr(2), D, O);
 
                 float t_o01 = compute_parametric_variable(obs_pts[cto.v1],
-                    obs_pts[cto.v2], cdo.x, cdo.y, D, O);
+                    obs_pts[cto.v2], cdo(0), cdo(1), D, O);
 
                 float t_o12 = compute_parametric_variable(obs_pts[cto.v2],
-                    obs_pts[cto.v3], cdo.y, cdo.z, D, O);
+                    obs_pts[cto.v3], cdo(1), cdo(2), D, O);
 
                 // There is no overlap
                 if (min(t_r01, t_r12) >= max(t_o01, t_o12)) {
@@ -784,7 +788,7 @@ __global__ void narrowPhaseKernel(int num_confs, int num_rob_trs, int num_rob_pt
 
 void narrowPhase_unopt(int num_confs, int num_rob_trs, int num_rob_pts,
         int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
-        const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
+        const Eigen::Vector3f *rob_pts, const Triangle *obs_trs, const Eigen::Vector3f *obs_pts,
         bool *valid_conf) {
 
     int device_count;
@@ -812,9 +816,9 @@ void narrowPhase_unopt(int num_confs, int num_rob_trs, int num_rob_pts,
         printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
     #endif
 
-    Vector3f *d_rob_pts;
-    cudaMalloc(&d_rob_pts, num_confs * num_rob_pts * sizeof(Vector3f));
-    cudaMemcpy(d_rob_pts, rob_pts, num_confs * num_rob_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
+    Eigen::Vector3f *d_rob_pts;
+    cudaMalloc(&d_rob_pts, num_confs * num_rob_pts * sizeof(Eigen::Vector3f));
+    cudaMemcpy(d_rob_pts, rob_pts, num_confs * num_rob_pts * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
     fflush(stdout);
     #if VERBOSE
@@ -832,9 +836,9 @@ void narrowPhase_unopt(int num_confs, int num_rob_trs, int num_rob_pts,
         printf("Status: %s: %s\n", cudaGetErrorName(err), cudaGetErrorString(err));
     #endif
 
-    Vector3f *d_obs_pts;
-    cudaMalloc(&d_obs_pts, num_obs_pts * sizeof(Vector3f));
-    cudaMemcpy(d_obs_pts, obs_pts, num_obs_pts * sizeof(Vector3f), cudaMemcpyHostToDevice);
+    Eigen::Vector3f *d_obs_pts;
+    cudaMalloc(&d_obs_pts, num_obs_pts * sizeof(Eigen::Vector3f));
+    cudaMemcpy(d_obs_pts, obs_pts, num_obs_pts * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);
     cudaDeviceSynchronize();
     fflush(stdout);
     #if VERBOSE
@@ -916,7 +920,7 @@ void narrowPhase_unopt(int num_confs, int num_rob_trs, int num_rob_pts,
 
 void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
         int num_obs_trs, int num_obs_pts, const Triangle *rob_trs,
-        const Vector3f *rob_pts, const Triangle *obs_trs, const Vector3f *obs_pts,
+        const Eigen::Vector3f *rob_pts, const Triangle *obs_trs, const Eigen::Vector3f *obs_pts,
         bool *valid_conf) {
 
     // // First copy everything to struct-of-arrays;
@@ -940,9 +944,9 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
     // }
 
     // for (int i = 0; i < num_confs * num_rob_pts; i++) {
-    //     rob_pts_x[i] = rob_pts[i].x;
-    //     rob_pts_y[i] = rob_pts[i].y;
-    //     rob_pts_z[i] = rob_pts[i].z;
+    //     rob_pts_x[i] = rob_pts[i](0);
+    //     rob_pts_y[i] = rob_pts[i](1);
+    //     rob_pts_z[i] = rob_pts[i](2);
     // }
 
     // for (int i = 0; i < num_obs_trs; i++) {
@@ -952,9 +956,9 @@ void narrowPhase(int num_confs, int num_rob_trs, int num_rob_pts,
     // }
 
     // for (int i = 0; i < num_obs_pts; i++) {
-    //     obs_pts_x[i] = obs_pts[i].x;
-    //     obs_pts_y[i] = obs_pts[i].y;
-    //     obs_pts_z[i] = obs_pts[i].z;
+    //     obs_pts_x[i] = obs_pts[i](0);
+    //     obs_pts_y[i] = obs_pts[i](1);
+    //     obs_pts_z[i] = obs_pts[i](2);
     // }
 
     // int device_count;

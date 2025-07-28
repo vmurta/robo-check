@@ -133,7 +133,7 @@ void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_con
 }
 
 //TODO: modify this to directly write to device memory
-void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vector<Triangle>& triangles){
+void loadOBJFile(const char* filename, std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles){
   FILE* file = fopen(filename, "rb");
   if(!file)
   {
@@ -172,7 +172,7 @@ void loadOBJFile(const char* filename, std::vector<Vector3f>& points, std::vecto
           float x = (float)atof(strtok(NULL, "\t "));
           float y = (float)atof(strtok(NULL, "\t "));
           float z = (float)atof(strtok(NULL, "\t "));
-          Vector3f p(x, y, z);
+          Eigen::Vector3f p(x, y, z);
           points.push_back(p);
         }
       }
