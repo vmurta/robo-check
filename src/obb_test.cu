@@ -1,5 +1,7 @@
 #include <iostream>
 #include <Eigen/Dense>
+#include <fcl/fcl.h>
+#include "./Utils.h"
 
 // taken from fcl/math/bv/obb-inl.h
 /// @brief Check collision between two boxes: the first box is in configuration
@@ -17,6 +19,63 @@
 // 
 // The function will return true if the two boxes are disjoint, and false otherwise.
 
+// TODO: This assumes that B is a rotation matrix of B with respect to the axes of A
+// we may want to calculate this dynamically, but for now, assume A axis aligned and centered at origin
+
+OBB_soa hierarchy_from_mesh(const char* mesh_path){
+    // Load Robot
+    std::vector<fcl::Vector3f> rob_vertices;
+    std::vector<fcl::Triangle> rob_triangles;
+
+    loadOBJFileFCL(mesh_path, rob_vertices, rob_triangles);
+
+    std::shared_ptr<fcl::BVHModel<fcl::OBB<float>>> rob_mesh(new fcl::BVHModel<fcl::OBB<float>>);
+    rob_mesh->beginModel(rob_triangles.size(), rob_vertices.size());
+    rob_mesh->addSubModel(rob_vertices, rob_triangles);
+    rob_mesh->endModel();
+
+    // Access OBB data from rob_mesh
+    // rob_mesh->getNumBVs() gives the number of OBBs in the hierarchy
+    size_t num_boxes = rob_mesh->getNumBVs();
+    OBB_soa result(num_boxes);
+
+    Eigen::Matrix3f rotation;
+    Eigen::Vector3f translation;
+    Eigen::Vector3f half_dimensions;
+    for (int i = 0; i < num_boxes; ++i) {
+        fcl::OBB<float> obb = rob_mesh->getBV(i).bv;
+        rotation = obb.axis;
+        translation = obb.To;
+        half_dimensions = obb.extent;
+
+        // // print out the values to verify
+        // std::cout << "OBB " << i << ":\n";
+        // std::cout << "Rotation:\n" << rotation << "\n";
+        // std::cout << "Translation:\n" << translation.transpose() << "\n";
+        // std::cout << "Half Dimensions:\n" << half_dimensions.transpose() << "\n";
+        // std::cout << "-----------------------\n";
+        result.set(i, rotation, translation, half_dimensions);
+    }
+
+    // delete rob_mesh manually to free memory
+    rob_mesh.reset();
+
+    //verify that the data was copied correctly
+    for (int i = 0; i < num_boxes; ++i) {
+        std::cout << "Verifying OBB " << i << ":\n";
+        std::cout << "Rotation:\n" << result.pR[i] << "\n";
+        std::cout << "Translation:\n" << result.pT[i].transpose() << "\n";
+        std::cout << "Half Dimensions:\n" << result.pDim[i].transpose() << "\n";
+        std::cout << "-----------------------\n";
+    }
+
+
+
+    return result;
+}
+
+// Note: This assumes that OBB B has rotation and translation with respect to A
+// will this be feasible to use in practice?
 __global__ void d_obbDisjoint(  const Eigen::Matrix3f* pB, const Eigen::Vector3f* pT,
                                 const Eigen::Vector3f* pa, const Eigen::Vector3f* pb, bool* pdisjoint) {
 
@@ -27,8 +86,7 @@ __global__ void d_obbDisjoint(  const Eigen::Matrix3f* pB, const Eigen::Vector3f
     Eigen::Vector3f b = pb[blockIdx.x]; 
 
     float t; // distance between centers of the two boxes as projected onto the axis
-    const float epsilon = 1e-6f; // tolerance for floating point comparison
-
+    const float epsilon = 1e-6f; // small value to avoid numerical issues
     // Take the absolute value of the rotation matrix B, add epsilon to avoid numerical issues
     // TODO: make this read as efficient as possible
     Eigen::Matrix3f Bf = B.cwiseAbs(); // absolute value of rotation matrix B 
@@ -169,12 +227,14 @@ __global__ void d_obbDisjoint(  const Eigen::Matrix3f* pB, const Eigen::Vector3f
 
 }
 
+
+//TODO: idea -- half float for obb, full float for triangle overlap?
 int main() {
     // Test OBB disjoint function
     const int num_boxes = 1; // Example with one box
 
     Eigen::Matrix3f B = Eigen::Matrix3f::Identity(); // Identity rotation
-    Eigen::Vector3f T(5.0f, 5.0f, 5.0f); // Center at origin
+    Eigen::Vector3f T(5.0f, 5.0f, 5.0f); // Translation of B from A
     Eigen::Vector3f a(1.0f, 1.0f, 1.0f); // Half dimensions of box A
     Eigen::Vector3f b(1.0f, 1.0f, 1.0f); // Half dimensions of box B
     bool disjoint[num_boxes] = {false};
@@ -191,6 +251,8 @@ int main() {
     cudaMalloc((void**)&pb, num_boxes * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&pdisjoint, num_boxes * sizeof(bool));
 
+    OBB_soa obb_data = hierarchy_from_mesh("/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj");
+    obb_data.writeToFile("robot_OBB_BVH.obj");
     // Copy data to device
     cudaMemcpy(pB, &B, sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice);
     cudaMemcpy(pT, &T, sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);

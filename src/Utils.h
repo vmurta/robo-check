@@ -90,6 +90,74 @@ struct AABB
     float z_max;
 };
 
+struct OBB_soa {
+    Eigen::Matrix3f *pR; // rotation matrix
+    Eigen::Vector3f *pT; // translation vector
+    Eigen::Vector3f *pDim; // half dimensions of box A
+    size_t size;
+
+    OBB_soa(size_t size) : size(size) {
+        pR = new Eigen::Matrix3f[size];
+        pT = new Eigen::Vector3f[size];
+        pDim = new Eigen::Vector3f[size];
+    }
+
+    ~OBB_soa() {
+        delete[] pR;
+        delete[] pT;
+        delete[] pDim;
+    }
+
+    void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim) {
+        if (index >= size) {
+            throw std::out_of_range("Index out of range");
+        }
+        pR[index] = R;
+        pT[index] = T;
+        pDim[index] = dim;
+    }
+
+    void writeToFile(const std::string& filename) const {
+        std::ofstream file(filename);
+        if (!file.is_open()) {
+            std::cerr << "Error opening file: " << filename << std::endl;
+            return;
+        }
+        
+        // Write this as a .obj file
+        for (size_t i = 0; i < size; ++i) {
+            file << "o Box" << i << "\n";
+            const Eigen::Matrix3f& R = pR[i];
+            const Eigen::Vector3f& T = pT[i];
+            const Eigen::Vector3f& dim = pDim[i];
+
+            // Calculate the vertices of the OBB
+            Eigen::Vector3f vertices[8];
+            vertices[0] = T + R * Eigen::Vector3f(-dim.x(), -dim.y(), -dim.z());
+            vertices[1] = T + R * Eigen::Vector3f(dim.x(), -dim.y(), -dim.z());
+            vertices[2] = T + R * Eigen::Vector3f(dim.x(), dim.y(), -dim.z());
+            vertices[3] = T + R * Eigen::Vector3f(-dim.x(), dim.y(), -dim.z());
+            vertices[4] = T + R * Eigen::Vector3f(-dim.x(), -dim.y(), dim.z());
+            vertices[5] = T + R * Eigen::Vector3f(dim.x(), -dim.y(), dim.z());
+            vertices[6] = T + R * Eigen::Vector3f(dim.x(), dim.y(), dim.z());
+            vertices[7] = T + R * Eigen::Vector3f(-dim.x(), dim.y(), dim.z());
+
+            // Write vertices to file
+            for (const auto& vertex : vertices) {
+                file << "v " << vertex.x() << " " << vertex.y() << " " << vertex.z() << "\n";
+            }
+
+            // Write faces to file
+            file << "f " << (i * 8 + 1) << " " << (i * 8 + 2) << " " << (i * 8 + 3) << " " << (i * 8 + 4) << "\n";
+            file << "f " << (i * 8 + 5) << " " << (i * 8 + 6) << " " << (i * 8 + 7) << " " << (i * 8 + 8) << "\n";
+            file << "f " << (i * 8 + 1) << " " << (i * 8 + 2) << " " << (i * 8 + 6) << " " << (i * 8 + 5) << "\n";
+            file << "f " << (i * 8 + 2) << " " << (i * 8 + 3) << " " << (i * 8 + 7) << " " << (i * 8 + 6) << "\n";
+            file << "f " << (i * 8 + 3) << " " << (i * 8 + 4) << " " << (i * 8 + 8) << " " << (i * 8 + 7) << "\n";
+            file << "f " << (i * 8 + 4) << " " << (i * 8 + 1) << " " << (i * 8 + 5) << " " << (i * 8 + 8) << "\n";
+        }
+    }
+};
+
 #define NUM_ROB_VERTICES 792
 #define MAX_NUM_ROBOT_TRIANGLES 1008
 extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
@@ -146,3 +214,64 @@ void printConfigurationTagged(const ConfigurationTagged& conf);
 void loadOBJFileFCL(const char* filename, std::vector<fcl::Vector3f>& points, std::vector<fcl::Triangle>& triangles);
 fcl::Transform3f configurationToTransform(const Configuration& config);
 void checkConfsCPU(std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs);
+
+class tranform_soa {
+    //spatial coordinates
+    float *x;
+    float *y;
+    float *z;
+
+    // quaternion values
+    float *qx;
+    float *qy;
+    float *qz;
+    float *qw;
+    
+    size_t size;
+
+    public:
+        tranform_soa(size_t size) : size(size) {
+            x = new float[size];
+            y = new float[size];
+            z = new float[size];
+            qx = new float[size];
+            qy = new float[size];
+            qz = new float[size];
+            qw = new float[size];
+        }   
+
+        ~tranform_soa() {
+            delete[] x;
+            delete[] y;
+            delete[] z;
+            delete[] qx;
+            delete[] qy;
+            delete[] qz;
+            delete[] qw;
+        }
+
+        void set(size_t index, const Configuration& conf) {
+            if (index >= size) {
+                throw std::out_of_range("Index out of range");
+            }
+            x[index] = conf.x;
+            y[index] = conf.y;
+            z[index] = conf.z;
+
+
+            //TODO: double check this
+            // Convert Euler angles to quaternion
+            float cy = cos(conf.yaw * 0.5f);
+            float sy = sin(conf.yaw * 0.5f);
+            float cp = cos(conf.pitch * 0.5f);
+            float sp = sin(conf.pitch * 0.5f);
+            float cr = cos(conf.roll * 0.5f);
+            float sr = sin(conf.roll * 0.5f);
+
+            qx[index] = sr * cp * cy - cr * sp * sy;
+            qy[index] = cr * sp * cy + sr * cp * sy;
+            qz[index] = cr * cp * sy - sr * sp * cy;
+            qw[index] = cr * cp * cy + sr * sp * sy;
+        }
+
+};

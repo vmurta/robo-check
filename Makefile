@@ -24,7 +24,7 @@ Full-Integration-Test: $(BUILD_DIR)/full-integration-test.o $(BUILD_DIR)/Utils.o
 Generate-Tests: $(BUILD_DIR)/generate-tests.o $(BUILD_DIR)/Utils.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
-Eigen: $(BUILD_DIR)/obb_test.o
+Eigen: $(BUILD_DIR)/obb_test.o $(BUILD_DIR)/Utils.o
 	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
 
 $(BUILD_DIR):
