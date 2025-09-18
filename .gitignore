@@ -5,6 +5,9 @@
 CPU-Sphere-Test
 CPU-Mesh-Test
 generate-test
+Eigen
+Full-Integration-Test
+Generate-Tests
 
 # Test files
 tmp/*
@@ -18,3 +21,6 @@ python/env/*
 python/__pycache__/*
 
 build/
+
+
+.vscode/*
