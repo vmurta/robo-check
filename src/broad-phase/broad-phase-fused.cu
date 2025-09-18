@@ -54,29 +54,6 @@ __device__ Eigen::Matrix4f createTransformationMatrix(const Configuration config
     return transform;
 }
 
-__device__ Eigen::Matrix3f createRotationMatrix(const Configuration config) {
-
-
-    float cosB = cos(config.pitch);
-    float sinB = sin(config.pitch);
-    float cosA = cos(config.yaw);
-    float sinA = sin(config.yaw);
-    float cosC = cos(config.roll);
-    float sinC = sin(config.roll);
-
-    Eigen::Matrix3f rotate;
-    rotate(0,0) = cosA * cosB;
-    rotate(0,1) = cosA * sinB * sinC - sinA * cosC;
-    rotate(0,2) = cosA *  sinB * cosC + sinA * sinC;
-    rotate(1,0) = sinA * cosB;
-    rotate(1,1) = sinA * sinB * sinC + cosA * cosC;
-    rotate(1,2) = sinA * sinB * cosC - cosA * sinC;
-    rotate(2,0) = -sinB;
-    rotate(2,1) = cosB * sinC;
-    rotate(2,2) = cosB * cosC;
-
-    return rotate;
-}
 
 
 
