@@ -47,6 +47,9 @@ OBB_soa hierarchy_from_mesh(const char* mesh_path){
         rotation = obb.axis;
         translation = obb.To;
         half_dimensions = obb.extent;
+        std::cout << "Rotation: " << rotation << std::endl;
+        std::cout << "Translation: " << translation.transpose() << std::endl;
+        std::cout << "Half Dimensions: " << half_dimensions.transpose() << std::endl;
 
         // // print out the values to verify
         // std::cout << "OBB " << i << ":\n";
@@ -57,17 +60,18 @@ OBB_soa hierarchy_from_mesh(const char* mesh_path){
         result.set(i, rotation, translation, half_dimensions);
     }
 
+    
     // delete rob_mesh manually to free memory
     rob_mesh.reset();
 
     //verify that the data was copied correctly
-    for (int i = 0; i < num_boxes; ++i) {
-        std::cout << "Verifying OBB " << i << ":\n";
-        std::cout << "Rotation:\n" << result.pR[i] << "\n";
-        std::cout << "Translation:\n" << result.pT[i].transpose() << "\n";
-        std::cout << "Half Dimensions:\n" << result.pDim[i].transpose() << "\n";
-        std::cout << "-----------------------\n";
-    }
+    // for (int i = 0; i < num_boxes; ++i) {
+    //     std::cout << "Verifying OBB " << i << ":\n";
+    //     std::cout << "Rotation:\n" << result.pR[i] << "\n";
+    //     std::cout << "Translation:\n" << result.pT[i].transpose() << "\n";
+    //     std::cout << "Half Dimensions:\n" << result.pDim[i].transpose() << "\n";
+    //     std::cout << "-----------------------\n";
+    // }
 
 
 
@@ -224,6 +228,8 @@ __global__ void d_obb_base(  const Eigen::Matrix3f* pB, const Eigen::Vector3f* p
             b[0] * Bf(2, 1) + b[1] * Bf(2, 0)))
         pdisjoint[blockIdx.x] = true;
         return;
+
+    pdisjoint[blockIdx.x] = false;
 
 }
 
@@ -391,6 +397,8 @@ __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector
             b[0] * Bf(2, 1) + b[1] * Bf(2, 0)))
         pdisjoint[index] = true;
         return;
+    
+    pdisjoint[index] = false;
 }
 
 // Code for 1 single box test
@@ -455,17 +463,19 @@ void broad_naive_1() {
     OBB_soa obs_BVH = hierarchy_from_mesh("/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj");
 
     // Load Configurations
-    int num_confs = 100000;
+    const int num_confs = 100000;
     std::vector<Configuration> confs;
     confs.reserve(num_confs);
-    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/easy_confs100,000.txt", confs);
+    std::cout << "Reading configurations from file..." << std::endl;
+    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/easy_confs100,000.conf", confs);
     Eigen::Matrix3f rob_rotations[num_confs];
     Eigen::Vector3f rob_translations[num_confs];
     for (int i = 0; i < num_confs; ++i) {
         rob_rotations[i] = createRotationMatrix(confs[i]);
         rob_translations[i] = Eigen::Vector3f(confs[i].x, confs[i].y, confs[i].z);
     }
-
+    std::cout << "Created Rotation matrices from configurations" << std::endl;
+    
     bool disjoint[num_confs] = {false};
     Eigen::Matrix3f* d_R_b;
     Eigen::Vector3f* d_T_b;
@@ -476,6 +486,7 @@ void broad_naive_1() {
     Eigen::Matrix3f* d_Rob_conf_rot;
     Eigen::Vector3f* d_Rob_conf_trans;
     bool* pdisjoint;
+    std::cout << "Allocated host memory" << std::endl;
 
     // Allocate memory for device pointers 
     cudaMalloc((void**)&d_R_b, num_confs * sizeof(Eigen::Matrix3f));
@@ -486,59 +497,92 @@ void broad_naive_1() {
     cudaMalloc((void**)&d_b, num_confs * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_conf_rot, num_confs * sizeof(Eigen::Matrix3f));
     cudaMalloc((void**)&d_Rob_conf_trans, num_confs * sizeof(Eigen::Vector3f));
-    
-    //Make dummy duplicates of the top level boxes for each configuration
-    Eigen::Matrix3f R_b[num_confs];
-    Eigen::Vector3f T_b[num_confs];
-    Eigen::Matrix3f R_a[num_confs];
-    Eigen::Vector3f T_a[num_confs];
-    Eigen::Vector3f a[num_confs];
-    Eigen::Vector3f b[num_confs];
+    cudaMalloc((void**)&pdisjoint, num_confs * sizeof(bool));  
+    std::cout << "Allocated device memory" << std::endl;
+
+    //Make one dummy duplicates of the top level box for each configuration
+    std::vector<Eigen::Matrix3f, Eigen::aligned_allocator<Eigen::Matrix3f>> R_b(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> T_b(num_confs);
+    std::vector<Eigen::Matrix3f, Eigen::aligned_allocator<Eigen::Matrix3f>> R_a(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> T_a(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> a(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> b(num_confs);
+    std::cout << "Top level robot box size:" << rob_BVH.pDim[0] << std::endl;
+    std::cout << "Top level robot box rotation:" << std::endl << rob_BVH.pR[0] << std::endl;
+    std::cout << "Top level robot box translation:" << rob_BVH.pT[0] << std::endl;
+    std::cout << "Top level obstacle box size:" << rob_BVH.pDim[0] << std::endl; 
+    std::cout << "Top level obstacle box rotation:" << obs_BVH.pR[0] << std::endl;
+    std::cout << "Top level obstacle box translation:" << obs_BVH.pT[0] << std::endl;
+
     for (int i = 0; i < num_confs; ++i) {
         a[i] = obs_BVH.pDim[0];
         R_a[i] = obs_BVH.pR[0];
         T_a[i] = obs_BVH.pT[0];
+
+        b[i] = rob_BVH.pDim[0];
         R_b[i] = rob_BVH.pR[0];
         T_b[i] = rob_BVH.pT[0];
-        b[i] = rob_BVH.pDim[0];
     }
-    
+    std::cout << " Trimmed off top level boxes" << std::endl;
     // Copy data to device
-    cudaMemcpy(d_R_b, R_b, num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_T_b, T_b, num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_R_a, R_a, num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_T_a, T_a, num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Rob_conf_rot, rob_rotations, sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_Rob_conf_trans, rob_translations, sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);  
-    cudaMemcpy(d_a, a, sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);
-    cudaMemcpy(d_b, b, sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice);
-    
-    
-    // Launch kernel
-    TIMEIT("launching the kernel", 
-        d_obb_dyn_1box<<<num_confs >> 5, 32>>>(d_R_b, d_T_b, d_R_a, d_T_a, d_a, d_b, d_Rob_conf_rot, d_Rob_conf_trans, pdisjoint);
-        // Copy result back to host
+    TIMEIT("Copying data to device memory",
+        checkCudaMem(cudaMemcpy(d_R_b, R_b.data(), num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_T_b, T_b.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_R_a, R_a.data(), num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_T_a, T_a.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Rob_conf_rot, rob_rotations, num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Rob_conf_trans, rob_translations, num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_a, a.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_b, b.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
         cudaDeviceSynchronize();
-        cudaMemcpy(disjoint, pdisjoint, sizeof(bool), cudaMemcpyDeviceToHost);)
+    )
+    
+    // Launch kernel with correct grid size
+    const int blockSize = 32;
+    const int gridSize = (num_confs + blockSize - 1) / blockSize; // ceil division
 
+    TIMEIT("launching the kernel", 
+        d_obb_dyn_1box<<<gridSize, blockSize>>>(d_R_b, d_T_b, d_R_a, d_T_a, d_a, d_b, d_Rob_conf_rot, d_Rob_conf_trans, pdisjoint);
+        cudaDeviceSynchronize();
+        checkCudaMem(cudaGetLastError());
+        // Copy result back to host (num_confs * sizeof(bool))
+        checkCudaMem(cudaMemcpy(disjoint, pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
+    )
+    
     std::vector<ConfigurationTagged> cpuCollisions(num_confs);
     TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs);)
     // Check result
-    size_t true_positives = 0;
-    size_t false_positives = 0;
+    size_t true_positives = 0; // num disjoint that are valid
+    size_t false_positives = 0; // num disjoint that are not valid (should be 0)
+    size_t false_negatives = 0; // num not disjoint that are valid (likely to be high since this is broad phase)
+    size_t true_negatives = 0; // num not disjoint that are not valid (unsure how many of these will be)
     // if obb is disjoint, then we know for sure there is no collision
     // verify that the cpu said the same thing
     for (int i = 0; i < num_confs; ++i) {
         if (disjoint[i]) {
-            if (!cpuCollisions[i].valid) {
+            if (cpuCollisions[i].valid) {
                 true_positives++;
             } else {
                 false_positives++;
-                std::cout << "False positive at configuration " << i << std::endl;
+                std::cout << "False positive at configuration " << i << ": " 
+                          << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " << 
+                          "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
+
+                std::cout << createRotationMatrix(confs[i]) << std::endl;
+                
             }
+        }
+        else {
+            if (!cpuCollisions[i].valid) {
+                false_negatives++;
+            } else {
+                true_negatives++;
+            } 
         }
          
     }
+    std::cout << "Out of " << num_confs << " configurations, " << true_positives << " were true positives and " << false_positives << " were false positives." << std::endl;
+    std::cout << "Out of " << num_confs << " configurations, " << true_negatives << " were true negatives and " << false_negatives << " were false negatives." << std::endl;
     // Free device memory
     cudaFree(d_R_b);
     cudaFree(d_T_b);
@@ -548,10 +592,11 @@ void broad_naive_1() {
     cudaFree(d_b);
     cudaFree(d_Rob_conf_rot);
     cudaFree(d_Rob_conf_trans);
+    cudaFree(pdisjoint);
     
 }
 //TODO: idea -- half float for obb, full float for triangle overlap?
 int main() {
-
+    broad_naive_1();
 }
 
