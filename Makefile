@@ -10,6 +10,11 @@ TRANS_DIR=${SRC_DIR}/transformation
 TEST_DIR=./test
 CU=nvcc
 CUFLAGS=-DLOCAL_TESTING=1 -lineinfo -O3 -Wno-deprecated-declarations
+
+ifeq ($(DEBUG),1)
+    CUFLAGS := -DLOCAL_TESTING=1 -G -g -O0 -Wno-deprecated-declarations
+    CXXFLAGS := -g
+endif
 # Default target
 all: Full-Integration-Test Generate-Tests
 .PHONY: clean all
