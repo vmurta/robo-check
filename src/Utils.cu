@@ -133,8 +133,8 @@ void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_con
 }
 
 //TODO: modify this to directly write to device memory
-void loadOBJFile(const char* filename, std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles){
-  FILE* file = fopen(filename, "rb");
+void loadOBJFile(std::string filename, std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles){
+  FILE* file = fopen(filename.c_str(), "rb");
   if(!file)
   {
     std::cerr << "file not exist" << std::endl;
@@ -222,10 +222,10 @@ void loadOBJFile(const char* filename, std::vector<Eigen::Vector3f>& points, std
   }
 }
 
-void loadOBJFile(const char* filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
+void loadOBJFile(std::string filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
                                         std::vector<int>& v1, std::vector<int>& v2, std::vector<int>& v3){
 
-  FILE* file = fopen(filename, "rb");
+  FILE* file = fopen(filename.c_str(), "rb");
   if(!file)
   {
     std::cerr << "file not exist" << std::endl;
@@ -389,8 +389,8 @@ void printConfigurationTagged(const ConfigurationTagged& conf) {
 }
 
 // This function taken from https://github.com/flexible-collision-library/fcl/issues/131 Github user dblanm
-void loadOBJFileFCL(const char* filename, std::vector<fcl::Vector3f>& points, std::vector<fcl::Triangle>& triangles){
-  FILE* file = fopen(filename, "rb");
+void loadOBJFileFCL(std::string filename, std::vector<fcl::Vector3f>& points, std::vector<fcl::Triangle>& triangles){
+  FILE* file = fopen(filename.c_str(), "rb");
   if(!file)
   {
     std::cerr << "file not exist" << std::endl;
@@ -487,7 +487,8 @@ fcl::Transform3f configurationToTransform(const Configuration& config) {
     return out;
 }
 
-void checkConfsCPU(std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs){
+void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs, 
+                    std::string robot_filename, std::string obstacle_filename){
 
     //Load Robot
     std::vector<fcl::Vector3f> rob_vertices;
@@ -495,17 +496,17 @@ void checkConfsCPU(std::vector<ConfigurationTagged> &out, const std::vector<Conf
     std::vector<fcl::Vector3f> obs_vertices;
     std::vector<fcl::Triangle> obs_triangles;
 
-    loadOBJFileFCL("models/alpha1.0/robot.obj", rob_vertices, rob_triangles);
-    loadOBJFileFCL("models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles);
+    loadOBJFileFCL(robot_filename, rob_vertices, rob_triangles);
+    loadOBJFileFCL(obstacle_filename, obs_vertices, obs_triangles);
 
-    std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
+    // std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
     auto cpu_start_time = std::chrono::high_resolution_clock::now();
 
     std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
     rob_mesh->beginModel(rob_triangles.size(), rob_vertices.size());
     rob_mesh->addSubModel(rob_vertices, rob_triangles);
     rob_mesh->endModel();
-    std::cout << "loaded robot" <<std::endl;
+    // std::cout << "loaded robot" <<std::endl;
 
     // Load Obstacle
     std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> obs_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);

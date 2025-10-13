@@ -223,8 +223,8 @@ void readConfigurationFromFile(const std::string& filename, std::vector<Configur
 ConfigurationTagged makeTagged(const Configuration& conf);
 
 void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs, bool hard);
-void loadOBJFile(const char* filename,  std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles);
-void loadOBJFile(const char* filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
+void loadOBJFile(std::string filename,  std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles);
+void loadOBJFile(std::string filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
                                         std::vector<int>& v1, std::vector<int>& v2, std::vector<int>& v3);
 
 void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
@@ -236,13 +236,16 @@ void printConfiguration(const Configuration& conf);
 void printConfigurationTagged(const ConfigurationTagged& conf);
 
 // This function taken from https://github.com/flexible-collision-library/fcl/issues/131 Github user dblanm
-void loadOBJFileFCL(const char* filename, std::vector<fcl::Vector3f>& points, std::vector<fcl::Triangle>& triangles);
+void loadOBJFileFCL(std::string filename, std::vector<fcl::Vector3f>& points, std::vector<fcl::Triangle>& triangles);
 fcl::Transform3f configurationToTransform(const Configuration& config);
 
 
 __device__ __host__ Eigen::Matrix3f createRotationMatrix(const Configuration config);
 
-void checkConfsCPU(std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs);
+void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs, 
+                    std::string robot_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj",
+                    std::string obstacle_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj");
+
 
 class tranform_soa {
     //spatial coordinates
