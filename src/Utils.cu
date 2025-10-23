@@ -345,7 +345,7 @@ void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
 }
 
 
-__device__ __host__ Eigen::Matrix3f createRotationMatrix(const Configuration config) {
+__device__ __host__ Eigen::Matrix3f createRotationMatrix(const Configuration& config) {
 
 
     float cosB = cos(config.pitch);
@@ -367,6 +367,16 @@ __device__ __host__ Eigen::Matrix3f createRotationMatrix(const Configuration con
     rotate(2,2) = cosB * cosC;
 
     return rotate;
+}
+
+__device__ __host__ Eigen::Matrix4f createHomogeneousMatrix(const Configuration& config) {
+    Eigen::Matrix4f homogeneous = Eigen::Matrix4f::Identity();
+    Eigen::Matrix3f rotation = createRotationMatrix(config);
+    homogeneous.block<3,3>(0,0) = rotation;
+    homogeneous(0,3) = config.x;
+    homogeneous(1,3) = config.y;
+    homogeneous(2,3) = config.z;
+    return homogeneous;
 }
 
 void printConfiguration(const Configuration& conf) {
