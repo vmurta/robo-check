@@ -9,7 +9,7 @@ NAR_DIR=${SRC_DIR}/narrow-phase
 TRANS_DIR=${SRC_DIR}/transformation
 TEST_DIR=./test
 CU=nvcc
-CUFLAGS=-DLOCAL_TESTING=1 -lineinfo -O3 -Wno-deprecated-declarations
+CUFLAGS=-DLOCAL_TESTING=1 -lineinfo -O3 -Wno-deprecated-declarations --expt-relaxed-constexpr -diag-suppress 20012
 
 ifeq ($(DEBUG),1)
     CUFLAGS := -DLOCAL_TESTING=1 -G -g -O0 -Wno-deprecated-declarations
