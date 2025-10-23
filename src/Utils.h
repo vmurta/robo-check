@@ -142,6 +142,25 @@ struct OBB_soa {
         pDim[index] = dim;
     }
 
+    std::vector<Eigen::Vector3f> getBoxVertices(size_t box_index) const {
+        const Eigen::Matrix3f& R = pR[box_index];
+        const Eigen::Vector3f& T = pT[box_index];
+        const Eigen::Vector3f& dim = pDim[box_index];
+
+        std::vector<Eigen::Vector3f> vertices(8);
+        vertices[0] = T + R * Eigen::Vector3f(-dim.x(), -dim.y(), -dim.z());
+        vertices[1] = T + R * Eigen::Vector3f(dim.x(), -dim.y(), -dim.z());
+        vertices[2] = T + R * Eigen::Vector3f(dim.x(), dim.y(), -dim.z());
+        vertices[3] = T + R * Eigen::Vector3f(-dim.x(), dim.y(), -dim.z());
+        vertices[4] = T + R * Eigen::Vector3f(-dim.x(), -dim.y(), dim.z());
+        vertices[5] = T + R * Eigen::Vector3f(dim.x(), -dim.y(), dim.z());
+        vertices[6] = T + R * Eigen::Vector3f(dim.x(), dim.y(), dim.z());
+        vertices[7] = T + R * Eigen::Vector3f(-dim.x(), dim.y(), dim.z());
+
+        return vertices;
+    }
+
+
     void writeToFile(const std::string& filename) const {
         std::ofstream file(filename);
         if (!file.is_open()) {
@@ -152,20 +171,7 @@ struct OBB_soa {
         // Write this as a .obj file
         for (size_t i = 0; i < size; ++i) {
             file << "o Box" << i << "\n";
-            const Eigen::Matrix3f& R = pR[i];
-            const Eigen::Vector3f& T = pT[i];
-            const Eigen::Vector3f& dim = pDim[i];
-
-            // Calculate the vertices of the OBB
-            Eigen::Vector3f vertices[8];
-            vertices[0] = T + R * Eigen::Vector3f(-dim.x(), -dim.y(), -dim.z());
-            vertices[1] = T + R * Eigen::Vector3f(dim.x(), -dim.y(), -dim.z());
-            vertices[2] = T + R * Eigen::Vector3f(dim.x(), dim.y(), -dim.z());
-            vertices[3] = T + R * Eigen::Vector3f(-dim.x(), dim.y(), -dim.z());
-            vertices[4] = T + R * Eigen::Vector3f(-dim.x(), -dim.y(), dim.z());
-            vertices[5] = T + R * Eigen::Vector3f(dim.x(), -dim.y(), dim.z());
-            vertices[6] = T + R * Eigen::Vector3f(dim.x(), dim.y(), dim.z());
-            vertices[7] = T + R * Eigen::Vector3f(-dim.x(), dim.y(), dim.z());
+            std::vector<Eigen::Vector3f> vertices = this->getBoxVertices(i);
 
             // Write vertices to file
             for (const auto& vertex : vertices) {
@@ -240,7 +246,28 @@ void loadOBJFileFCL(std::string filename, std::vector<fcl::Vector3f>& points, st
 fcl::Transform3f configurationToTransform(const Configuration& config);
 
 
-__device__ __host__ Eigen::Matrix3f createRotationMatrix(const Configuration config);
+__device__ __host__ Eigen::Matrix3f createRotationMatrix(const Configuration &config);
+__device__ __host__ Eigen::Matrix4f createHomogeneousMatrix(const Configuration &config);
+
+template<typename Derived>
+std::string pythonifyEigenMatrix(const Eigen::MatrixBase<Derived>& m)
+{
+    std::ostringstream oss;
+    for (int i = 0; i < m.rows(); ++i) {
+        oss << "[";
+        for (int j = 0; j < m.cols(); ++j) {
+            oss << m(i, j);
+            if (j < m.cols() - 1) {
+                oss << ", ";
+            }
+        }
+        oss << "]";
+        if (i < m.rows() - 1) {
+            oss << ",\n";
+        }
+    }
+    return oss.str();
+}
 
 void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs, 
                     std::string robot_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj",
