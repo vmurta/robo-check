@@ -47,9 +47,16 @@ OBB_soa hierarchy_from_mesh(const char* mesh_path){
         rotation = obb.axis;
         translation = obb.To;
         half_dimensions = obb.extent;
-        std::cout << "Rotation: " << rotation << std::endl;
-        std::cout << "Translation: " << translation.transpose() << std::endl;
-        std::cout << "Half Dimensions: " << half_dimensions.transpose() << std::endl;
+        if (i == 0){
+            std::cout << "The outermost OBB has: " << std::endl;
+            std::cout << "Height " << obb.height() << std::endl;
+            std::cout << "Width " << obb.width() << std::endl;
+            std::cout << "Depth " << obb.depth() << std::endl;
+                      
+        }
+        // std::cout << "Rotation: " << rotation << std::endl;
+        // std::cout << "Translation: " << translation.transpose() << std::endl;
+        // std::cout << "Half Dimensions: " << half_dimensions.transpose() << std::endl;
 
         // // print out the values to verify
         // std::cout << "OBB " << i << ":\n";
@@ -58,6 +65,15 @@ OBB_soa hierarchy_from_mesh(const char* mesh_path){
         // std::cout << "Half Dimensions:\n" << half_dimensions.transpose() << "\n";
         // std::cout << "-----------------------\n";
         result.set(i, rotation, translation, half_dimensions);
+    }
+    
+    fcl::OBB<float> outer_obb = rob_mesh->getBV(0).bv;
+    bool all_in = true;
+    for (fcl::Vector3f vertex : rob_vertices){
+        if (!outer_obb.contain(vertex)){
+            all_in = false;
+            std::cout << vertex << " not in outermost OBB" << std::endl;
+        }
     }
 
     
@@ -232,7 +248,14 @@ __global__ void d_obb_base(  const Eigen::Matrix3f* pB, const Eigen::Vector3f* p
     pdisjoint[blockIdx.x] = false;
 
 }
-
+__device__ bool contains(int val, const int* arr, size_t arr_size){
+    for (size_t i = 0; i < arr_size; i++){
+        if (arr[i] == val){
+            return true;
+        }
+    }
+    return false;
+}
 __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector3f* pT_b,
                                 const Eigen::Matrix3f* pR_a, const Eigen::Vector3f* pT_a,
                                 const Eigen::Vector3f* pa, const Eigen::Vector3f* pb,
@@ -256,6 +279,7 @@ __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector
     float t; // distance between centers of the two boxes as projected onto the axis
     const float epsilon = 1e-6f; // small value to avoid numerical issues
 
+    const int bad_indices[] = {2504, 11488, 11835, 12938, 19644, 37535, 44655, 89049, 91742, 98680};
     //Calculate relative rotation of B wrt A
     //TODO: precompute inverse rotations of A
     // Take the absolute value of the rotation matrix B, add epsilon to avoid numerical issues
@@ -275,129 +299,190 @@ __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector
     // t dot L = t
     // \sum |a_i A^i * L | = a_0 + 0 + 0 
     // \sum |b_i B^i * L | = b_i B^i * A0 = first element of each column vector of Bf = Bf.row(0).dot(b)
-    if(t > (a[0] + Bf.row(0).dot(b)))
+
+    if(t > (a[0] + Bf.row(0).dot(b))){
+        if (contains(index, bad_indices, 6)){
+
+            printf("Disjoint on A1xA2 for index %d with t value %f and comparison value %f\n", index, t, (a[0] + Bf.row(0).dot(b)));
+        }
         pdisjoint[index] = true;
         return;
+    }
 
   // B1 x B2 = B0
     float s =  B.col(0).dot(T);
     t = ((s < 0.0) ? -s : s);
 
-    if(t > (b[0] + Bf.col(0).dot(a)))
+    if(t > (b[0] + Bf.col(0).dot(a))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on B1xB2 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A2 x A0 = A1
     t = ((T[1] < 0.0) ? -T[1] : T[1]);
 
-    if(t > (a[1] + Bf.row(1).dot(b)))
+    if(t > (a[1] + Bf.row(1).dot(b))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A2xA0 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A0 x A1 = A2
     t =((T[2] < 0.0) ? -T[2] : T[2]);
 
-    if(t > (a[2] + Bf.row(2).dot(b)))
+    if(t > (a[2] + Bf.row(2).dot(b))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A0xA1 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // B2 x B0 = B1
     s = B.col(1).dot(T);
     t = ((s < 0.0) ? -s : s);
 
-    if(t > (b[1] + Bf.col(1).dot(a)))
+    if(t > (b[1] + Bf.col(1).dot(a))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on B1xB2 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // B0 x B1 = B2
     s = B.col(2).dot(T);
     t = ((s < 0.0) ? -s : s);
 
-    if(t > (b[2] + Bf.col(2).dot(a)))
+    if(t > (b[2] + Bf.col(2).dot(a))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on B0xB1 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A0 x B0
     s = T[2] * B(1, 0) - T[1] * B(2, 0);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[1] * Bf(2, 0) + a[2] * Bf(1, 0) +
-            b[1] * Bf(0, 2) + b[2] * Bf(0, 1)))
+            b[1] * Bf(0, 2) + b[2] * Bf(0, 1))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A0xB0 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A0 x B1
     s = T[2] * B(1, 1) - T[1] * B(2, 1);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[1] * Bf(2, 1) + a[2] * Bf(1, 1) +
-            b[0] * Bf(0, 2) + b[2] * Bf(0, 0)))
+            b[0] * Bf(0, 2) + b[2] * Bf(0, 0))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A0xB1 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A0 x B2
     s = T[2] * B(1, 2) - T[1] * B(2, 2);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[1] * Bf(2, 2) + a[2] * Bf(1, 2) +
-            b[0] * Bf(0, 1) + b[1] * Bf(0, 0)))
+            b[0] * Bf(0, 1) + b[1] * Bf(0, 0))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A0xB2 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A1 x B0
     s = T[0] * B(2, 0) - T[2] * B(0, 0);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[0] * Bf(2, 0) + a[2] * Bf(0, 0) +
-            b[1] * Bf(1, 2) + b[2] * Bf(1, 1)))
+            b[1] * Bf(1, 2) + b[2] * Bf(1, 1))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A1xB0 for index %d\n", index);
+        }   
         pdisjoint[index] = true;
         return;
+    }
 
     // A1 x B1
     s = T[0] * B(2, 1) - T[2] * B(0, 1);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[0] * Bf(2, 1) + a[2] * Bf(0, 1) +
-            b[0] * Bf(1, 2) + b[2] * Bf(1, 0)))
+            b[0] * Bf(1, 2) + b[2] * Bf(1, 0))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A1xB1 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A1 x B2
     s = T[0] * B(2, 2) - T[2] * B(0, 2);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[0] * Bf(2, 2) + a[2] * Bf(0, 2) +
-            b[0] * Bf(1, 1) + b[1] * Bf(1, 0)))
+            b[0] * Bf(1, 1) + b[1] * Bf(1, 0))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A1xB2 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A2 x B0
     s = T[1] * B(0, 0) - T[0] * B(1, 0);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[0] * Bf(1, 0) + a[1] * Bf(0, 0) +
-            b[1] * Bf(2, 2) + b[2] * Bf(2, 1)))
+            b[1] * Bf(2, 2) + b[2] * Bf(2, 1))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A2xB0 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
+    }
 
     // A2 x B1
     s = T[1] * B(0, 1) - T[0] * B(1, 1);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[0] * Bf(1, 1) + a[1] * Bf(0, 1) +
-            b[0] * Bf(2, 2) + b[2] * Bf(2, 0)))
+            b[0] * Bf(2, 2) + b[2] * Bf(2, 0))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A2xB1 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
-
+    }
     // A2 x B2
     s = T[1] * B(0, 2) - T[0] * B(1, 2);
     t = ((s < 0.0) ? -s : s);
 
     if(t > (a[0] * Bf(1, 2) + a[1] * Bf(0, 2) +
-            b[0] * Bf(2, 1) + b[1] * Bf(2, 0)))
+            b[0] * Bf(2, 1) + b[1] * Bf(2, 0))){
+        if (contains(index, bad_indices, 6)){
+            printf("Disjoint on A2xB2 for index %d\n", index);
+        }
         pdisjoint[index] = true;
         return;
-    
+    }
+
     pdisjoint[index] = false;
 }
 
@@ -456,7 +541,7 @@ void dummy_test() {
 // high level broad phase test -- runs top level obb for transformed robot and static obstacles
 // does not assume robot BVH is wrt any obstacle
 void broad_naive_1() {
-    // Test OBB disjoint function
+    // Test OBB disjoint functionkj
 
     // Load Robot and Obstacle BVH
     OBB_soa rob_BVH = hierarchy_from_mesh("/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj");
@@ -534,6 +619,7 @@ void broad_naive_1() {
         checkCudaMem(cudaMemcpy(d_Rob_conf_trans, rob_translations, num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(d_a, a.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(d_b, b.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(pdisjoint, disjoint, num_confs * sizeof(bool), cudaMemcpyHostToDevice));
         cudaDeviceSynchronize();
     )
     
@@ -567,8 +653,19 @@ void broad_naive_1() {
                 std::cout << "False positive at configuration " << i << ": " 
                           << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " << 
                           "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
+                
+                //apply transformation to blank obb
+                // rob_BVH.set(0, rob_rotations[i], rob_translations[i], rob_BVH.pDim[0]);
+                std::vector<Eigen::Vector3f> vertices = rob_BVH.getBoxVertices(0);
+                Eigen::Matrix3f R = rob_rotations[i];
+                Eigen::Vector3f T = rob_translations[i];
 
-                std::cout << createRotationMatrix(confs[i]) << std::endl;
+                // for (auto p : vertices){
+                //     std::cout << p.transpose() << " --> ";
+                //     std::cout << (R * p + T).transpose() << std::endl;
+                // }
+                std::cout << "Invalid Robot Transform:" << std::endl;
+                std::cout << pythonifyEigenMatrix(createHomogeneousMatrix(confs[i])) << std::endl;
                 
             }
         }
