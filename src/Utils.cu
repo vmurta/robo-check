@@ -487,11 +487,8 @@ fcl::Transform3f configurationToTransform(const Configuration& config) {
     fcl::Transform3f out;
     out.setIdentity();
     fcl::Vector3f translation(config.x, config.y, config.z);
-    
-    fcl::Quaternionf rotation = Eigen::AngleAxisf(config.yaw, Eigen::Vector3f::UnitZ())
-                              * Eigen::AngleAxisf(config.pitch, Eigen::Vector3f::UnitY())
-                              * Eigen::AngleAxisf(config.roll, Eigen::Vector3f::UnitX());
-    
+
+    fcl::Matrix3f rotation = createRotationMatrix(config);
     out.translation() = translation;
     out.rotate(rotation);
     return out;

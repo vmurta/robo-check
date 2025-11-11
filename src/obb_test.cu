@@ -256,21 +256,22 @@ __device__ bool contains(int val, const int* arr, size_t arr_size){
     }
     return false;
 }
-__global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector3f* pT_b,
-                                const Eigen::Matrix3f* pR_a, const Eigen::Vector3f* pT_a,
-                                const Eigen::Vector3f* pa, const Eigen::Vector3f* pb,
+
+__global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
+                                const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
+                                const Eigen::Vector3f* pRob_dim, const Eigen::Vector3f* pObs_dim,
                                 const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
                                 bool* pdisjoint) {    
 
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
-    Eigen::Matrix3f R_B_abs = pR_b[index]; // rotation of B wrt origin
-    Eigen::Vector3f T_b_abs = pT_b[index]; // translation of B wrt origin
+    Eigen::Matrix3f R_obs_abs = pR_obs[index]; // rotation of B wrt origin
+    Eigen::Vector3f T_obs_abs = pT_obs[index]; // translation of B wrt origin
 
-    Eigen::Matrix3f R_A_abs = pR_a[index]; // rotation of A wrt origin
-    Eigen::Vector3f T_a_abs = pT_a[index]; // translation of A wrt origin
+    Eigen::Matrix3f R_rob_abs = pR_rob[index]; // rotation of A wrt origin
+    Eigen::Vector3f T_rob_abs = pT_rob[index]; // translation of A wrt origin
 
-    Eigen::Vector3f a = pa[index]; // half dimensions of box A
-    Eigen::Vector3f b = pb[index]; // half dimensions of box B
+    Eigen::Vector3f a = pRob_dim[index]; // half dimensions of box A
+    Eigen::Vector3f b = pObs_dim[index]; // half dimensions of box B
 
     Eigen::Matrix3f R_conf = pRob_conf_rot[index]; // rotation of robot wrt world
     Eigen::Vector3f T_conf = pRob_conf_trans[index]; // translation of robot wrt world
@@ -283,12 +284,12 @@ __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector
     //Calculate relative rotation of B wrt A
     //TODO: precompute inverse rotations of A
     // Take the absolute value of the rotation matrix B, add epsilon to avoid numerical issues
-    Eigen::Matrix3f B = (R_conf * R_B_abs * R_A_abs.inverse());
+    Eigen::Matrix3f B = R_obs_abs.transpose() * (R_conf * R_rob_abs); // rotation of A wrt B
     Eigen::Matrix3f Bf = B.cwiseAbs();
     Bf.array() += epsilon;
 
     //TODO: check if this math is right
-    Eigen::Vector3f T = T_conf + T_b_abs - T_a_abs;
+    Eigen::Vector3f T = (T_conf + R_conf * T_rob_abs - T_obs_abs).transpose() * R_obs_abs; // translation of A wrt B
     // first tests: cross product of axes within the same box 
     // (always resulting in the third axis of the box)
     ////////////////////////////////////////////////////////////////////////////////
@@ -303,7 +304,19 @@ __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector
     if(t > (a[0] + Bf.row(0).dot(b))){
         if (contains(index, bad_indices, 6)){
 
-            printf("Disjoint on A1xA2 for index %d with t value %f and comparison value %f\n", index, t, (a[0] + Bf.row(0).dot(b)));
+            printf("Disjoint on plane with normal A0 for index %d\n B: \n %f %f %f \n %f %f %f \n %f %f %f \n T: %f %f %f \n a: %f %f %f \n b: %f %f %f \n Original rob rotation and translation:\n %f %f %f \n %f %f %f \n %f %f %f \n %f %f %f \n  Original obs rotation and translation:\n %f %f %f \n %f %f %f \n %f %f %f \n %f %f %f \n", 
+                index, B(0,0), B(0,1), B(0,2), B(1,0), B(1,1), B(1,2), B(2,0), B(2,1), B(2,2),
+                T[0], T[1], T[2],
+                a[0], a[1], a[2],
+                b[0], b[1], b[2],
+                R_rob_abs(0,0), R_rob_abs(0,1), R_rob_abs(0,2),
+                R_rob_abs(1,0), R_rob_abs(1,1), R_rob_abs(1,2),
+                R_rob_abs(2,0), R_rob_abs(2,1), R_rob_abs(2,2),
+                T_rob_abs[0], T_rob_abs[1], T_rob_abs[2],
+                R_obs_abs(0,0), R_obs_abs(0,1), R_obs_abs(0,2),
+                R_obs_abs(1,0), R_obs_abs(1,1), R_obs_abs(1,2),
+                R_obs_abs(2,0), R_obs_abs(2,1), R_obs_abs(2,2),
+                T_obs_abs[0], T_obs_abs[1], T_obs_abs[2]);
         }
         pdisjoint[index] = true;
         return;
@@ -315,7 +328,19 @@ __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_b, const Eigen::Vector
 
     if(t > (b[0] + Bf.col(0).dot(a))){
         if (contains(index, bad_indices, 6)){
-            printf("Disjoint on B1xB2 for index %d\n", index);
+            printf("Disjoint on plane with normal B0 for index %d\n B: \n %f %f %f \n %f %f %f \n %f %f %f \n T: %f %f %f \n a: %f %f %f \n b: %f %f %f \n Original rob rotation and translation:\n %f %f %f \n %f %f %f \n %f %f %f \n %f %f %f \n  Original obs rotation and translation:\n %f %f %f \n %f %f %f \n %f %f %f \n %f %f %f \n", 
+                index, B(0,0), B(0,1), B(0,2), B(1,0), B(1,1), B(1,2), B(2,0), B(2,1), B(2,2),
+                T[0], T[1], T[2],
+                a[0], a[1], a[2],
+                b[0], b[1], b[2],
+                R_rob_abs(0,0), R_rob_abs(0,1), R_rob_abs(0,2),
+                R_rob_abs(1,0), R_rob_abs(1,1), R_rob_abs(1,2),
+                R_rob_abs(2,0), R_rob_abs(2,1), R_rob_abs(2,2),
+                T_rob_abs[0], T_rob_abs[1], T_rob_abs[2],
+                R_obs_abs(0,0), R_obs_abs(0,1), R_obs_abs(0,2),
+                R_obs_abs(1,0), R_obs_abs(1,1), R_obs_abs(1,2),
+                R_obs_abs(2,0), R_obs_abs(2,1), R_obs_abs(2,2),
+                T_obs_abs[0], T_obs_abs[1], T_obs_abs[2]);
         }
         pdisjoint[index] = true;
         return;
@@ -562,36 +587,36 @@ void broad_naive_1() {
     std::cout << "Created Rotation matrices from configurations" << std::endl;
     
     bool disjoint[num_confs] = {false};
-    Eigen::Matrix3f* d_R_b;
-    Eigen::Vector3f* d_T_b;
-    Eigen::Matrix3f* d_R_a;
-    Eigen::Vector3f* d_T_a;
-    Eigen::Vector3f* d_a;
-    Eigen::Vector3f* d_b;
+    Eigen::Matrix3f* d_R_obs;
+    Eigen::Vector3f* d_T_obs;
+    Eigen::Matrix3f* d_R_rob;
+    Eigen::Vector3f* d_T_rob;
+    Eigen::Vector3f* d_Rob_dim;
+    Eigen::Vector3f* d_Obs_dim;
     Eigen::Matrix3f* d_Rob_conf_rot;
     Eigen::Vector3f* d_Rob_conf_trans;
     bool* pdisjoint;
     std::cout << "Allocated host memory" << std::endl;
 
     // Allocate memory for device pointers 
-    cudaMalloc((void**)&d_R_b, num_confs * sizeof(Eigen::Matrix3f));
-    cudaMalloc((void**)&d_T_b, num_confs * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_R_a, num_confs * sizeof(Eigen::Matrix3f));
-    cudaMalloc((void**)&d_T_a, num_confs * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_a, num_confs * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_b, num_confs * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_R_obs, num_confs * sizeof(Eigen::Matrix3f));
+    cudaMalloc((void**)&d_T_obs, num_confs * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_R_rob, num_confs * sizeof(Eigen::Matrix3f));
+    cudaMalloc((void**)&d_T_rob, num_confs * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_Rob_dim, num_confs * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_Obs_dim, num_confs * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_conf_rot, num_confs * sizeof(Eigen::Matrix3f));
     cudaMalloc((void**)&d_Rob_conf_trans, num_confs * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&pdisjoint, num_confs * sizeof(bool));  
     std::cout << "Allocated device memory" << std::endl;
 
     //Make one dummy duplicates of the top level box for each configuration
-    std::vector<Eigen::Matrix3f, Eigen::aligned_allocator<Eigen::Matrix3f>> R_b(num_confs);
-    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> T_b(num_confs);
-    std::vector<Eigen::Matrix3f, Eigen::aligned_allocator<Eigen::Matrix3f>> R_a(num_confs);
-    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> T_a(num_confs);
-    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> a(num_confs);
-    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> b(num_confs);
+    std::vector<Eigen::Matrix3f, Eigen::aligned_allocator<Eigen::Matrix3f>> R_obs(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> T_obs(num_confs);
+    std::vector<Eigen::Matrix3f, Eigen::aligned_allocator<Eigen::Matrix3f>> R_rob(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> T_rob(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> rob_dim(num_confs);
+    std::vector<Eigen::Vector3f, Eigen::aligned_allocator<Eigen::Vector3f>> obs_dim(num_confs);
     std::cout << "Top level robot box size:" << rob_BVH.pDim[0] << std::endl;
     std::cout << "Top level robot box rotation:" << std::endl << rob_BVH.pR[0] << std::endl;
     std::cout << "Top level robot box translation:" << rob_BVH.pT[0] << std::endl;
@@ -600,25 +625,39 @@ void broad_naive_1() {
     std::cout << "Top level obstacle box translation:" << obs_BVH.pT[0] << std::endl;
 
     for (int i = 0; i < num_confs; ++i) {
-        a[i] = obs_BVH.pDim[0];
-        R_a[i] = obs_BVH.pR[0];
-        T_a[i] = obs_BVH.pT[0];
+        obs_dim[i] = obs_BVH.pDim[0];
+        R_obs[i] = obs_BVH.pR[0];
+        T_obs[i] = obs_BVH.pT[0];
 
-        b[i] = rob_BVH.pDim[0];
-        R_b[i] = rob_BVH.pR[0];
-        T_b[i] = rob_BVH.pT[0];
+        rob_dim[i] = rob_BVH.pDim[0];
+        R_rob[i] = rob_BVH.pR[0];
+        T_rob[i] = rob_BVH.pT[0];
     }
+
+    //print out obs OBB coords
+    std::cout << "Obstacle OBB coords:" << std::endl;
+    {
+        std::vector<Eigen::Vector3f> vertices = obs_BVH.getBoxVertices(0);
+        for (auto p : vertices){
+            std::cout << p.transpose() << std::endl;
+        }
+    }
+    std::cout << "Obstacle obb stats:" << std::endl;
+    std::cout << " Center: " << obs_BVH.pT[0].transpose()
+                << " Half-dimensions: " << obs_BVH.pDim[0].transpose() << std::endl
+                << " Rotation: " << std::endl << obs_BVH.pR[0] << std::endl;
     std::cout << " Trimmed off top level boxes" << std::endl;
     // Copy data to device
     TIMEIT("Copying data to device memory",
-        checkCudaMem(cudaMemcpy(d_R_b, R_b.data(), num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
-        checkCudaMem(cudaMemcpy(d_T_b, T_b.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-        checkCudaMem(cudaMemcpy(d_R_a, R_a.data(), num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
-        checkCudaMem(cudaMemcpy(d_T_a, T_a.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        cudaDeviceSynchronize();
+        checkCudaMem(cudaMemcpy(d_R_obs, R_obs.data(), num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_T_obs, T_obs.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_R_rob, R_rob.data(), num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_T_rob, T_rob.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(d_Rob_conf_rot, rob_rotations, num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(d_Rob_conf_trans, rob_translations, num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-        checkCudaMem(cudaMemcpy(d_a, a.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-        checkCudaMem(cudaMemcpy(d_b, b.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Rob_dim, rob_dim.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Obs_dim, obs_dim.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(pdisjoint, disjoint, num_confs * sizeof(bool), cudaMemcpyHostToDevice));
         cudaDeviceSynchronize();
     )
@@ -628,7 +667,7 @@ void broad_naive_1() {
     const int gridSize = (num_confs + blockSize - 1) / blockSize; // ceil division
 
     TIMEIT("launching the kernel", 
-        d_obb_dyn_1box<<<gridSize, blockSize>>>(d_R_b, d_T_b, d_R_a, d_T_a, d_a, d_b, d_Rob_conf_rot, d_Rob_conf_trans, pdisjoint);
+        d_obb_dyn_1box<<<gridSize, blockSize>>>(d_R_obs, d_T_obs, d_R_rob, d_T_rob, d_Obs_dim, d_Rob_dim, d_Rob_conf_rot, d_Rob_conf_trans, pdisjoint);
         cudaDeviceSynchronize();
         checkCudaMem(cudaGetLastError());
         // Copy result back to host (num_confs * sizeof(bool))
@@ -681,12 +720,12 @@ void broad_naive_1() {
     std::cout << "Out of " << num_confs << " configurations, " << true_positives << " were true positives and " << false_positives << " were false positives." << std::endl;
     std::cout << "Out of " << num_confs << " configurations, " << true_negatives << " were true negatives and " << false_negatives << " were false negatives." << std::endl;
     // Free device memory
-    cudaFree(d_R_b);
-    cudaFree(d_T_b);
-    cudaFree(d_R_a);
-    cudaFree(d_T_a);
-    cudaFree(d_a);
-    cudaFree(d_b);
+    cudaFree(d_R_obs);
+     cudaFree(d_T_obs);
+    cudaFree(d_R_rob);
+    cudaFree(d_T_rob);
+    cudaFree(d_Rob_dim);
+    cudaFree(d_Obs_dim);
     cudaFree(d_Rob_conf_rot);
     cudaFree(d_Rob_conf_trans);
     cudaFree(pdisjoint);
