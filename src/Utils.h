@@ -273,6 +273,7 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
                     std::string robot_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj",
                     std::string obstacle_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj");
 
+void flushCudaCache();
 
 class tranform_soa {
     //spatial coordinates

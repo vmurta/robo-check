@@ -494,6 +494,20 @@ fcl::Transform3f configurationToTransform(const Configuration& config) {
     return out;
 }
 
+// taken from https://guillesanbri.com/CUDA-Benchmarks/
+void flushCudaCache(){
+  // Get size of L2 cache
+  int device = 0;
+  float *d_F = nullptr;
+  int l2_size = 0;
+  cudaGetDevice(&device);
+  cudaDeviceGetAttribute(&l2_size, cudaDevAttrL2CacheSize, device);
+  size_t sizeF = l2_size * 2;
+  cudaMalloc((void **)&d_F, sizeF);
+  cudaMemsetAsync((void *) d_F, 0, sizeF);
+  cudaDeviceSynchronize();  
+  cudaFree(d_F);
+}
 void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs, 
                     std::string robot_filename, std::string obstacle_filename){
 
