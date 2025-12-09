@@ -19,6 +19,9 @@
 // 
 // The function will return true if the two boxes are disjoint, and false otherwise.
 
+
+#define WARP_SIZE 32
+
 // TODO: This assumes that B is a rotation matrix of B with respect to the axes of A
 // we may want to calculate this dynamically, but for now, assume A axis aligned and centered at origin
 
@@ -427,6 +430,7 @@ __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
     // pdisjoint[index] = false;
 }
+
 
 // Do TWO_STAGE_CF tests per thread
 // only top level box
@@ -921,6 +925,399 @@ __global__ void d_obb_coursened_one_stage ( const Eigen::Matrix3f* pR_obs, const
                                 // maybe bring in all the children into shared memory first, then use pointers?
 
 
+//assumes BVH of both trees have same depth
+__global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
+                                const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
+                                const Eigen::Vector3f* pRob_dim, const Eigen::Vector3f* pObs_dim,
+                                const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
+                                bool* pdisjoint, uint8_t bvh_depth) {    
+    //TODO: this will require the bvh's to be have 32 children at each level
+    //TODO: rewrite bvh creation to do so
+    size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+    Eigen::Matrix3f R_obs_abs = pR_obs[0]; // rotation of B wrt origin
+    Eigen::Vector3f T_obs_abs = pT_obs[0]; // translation of B wrt origin
+
+    Eigen::Matrix3f R_rob_abs = pR_rob[0]; // rotation of A wrt origin
+    Eigen::Vector3f T_rob_abs = pT_rob[0]; // translation of A wrt origin
+
+    Eigen::Vector3f a = pRob_dim[0]; // half dimensions of box A
+    Eigen::Vector3f b = pObs_dim[0]; // half dimensions of box B
+
+    Eigen::Matrix3f R_conf = pRob_conf_rot[index]; // rotation of robot wrt world
+    Eigen::Vector3f T_conf = pRob_conf_trans[index]; // translation of robot wrt world
+
+    
+    float t; // distance between centers of the two boxes as projected onto the axis
+    const float epsilon = 1e-6f; // small value to avoid numerical issues
+
+    //Calculate relative rotation of B wrt A
+    //TODO: precompute inverse rotations of A
+    // Take the absolute value of the rotation matrix B, add epsilon to avoid numerical issues
+    Eigen::Matrix3f B = R_obs_abs.transpose() * (R_conf * R_rob_abs); // rotation of A wrt B
+    Eigen::Matrix3f Bf = B.cwiseAbs();
+    Bf.array() += epsilon;
+
+    Eigen::Vector3f T = (T_conf + R_conf * T_rob_abs - T_obs_abs).transpose() * R_obs_abs; // translation of A wrt B
+    // first tests: cross product of axes within the same box 
+    // (always resulting in the third axis of the box)
+    ////////////////////////////////////////////////////////////////////////////////
+    // A1 x A2 = A0
+    __shared__ uint32_t num_confs_pend;
+    if (threadIdx.x == 0){
+        num_confs_pend = 0;
+    }
+
+    //TODO: need failsafe if this overflows
+    __shared__ Eigen::Matrix3f rob_confs_pend_rot[BLOCK_SIZE];
+    __shared__ Eigen::Vector3f rob_confs_pend_trans[BLOCK_SIZE];
+
+
+    __syncthreads();
+
+
+    while (true) {
+
+        t = fabsf(T[0]);
+
+        //Since L = A0 is a unit vector (as it is the cross product of unit vectors), no need to multiply t
+        // t dot L = t
+        // \sum |a_i A^i * L | = a_0 + 0 + 0 
+        // \sum |b_i B^i * L | = b_i B^i * A0 = first element of each column vector of Bf = Bf.row(0).dot(b)
+        
+        // Test #1
+        if(t > (a[0] + Bf.row(0).dot(b))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #2
+        // B1 x B2 = B0
+        t = fabsf(B.col(0).dot(T));
+
+        if(t > (b[0] + Bf.col(0).dot(a))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #3
+        // A2 x A0 = A1
+        t = fabsf(T[1]);
+
+        if(t > (a[1] + Bf.row(1).dot(b))){
+            pdisjoint[index] = true;uint16_t obs_obb_idx = 0; // root
+            break;
+        }
+
+        // Test #4
+        // A0 x A1 = A2
+        t =fabsf(T[2]);
+
+        if(t > (a[2] + Bf.row(2).dot(b))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #5
+        // B2 x B0 = B1
+        t = fabsf(B.col(1).dot(T));
+
+        if(t > (b[1] + Bf.col(1).dot(a))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #6
+        // B0 x B1 = B2
+        t = fabsf(B.col(2).dot(T));
+
+        if(t > (b[2] + Bf.col(2).dot(a))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #7
+        // A0 x B0
+        t = fabsf(T[2] * B(1, 0) - T[1] * B(2, 0));
+
+        if(t > (a[1] * Bf(2, 0) + a[2] * Bf(1, 0) +
+                b[1] * Bf(0, 2) + b[2] * Bf(0, 1))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #8
+        // A0 x B1
+        t = fabsf(T[2] * B(1, 1) - T[1] * B(2, 1));
+
+        if(t > (a[1] * Bf(2, 1) + a[2] * Bf(1, 1) +
+                b[0] * Bf(0, 2) + b[2] * Bf(0, 0))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #9
+        // A0 x B2
+        t = fabsf(T[2] * B(1, 2) - T[1] * B(2, 2));
+
+        if(t > (a[1] * Bf(2, 2) + a[2] * Bf(1, 2) +
+                b[0] * Bf(0, 1) + b[1] * Bf(0, 0))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #10
+        // A1 x B0
+        t = fabsf(T[0] * B(2, 0) - T[2] * B(0, 0));
+
+        if(t > (a[0] * Bf(2, 0) + a[2] * Bf(0, 0) +
+                b[1] * Bf(1, 2) + b[2] * Bf(1, 1))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #11
+        // A1 x B1
+        t = fabsf(T[0] * B(2, 1) - T[2] * B(0, 1));
+
+        if(t > (a[0] * Bf(2, 1) + a[2] * Bf(0, 1) +
+                b[0] * Bf(1, 2) + b[2] * Bf(1, 0))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #12
+        // A1 x B2
+        t = fabsf(T[0] * B(2, 2) - T[2] * B(0, 2));
+
+        if(t > (a[0] * Bf(2, 2) + a[2] * Bf(0, 2) +
+                b[0] * Bf(1, 1) + b[1] * Bf(1, 0))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #13
+        // A2 x B0
+        t = fabsf(T[1] * B(0, 0) - T[0] * B(1, 0));
+
+        if(t > (a[0] * Bf(1, 0) + a[1] * Bf(0, 0) +
+                b[1] * Bf(2, 2) + b[2] * Bf(2, 1))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #14
+        // A2 x B1
+        t = fabsf(T[1] * B(0, 1) - T[0] * B(1, 1));
+
+        if(t > (a[0] * Bf(1, 1) + a[1] * Bf(0, 1) +
+                b[0] * Bf(2, 2) + b[2] * Bf(2, 0))){
+            pdisjoint[index] = true;
+            break;
+        }
+
+        // Test #15
+        // A2 x B2
+        t = fabsf(T[1] * B(0, 2) - T[0] * B(1, 2));
+
+        if(t > (a[0] * Bf(1, 2) + a[1] * Bf(0, 2) +
+                b[0] * Bf(2, 1) + b[1] * Bf(2, 0))){
+            pdisjoint[index] = true;
+            break;
+        }
+        uint_fast8_t pos = atomicAdd(&num_confs_pend, 1);
+        rob_confs_pend_rot[pos] = R_conf;
+        rob_confs_pend_trans[pos] = T_conf;
+        break;
+    }
+    __syncthreads();
+
+    // intent: for each i in rob_obb_pend, need to check all children of rob_obb_pend[i] against all children of obs_obb_pend[j]
+    __shared__ uint16_t rob_obb_pend[BLOCK_SIZE * 32]; // arbitrary buffer size, should experiment with this
+    __shared__ uint16_t obs_obb_pend[BLOCK_SIZE * 32];
+    __shared__ uint32_t num_obb_pend;
+
+    // no obstacles need further testing
+    for (uint8_t i = 0; i < num_confs_pend; i++){
+        R_conf = rob_confs_pend_rot[i];
+        T_conf = rob_confs_pend_trans[i];
+
+        //reset pending OBB lists
+        if (threadIdx.x == 0){
+            num_obb_pend = 1;
+            rob_obb_pend[0] = 0; // root
+            obs_obb_pend[0] = 0; // root
+        }
+        __syncthreads();
+
+        // hang on, this ain't quite right, need to check depth more carefully
+        uint8_t current_depth = 0;
+        while(num_obb_pend != 0 and current_depth < bvh_depth){
+            current_depth += 1;
+            uint16_t rob_obb_idx = rob_obb_pend[num_obb_pend] * WARP_SIZE + threadIdx.x + 1;
+            uint16_t obs_obb_idx = obs_obb_pend[num_obb_pend] * WARP_SIZE + threadIdx.x + 1;
+            if(threadIdx.x == 0){
+                num_obb_pend--;
+            }
+            __syncthreads();
+
+            R_obs_abs = pR_obs[rob_obb_idx]; 
+            T_obs_abs = pT_obs[obs_obb_idx]; 
+            R_rob_abs = pR_rob[rob_obb_idx]; 
+            T_rob_abs = pT_rob[obs_obb_idx]; 
+            a = pRob_dim[rob_obb_idx]; 
+            b = pObs_dim[obs_obb_idx]; 
+
+            B = R_obs_abs.transpose() * (R_conf * R_rob_abs); // rotation of A wrt B
+            Bf = B.cwiseAbs(); // rotation of A wrt B
+            Bf.array() += epsilon;
+
+            T = (T_conf + R_conf * T_rob_abs - T_obs_abs).transpose() * R_obs_abs; // translation of A wrt B
+            // first tests: cross product of axes within the same box 
+            // (always resulting in the third axis of the box)
+            ////////////////////////////////////////////////////////////////////////////////
+            // A1 x A2 = A0
+            t = fabsf(T[0]);
+
+            //Since L = A0 is a unit vector (as it is the cross product of unit vectors), no need to multiply t
+            // t dot L = t
+            // \sum |a_i A^i * L | = a_0 + 0 + 0 
+            // \sum |b_i B^i * L | = b_i B^i * A0 = first element of each column vector of Bf = Bf.row(0).dot(b)
+
+            // Test #1
+            if(t > (a[0] + Bf.row(0).dot(b))){
+                continue;
+            } 
+            
+            // Test #2
+            // B1 x B2 = B0    
+            t = fabsf(B.col(0).dot(T));
+
+            if(t > (b[0] + Bf.col(0).dot(a))){
+                continue;
+            }
+
+            // Test #3
+            // A2 x A0 = A1
+            t = fabsf(T[1]);
+
+            if(t > (a[1] + Bf.row(1).dot(b))){
+                continue;
+            }
+
+            // Test #4
+            // A0 x A1 = A2
+            t = fabsf(T[2]);
+
+            if(t > (a[2] + Bf.row(2).dot(b))){
+                continue;
+            }
+
+            // Test #5
+            // B2 x B0 = B1
+            t = fabsf(B.col(1).dot(T));
+
+            if(t > (b[1] + Bf.col(1).dot(a))){
+                continue;
+            }
+
+            // Test #6
+            // B0 x B1 = B2
+            t = fabsf(B.col(2).dot(T));
+
+            if(t > (b[2] + Bf.col(2).dot(a))){
+                continue;
+            }
+
+            // Test #7
+            // A0 x B0
+            t = fabsf(T[2] * B(1, 0) - T[1] * B(2, 0));
+
+            if(t > (a[1] * Bf(2, 0) + a[2] * Bf(1, 0) +
+                    b[1] * Bf(0, 2) + b[2] * Bf(0, 1))){
+                continue;
+            }
+
+            // Test #8
+            // A0 x B1
+            t = fabsf(T[2] * B(1, 1) - T[1] * B(2, 1));
+
+            if(t > (a[1] * Bf(2, 1) + a[2] * Bf(1, 1) +
+                    b[0] * Bf(0, 2) + b[2] * Bf(0, 0))){
+                continue;
+            }
+
+            // Test #9
+            // A0 x B2
+            t = fabsf(T[2] * B(1, 2) - T[1] * B(2, 2));
+
+            if(t > (a[1] * Bf(2, 2) + a[2] * Bf(1, 2) +
+                    b[0] * Bf(0, 1) + b[1] * Bf(0, 0))){
+                continue;
+            }
+
+            // Test #10
+            // A1 x B0
+            t = fabsf(T[0] * B(2, 0) - T[2] * B(0, 0));
+
+            if(t > (a[0] * Bf(2, 0) + a[2] * Bf(0, 0) +
+                    b[1] * Bf(1, 2) + b[2] * Bf(1, 1))){  
+                continue;
+            }
+
+            // Test #11
+            // A1 x B1
+            t = fabsf(T[0] * B(2, 1) - T[2] * B(0, 1));
+
+            if(t > (a[0] * Bf(2, 1) + a[2] * Bf(0, 1) +
+                    b[0] * Bf(1, 2) + b[2] * Bf(1, 0))){
+                continue;
+            }
+
+            // Test #12
+            // A1 x B2
+            t = fabsf(T[0] * B(2, 2) - T[2] * B(0, 2));
+
+            if(t > (a[0] * Bf(2, 2) + a[2] * Bf(0, 2) +
+                    b[0] * Bf(1, 1) + b[1] * Bf(1, 0))){
+                continue;
+            }
+
+            // Test #13
+            // A2 x B0
+            t = fabsf(T[1] * B(0, 0) - T[0] * B(1, 0));
+
+            if(t > (a[0] * Bf(1, 0) + a[1] * Bf(0, 0) +
+                    b[1] * Bf(2, 2) + b[2] * Bf(2, 1))){
+                continue;
+            }
+
+            // Test #14
+            // A2 x B1
+            t = fabsf(T[1] * B(0, 1) - T[0] * B(1, 1));
+
+            if(t > (a[0] * Bf(1, 1) + a[1] * Bf(0, 1) +
+                    b[0] * Bf(2, 2) + b[2] * Bf(2, 0))){
+                continue;
+            }
+
+            // Test #15
+            // A2 x B2
+            t = fabsf(T[1] * B(0, 2) - T[0] * B(1, 2));
+
+            if(t > (a[0] * Bf(1, 2) + a[1] * Bf(0, 2) +
+                    b[0] * Bf(2, 1) + b[1] * Bf(2, 0))){
+                continue;
+            }
+
+            //TODO: eventually, this will need to check if leaf nodes are reached
+            uint_fast8_t pos = atomicAdd(&num_obb_pend, 1);
+            obs_obb_pend[pos] = obs_obb_idx;
+
+        }   
+    }
+
+    return;
+}
 // Code for 1 single box test
 void dummy_test() {
     // Test OBB disjoint function
