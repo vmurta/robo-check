@@ -6,6 +6,7 @@
 #include <chrono>
 #include <vector>
 #include <limits>
+#include <stack>
 #include <float.h>
 #include <sstream>
 #include <fcl/common/types.h>
@@ -127,7 +128,7 @@ struct OBB_soa {
         pDim = new Eigen::Vector3f[size];
     }
 
-    ~OBB_soa() {
+    virtual ~OBB_soa() {
         delete[] pR;
         delete[] pT;
         delete[] pDim;
@@ -189,26 +190,38 @@ struct OBB_soa {
     }
 };
 
+// Extends OBB to include BVH tree information
+// each node either has 0 or 32 children
+
+struct BVNode_soa : OBB_soa {
+    // using the same pattern as fcl::BVNodeBase 
+    /// If the value is positive, it is the index of the first child bv node
+    /// If the value is negative, it is -(primitive index + 1)
+    /// Zero implies this node has no children and no primitives, used only for padding
+    int16_t *first_child;
+
+    BVNode_soa(size_t size) : OBB_soa(size) {
+        first_child = new int16_t[size];
+    }
+
+    ~BVNode_soa() {
+        delete[] first_child;
+    }
+
+    void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim, int16_t child) {
+        OBB_soa::set(index, R, T, dim);
+        first_child[index] = child;
+    }
+
+};
+
+//TODO: move these somewhere outside of Utils.h
 #define NUM_ROB_VERTICES 792
 #define MAX_NUM_ROBOT_TRIANGLES 1008
 extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
 extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
 extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
-
-// extern __constant__ float base_robot_vertices_x[NUM_ROB_VERTICES];
-// extern __constant__ float base_robot_vertices_y[NUM_ROB_VERTICES];
-// extern __constant__ float base_robot_vertices_z[NUM_ROB_VERTICES];
-// extern __constant__ int base_robot_triangles_1[MAX_NUM_ROBOT_TRIANGLES];
-// extern __constant__ int base_robot_triangles_2[MAX_NUM_ROBOT_TRIANGLES];
-// extern __constant__ int base_robot_triangles_3[MAX_NUM_ROBOT_TRIANGLES];
-// extern __constant__ float base_obs_vertices_x[NUM_ROB_VERTICES];
-// extern __constant__ float base_obs_vertices_y[NUM_ROB_VERTICES];
-// extern __constant__ float base_obs_vertices_z[NUM_ROB_VERTICES];
-// extern __constant__ int base_obs_triangles_1[MAX_NUM_ROBOT_TRIANGLES];
-// extern __constant__ int base_obs_triangles_2[MAX_NUM_ROBOT_TRIANGLES];
-// extern __constant__ int base_obs_triangles_3[MAX_NUM_ROBOT_TRIANGLES];
-
 extern __constant__ float base_rob_x[NUM_ROB_VERTICES];
 extern __constant__ float base_rob_y[NUM_ROB_VERTICES];
 extern __constant__ float base_rob_z[NUM_ROB_VERTICES];
@@ -335,3 +348,63 @@ class tranform_soa {
         }
 
 };
+
+
+template <typename BV>
+std::vector<size_t> getBVHTreeDepths(const fcl::BVHModel<BV>& model)
+{
+    const int n = model.getNumBVs();
+    if (n == 0) return {};
+
+    size_t max_depth = 0;
+
+    // stack of (node_index, depth)
+    std::stack<std::pair<int, size_t>> st;
+    st.push({0, 1});   // root is depth 1
+
+    std::vector<size_t> leaf_depths(n, 0);
+    while (!st.empty()) {
+        auto [node_idx, depth] = st.top();
+        st.pop();
+        max_depth = std::max(max_depth, depth);
+
+        const auto& node = model.getBV(node_idx);
+        if (node.isLeaf()) {
+            leaf_depths[node_idx] = depth;
+            continue;
+        }       
+        // std::cout << "Node " << node_idx << " is " << node.isLeaf() << " and has " << node.num_primitives << "\n";
+        int left  = node.leftChild();
+        int right = node.rightChild();
+
+        if (right >= 0)
+            st.push({right, depth + 1});
+        if (left >= 0)
+            st.push({left, depth + 1});
+        
+
+    }
+
+    // //print histogram of leaf depths
+    // std::unordered_map<size_t, size_t> depth_hist;
+    // size_t depth_sum = 0;
+    // size_t total_count = leaf_depths.size();
+    // size_t leaf_count = 0;
+    // for (size_t i = 0; i < total_count; ++i) {
+    //     if (leaf_depths[i] > 0) {
+    //         depth_hist[leaf_depths[i]]++;
+    //         depth_sum += leaf_depths[i];
+    //         leaf_count++;
+    //     }
+    // }   
+    // std::cout << "Leaf depth histogram:\n";
+    // for (const auto& [depth, count] : depth_hist) {
+    //     std::cout << "Depth " << depth << ": " << count << " leaves\n";
+    // }
+
+    // double average_depth = static_cast<double>(depth_sum) / leaf_count;
+    // std::cout << "Average leaf depth: " << average_depth << "\n";
+    // std::cout << "Total leaves: " << leaf_count << " out of " << total_count << " nodes.\n";
+
+    return leaf_depths;
+}

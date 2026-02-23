@@ -543,6 +543,10 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
 
     // perform collision detection on each of the randomly generated configs
     for(int i = 0; i < confs.size(); i++){
+      if (i == 8848) {
+        std::cout << "checking configuration " << i << std::endl;
+        printConfiguration(confs[i]);
+      }
       // std::cout << "starting conf " << i << std::endl;
       fcl::Transform3f transform = configurationToTransform(confs[i]);
       rob_col_obj.setTransform(transform);
@@ -558,6 +562,14 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
       // Check if collision occurred
       if (result.isCollision()) {
         out[i].valid= false;
+        if (i == 8848) {
+          std::cout << "configuration " << i << " is in collision with " << result.numContacts() << " contacts." << std::endl;
+          for (size_t j = 0; j < result.numContacts(); ++j) {
+              const fcl::Contact<float>& contact = result.getContact(j);
+              std::cout << "Contact " << j << ": position = (" << contact.pos[0] << ", " << contact.pos[1] << ", " << contact.pos[2] << "), normal = (" << contact.normal[0] << ", " << contact.normal[1] << ", " << contact.normal[2] << "), penetration depth = " << contact.penetration_depth << std::endl;
+              std::cout << "Contact " << j << ": body1 = " << contact.b1 << ", body2 = " << contact.b2 << std::endl;
+          }
+        }
       } else {
         out[i].valid=true;
       }
