@@ -543,33 +543,35 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
 
     // perform collision detection on each of the randomly generated configs
     for(int i = 0; i < confs.size(); i++){
-      if (i == 8848) {
-        std::cout << "checking configuration " << i << std::endl;
-        printConfiguration(confs[i]);
-      }
       // std::cout << "starting conf " << i << std::endl;
       fcl::Transform3f transform = configurationToTransform(confs[i]);
       rob_col_obj.setTransform(transform);
+      if (i == 11488){
+        std::cout << "conf " << i << " has transform: " << std::endl;
+        std::cout << transform.matrix() << std::endl;
+      }
 
       // Define CollisionRequest and CollisionResult objects
-      fcl::CollisionRequest<float> request;
+      fcl::CollisionRequest<float> request(1000);
       fcl::CollisionResult<float> result;
 
       // // Perform collision detection
       fcl::collide(&obs_col_obj, &rob_col_obj, request, result);
 
+      if (i == 2504 ){
+        std::cout << "conf " << i << " has " << result.numContacts() << " contacts" << std::endl;
+        std::vector<fcl::Contact<float>> contacts;
+        result.getContacts(contacts);
+        for (size_t j = 0; j < result.numContacts(); j++) {
+          std::cout << "obs primitive: " << contacts[j].b1 << " rob primitive: " << contacts[j].b2 << std::endl;
+
+        }
+      }
+
       out[i] = makeTagged(confs[i]);
       // Check if collision occurred
       if (result.isCollision()) {
         out[i].valid= false;
-        if (i == 8848) {
-          std::cout << "configuration " << i << " is in collision with " << result.numContacts() << " contacts." << std::endl;
-          for (size_t j = 0; j < result.numContacts(); ++j) {
-              const fcl::Contact<float>& contact = result.getContact(j);
-              std::cout << "Contact " << j << ": position = (" << contact.pos[0] << ", " << contact.pos[1] << ", " << contact.pos[2] << "), normal = (" << contact.normal[0] << ", " << contact.normal[1] << ", " << contact.normal[2] << "), penetration depth = " << contact.penetration_depth << std::endl;
-              std::cout << "Contact " << j << ": body1 = " << contact.b1 << ", body2 = " << contact.b2 << std::endl;
-          }
-        }
       } else {
         out[i].valid=true;
       }
