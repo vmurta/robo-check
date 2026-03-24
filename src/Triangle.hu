@@ -212,7 +212,7 @@ __host__ __device__ void compute_intersect_line_sep(const float N1_x, const floa
     }
 }
 
-__host__ __device__ float project_vertex(const Eigen::Vector3f V, const Eigen::Vector3f D, const Eigen::Vector3f O) {
+__host__ __device__ float project_vertex(const Eigen::Vector3f &V, const Eigen::Vector3f &D, const Eigen::Vector3f &O) {
     return D(0) * (V(0) - O(0)) + D(1) * (V(1) - O(1)) + D(2) * (V(2) - O(2));
 }
 
@@ -221,12 +221,37 @@ __host__ __device__ float project_vertex_sep(const float Vx, const float Vy, con
 }
 
 __host__ __device__ float compute_parametric_variable(const Eigen::Vector3f v0, const Eigen::Vector3f v1,
-        const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O) {
+        const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O, bool delete_me) {
     float p_v0 = project_vertex(v0, D, O);
     float p_v1 = project_vertex(v1, D, O);
 
     return p_v0 + (p_v1 - p_v0) * d0 / (d0 - d1);
 }
+
+// __host__ __device__
+// float compute_parametric_variable(
+//     const Eigen::Vector3f &v0,
+//     const Eigen::Vector3f &v1,
+//     float d0, float d1,
+//     const Eigen::Vector3f &D,
+//     const Eigen::Vector3f &O,
+//     bool delete_me = false)
+// {
+//     float p_v0 = project_vertex(v0, D, O);
+//     float p_v1 = project_vertex(v1, D, O);
+
+//     if (delete_me) {
+//         printf("p_v0: %f, p_v1: %f, d0: %f, d1: %f\n", p_v0, p_v1, d0, d1);
+//     }
+//     float denom = d0 - d1;
+//     if (fabsf(denom) < 1e-6f) {
+//         return p_v0; // fallback
+//     }
+
+//     float t = d0 / denom;
+
+//     return p_v0 + (p_v1 - p_v0) * t;
+// }
 
 __host__ __device__ float compute_parametric_variable_sep(const float v0_x, const float v0_y, const float v0_z, const float v1_x, const float v1_y, const float v1_z, const float d0, const float d1, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz) {
     float p_v0 = project_vertex_sep(v0_x, v0_y, v0_z, Dx, Dy, Dz, Ox, Oy, Oz);
@@ -435,6 +460,9 @@ __device__ bool triangles_valid(Eigen::Vector3f rob_v1, Eigen::Vector3f rob_v2, 
     //TODO: i think this code can't handle coplanar triangles? return false if that's the case
     if (is_coplanar(Nr, dr, No, do_)) {
         req_coplanar = true;
+        if (delete_me) {
+            printf("Coplanar triangles found\n");
+        }
         return false;
     }
 
@@ -451,16 +479,16 @@ __device__ bool triangles_valid(Eigen::Vector3f rob_v1, Eigen::Vector3f rob_v2, 
     canonicalize_triangle(obs_v1, obs_v2, obs_v3, distO);
 
     float t_r01 = compute_parametric_variable(rob_v1,
-        rob_v2, distR[0], distR[1], D, O);
+        rob_v2, distR[0], distR[1], D, O,delete_me);
 
     float t_r12 = compute_parametric_variable(rob_v2,
-        rob_v3, distR[1], distR[2], D, O);
+        rob_v3, distR[1], distR[2], D, O,delete_me);
 
     float t_o01 = compute_parametric_variable(rob_v1,
-        rob_v2, distO[0], distO[1], D, O);
+        rob_v2, distO[0], distO[1], D, O,delete_me);
 
     float t_o12 = compute_parametric_variable(rob_v2,
-        rob_v3, distO[1], distO[2], D, O);
+        rob_v3, distO[1], distO[2], D, O,delete_me);
 
     // There is no overlap
     if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
@@ -473,6 +501,9 @@ __device__ bool triangles_valid(Eigen::Vector3f rob_v1, Eigen::Vector3f rob_v2, 
     // There is overlap
     } else {
         req_coplanar = false;
+        if (delete_me) {
+            printf("Overlap found with t_r01 %f, t_r12 %f, t_o01 %f, t_o12 %f\n", t_r01, t_r12, t_o01, t_o12);
+        }
         return false;
     }
 }

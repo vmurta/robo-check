@@ -546,7 +546,7 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
       // std::cout << "starting conf " << i << std::endl;
       fcl::Transform3f transform = configurationToTransform(confs[i]);
       rob_col_obj.setTransform(transform);
-      if (i == 2504){
+      if (i == 1428){
         std::cout << "conf " << i << " has transform: " << std::endl;
         std::cout << transform.matrix() << std::endl;
       }
@@ -558,7 +558,7 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
       // // Perform collision detection
       fcl::collide(&obs_col_obj, &rob_col_obj, request, result);
 
-      if (i == 2504 ){
+      if (i == 1428 ){
         std::cout << "conf " << i << " has " << result.numContacts() << " contacts" << std::endl;
         std::vector<fcl::Contact<float>> contacts;
         result.getContacts(contacts);

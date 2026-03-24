@@ -1173,6 +1173,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     }
     __syncthreads();
 
+    bool delete_me_10 = index == 1428;
 
     float t; // distance between centers of the two boxes as projected onto the axis
     const float epsilon = 1e-6f; // small value to avoid numerical issues
@@ -1363,7 +1364,9 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         // no pending configurations, we're done
         return;
     }
-
+    if (delete_me_10){
+        printf("num_confs_pend for index %d: %d\n", index, num_confs_pend);
+    }
     __shared__ int16_t rob_first_children[NUM_ROB_NODES];
     __shared__ int16_t obs_first_children[NUM_OBS_NODES];
 
@@ -1415,7 +1418,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         T_conf = rob_confs_pend_trans[i];
         int global_conf_idx = rob_confs_pend_indices[i];
         // bool delete_me_3 = (global_conf_idx == 11488);
-        bool delete_me_4 = (global_conf_idx == 2504);
+        bool delete_me_4 = (global_conf_idx == 1428);
         //reset pending OBB lists
         if (threadIdx.x == 0){
             num_obb_pend = 1;
@@ -1434,12 +1437,12 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             if (num_obb_pend == 0){
                 break;
             }
-            if (delete_me_4 && threadIdx.x == 0){
-                printf("num_obb_pend at start: %d\n", num_obb_pend);
-                for (uint16_t j = 0; j < num_obb_pend; j++){
-                    printf("pending rob_obb_idx %d and obs_obb_idx %d\n", rob_obb_pend[j], obs_obb_pend[j]);
-                }
-            }
+            // if (delete_me_4 && threadIdx.x == 0){
+            //     printf("num_obb_pend at start: %d\n", num_obb_pend);
+            //     for (uint16_t j = 0; j < num_obb_pend; j++){
+            //         printf("pending rob_obb_idx %d and obs_obb_idx %d\n", rob_obb_pend[j], obs_obb_pend[j]);
+            //     }
+            // }
             __syncthreads();
 
 
@@ -1514,10 +1517,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             bool delete_me_5 = delete_me_4 && (rob_obb_idx == 83);
 
-            if (delete_me_4){
-                printf("thread %d processing rob_obb_idx %d and obs_obb_idx %d with rob_child_idx %d and obs_child_idx %d, conf offset %d\n", 
-                        threadIdx.x, rob_obb_idx, obs_obb_idx, rob_child_idx, obs_child_idx, conf_offset);
-            }
+            // if (delete_me_4){
+            //     printf("thread %d processing rob_obb_idx %d and obs_obb_idx %d with rob_child_idx %d and obs_child_idx %d, conf offset %d\n", 
+            //             threadIdx.x, rob_obb_idx, obs_obb_idx, rob_child_idx, obs_child_idx, conf_offset);
+            // }
 
             bool delete_me2 = delete_me && obs_obb_idx == 80 && rob_obb_idx == 75;
             R_obs_abs = pR_obs[obs_obb_idx];
@@ -1756,6 +1759,9 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         __syncthreads();
         if (num_bad_leaves == 0){
             if (threadIdx.x == 0) {
+                if (delete_me_4) {
+                    printf("Configuration %d has no bad leaf pairs, num_obb_pend %d\n", global_conf_idx, num_obb_pend);
+                }
                 pdisjoint[global_conf_idx] = true;
             }
             continue;
@@ -1803,7 +1809,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 rob_v1 = R_conf * rob_v1 + T_conf;
                 rob_v2 = R_conf * rob_v2 + T_conf;
 
-                bool delete_me_6 = (rob_tri_idx == 113 && obs_tri_idx == 841) && delete_me_4;
+                bool delete_me_6 = (rob_tri_idx == 168 && obs_tri_idx == 952) && delete_me_4;
 
                 bool valid = triangles_valid(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2, delete_me_6);
                 // valid = triangles_valid(rob_tri, obs_tri, R_conf, T_conf, pRob_verts, pObs_verts);
@@ -1825,6 +1831,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 //     printf("In block %d, thread %d, triangle pair with robot triangle index %d and obstacle triangle index %d is %s\n", 
                 //             blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx, valid ? "valid" : "invalid");
                 // }
+                if (!valid && delete_me_4) {
+                    printf("In block %d, thread %d, conf %d found invalid leaf pair with robot triangle index %d and obstacle triangle index %d\n", 
+                            blockIdx.x, threadIdx.x, global_conf_idx, rob_tri_idx, obs_tri_idx);
+                }
                 if (!__all_sync(mask, valid)) {   
                     all_valid = false;
                     break;
@@ -1919,7 +1929,7 @@ double broad_naive_1() {
     std::vector<Configuration> confs;
     confs.reserve(num_confs);
     // std::cout << "Reading configurations from file..." << std::endl;
-    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/easy_confs100,000.conf", confs);
+    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/hard_confs100,000.conf", confs);
     Eigen::Matrix3f rob_rotations[num_confs];
     Eigen::Vector3f rob_translations[num_confs];
     for (int i = 0; i < num_confs; ++i) {
@@ -2111,7 +2121,7 @@ double broad_coarsened_shared_mem_2S() {
     std::vector<Configuration> confs;
     confs.reserve(num_confs);
     // std::cout << "Reading configurations from file..." << std::endl;
-    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/easy_confs100,000.conf", confs);
+    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/hard_confs100,000.conf", confs);
     Eigen::Matrix3f rob_rotations[num_confs];
     Eigen::Vector3f rob_translations[num_confs];
     for (int i = 0; i < num_confs; ++i) {
@@ -2300,7 +2310,7 @@ double broad_coarsened_shared_mem_1S() {
     std::vector<Configuration> confs;
     confs.reserve(num_confs);
     // std::cout << "Reading configurations from file..." << std::endl;
-    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/easy_confs100,000.conf", confs);
+    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/hard_confs100,000.conf", confs);
     Eigen::Matrix3f rob_rotations[num_confs];
     Eigen::Vector3f rob_translations[num_confs];
     for (int i = 0; i < num_confs; ++i) {
@@ -2573,7 +2583,7 @@ double bvh_naive() {
     std::vector<Configuration> confs;
     confs.reserve(num_confs);
     // std::cout << "Reading configurations from file..." << std::endl;
-    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/easy_confs100,000.conf", confs);
+    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/hard_confs100,000.conf", confs);
     Eigen::Matrix3f rob_conf_r[num_confs];
     Eigen::Vector3f rob_conf_t[num_confs];
     for (int i = 0; i < num_confs; ++i) {
@@ -2702,11 +2712,14 @@ double bvh_naive() {
                 true_negatives++;
             } else {
                 false_negatives++;
+                // std::cout << "False negative at configuration " << i << ": "
+                //           << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
+                //           "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
             }
         }
     }
-    std::cout << "Out of " << num_confs << " configurations, " << true_positives << " were true positives and " << false_positives << " were false positives." << std::endl;
-    std::cout << "Out of " << num_confs << " configurations, " << true_negatives << " were true negatives and " << false_negatives << " were false negatives." << std::endl;
+    std::cout << "for BVH traversal, Out of " << num_confs << " configurations, " << true_positives << " were true positives and " << false_positives << " were false positives." << std::endl;
+    std::cout << "for BVH traversal, Out of " << num_confs << " configurations, " << true_negatives << " were true negatives and " << false_negatives << " were false negatives." << std::endl;
 
     int cpu_positives = 0;
     int cpu_negatives = 0;
