@@ -546,7 +546,7 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
       // std::cout << "starting conf " << i << std::endl;
       fcl::Transform3f transform = configurationToTransform(confs[i]);
       rob_col_obj.setTransform(transform);
-      if (i == 11488){
+      if (i == 2504){
         std::cout << "conf " << i << " has transform: " << std::endl;
         std::cout << transform.matrix() << std::endl;
       }
@@ -564,7 +564,8 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
         result.getContacts(contacts);
         for (size_t j = 0; j < result.numContacts(); j++) {
           std::cout << "obs primitive: " << contacts[j].b1 << " rob primitive: " << contacts[j].b2 << std::endl;
-
+          // std::cout << "obs vertices: " << obs_mesh->vertices[obs_triangles[contacts[j].b1][0]] << "," << obs_mesh->vertices[obs_triangles[contacts[j].b1][1]] << "," << obs_mesh->vertices[obs_triangles[contacts[j].b1][2]] << std::endl;
+          // std::cout << "rob vertices: " << rob_mesh->vertices[rob_triangles[contacts[j].b2][0]].applyOnTheRight(transform.matrix()) << "," << rob_mesh->vertices[rob_triangles[contacts[j].b2][1]].applyOnTheRight(transform.matrix()) << "," << rob_mesh->vertices[rob_triangles[contacts[j].b2][2]].applyOnTheRight(transform.matrix()) << std::endl;
         }
       }
 

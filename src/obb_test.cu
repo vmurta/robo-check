@@ -1396,7 +1396,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     #define MAX_BUFFER (BLOCK_SIZE * 128)
     __shared__ uint16_t rob_obb_pend[MAX_BUFFER]; // arbitrary buffer size, should experiment with this
     __shared__ uint16_t obs_obb_pend[MAX_BUFFER];
-    __shared__ uint32_t num_obb_pend;
+    __shared__ int num_obb_pend;
 
     // intent: for each i in rob_obb_pend, need to check triangle of bad_rob_leaves[i] against triangle of bad_obs_leaves[j]
     __shared__ uint16_t bad_rob_leaves[MAX_BUFFER];
@@ -1696,7 +1696,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             // }
             if (rob_first_child_idx > 0 && obs_first_child_idx > 0) {
                 // add children to pending lists
-                uint_fast16_t pos = atomicAdd(&num_obb_pend, 1);
+                int pos = atomicAdd(&num_obb_pend, 1);
                 obs_obb_pend[pos] = obs_obb_idx;
                 rob_obb_pend[pos] = rob_obb_idx;
                 if(delete_me_4){
@@ -1705,19 +1705,15 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 }
             } 
 
-            //TODO: delete this
-            // else{
-            //     uint_fast16_t pos = atomicAdd(&num_bad_leaves, 1);
-            // }
-            //todo: uncomment this
+            //TODO: this is causing duplicates to be added to the bad leaves list, causing extra work down the line, as the duplicates grow exponentially.
             else if (rob_first_child_idx < 0) {
                 // both are leaves
                 if (obs_first_child_idx < 0) {
 
                     // add leaves to bad leaves list
-                    uint_fast16_t pos = atomicAdd(&num_bad_leaves, 1);
+                    int pos = atomicAdd(&num_bad_leaves, 1);
                     if(delete_me_4){
-                        printf("Line 1712: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at pending index %d\n", 
+                        printf("Line 1712: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at tri index %d\n", 
                                 blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_idx, pos);
                     }
                     // if (delete_me_4) {
@@ -1735,23 +1731,23 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 }
                 // robot is leaf, obstacle is not
                 else {
-                    uint_fast16_t pos = atomicAdd(&num_obb_pend, 1);
+                    int pos = atomicAdd(&num_obb_pend, 1);
                     obs_obb_pend[pos] = obs_obb_idx;
                     rob_obb_pend[pos] = rob_obb_par_idx; // just shove the parent back in, recurse only on obstacle children
                     // TODO: this is a weird hack, figure out a better way to do this
                     if(delete_me_4){
                     printf("Line 1737: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at pending index %d\n", 
-                            blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_idx, pos);
+                            blockIdx.x, threadIdx.x, rob_obb_par_idx, obs_obb_idx, pos);
                 }
                 }
             } 
             // obstacle is leaf, robot is not
             else if (obs_first_child_idx < 0) {
 
-                uint_fast16_t pos = atomicAdd(&num_obb_pend, 1);
+                int pos = atomicAdd(&num_obb_pend, 1);
                 if(delete_me_4){
                     printf("Line 1745: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at pending index %d\n", 
-                            blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_idx, pos);
+                            blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_par_idx, pos);
                 }
                 rob_obb_pend[pos] = rob_obb_idx;
                 obs_obb_pend[pos] = obs_obb_par_idx; // just shove the parent back in, recurse only on robot children
@@ -1768,12 +1764,12 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             //TODO: this doesn't actually work if there are more than BLOCK_SIZE bad leaves, need to add some sort of batching mechanism
             bool valid = true;
             size_t leaf_idx = threadIdx.x;
-            // if (threadIdx.x == 0 && delete_me_4) {
-            //     printf("Configuration %d has the following bad leaf pairs", global_conf_idx);
-            //     for (size_t j = 0; j < num_bad_leaves; j++)                {
-            //         printf("robot triangle index %d and obstacle triangle index %d \n", bad_rob_leaves[j], bad_obs_leaves[j]);
-            //     }
-            // }
+            if (threadIdx.x == 0 && delete_me_4) {
+                printf("Configuration %d has the following bad leaf pairs, totalling %d:\n", global_conf_idx, num_bad_leaves);
+                for (size_t j = 0; j < num_bad_leaves; j++)                {
+                    printf("robot triangle index %d and obstacle triangle index %d \n", bad_rob_leaves[j], bad_obs_leaves[j]);
+                }
+            }
             bool all_valid = true;
             __syncthreads();
 
@@ -1782,14 +1778,15 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 // if(delete_me_4 ){
                 //     printf("Current active mask in block %d, thread %d is %u\n", blockIdx.x, threadIdx.x, mask);
                 // }
-                uint16_t rob_tri_idx = bad_rob_leaves[leaf_idx];
-                uint16_t obs_tri_idx = bad_obs_leaves[leaf_idx];
+                int rob_tri_idx = bad_rob_leaves[leaf_idx];
+                int obs_tri_idx = bad_obs_leaves[leaf_idx];
                 if (delete_me_4) {
-                    if (obs_tri_idx == 113 && rob_tri_idx == 445) {
+                    if (rob_tri_idx == 113 && obs_tri_idx == 841) {
                     printf("In block %d, thread %d, processing leaf pair with robot triangle index %d and obstacle triangle index %d \n", 
                             blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx);
                     }
                 }
+               
                 // printf("In block %d, thread %d, processing leaf pair with robot triangle index %d and obstacle triangle index %d\n", 
                 //         blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx);
                 Triangle rob_tri = pRob_tris[rob_tri_idx];
@@ -1806,7 +1803,24 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 rob_v1 = R_conf * rob_v1 + T_conf;
                 rob_v2 = R_conf * rob_v2 + T_conf;
 
-                valid = triangles_valid(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2);
+                bool delete_me_6 = (rob_tri_idx == 113 && obs_tri_idx == 841) && delete_me_4;
+
+                bool valid = triangles_valid(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2, delete_me_6);
+                // valid = triangles_valid(rob_tri, obs_tri, R_conf, T_conf, pRob_verts, pObs_verts);
+                // if (valid != backup_valid) {
+                //     printf("Discrepancy found in triangle-triangle test for robot triangle index %d and obstacle triangle index %d: valid = %s, backup_valid = %s\n",
+                //             rob_tri_idx, obs_tri_idx, valid ? "true" : "false", backup_valid ? "true" : "false");
+                // }
+                if (delete_me_4) {
+                    if (rob_tri_idx == 113 && obs_tri_idx == 841) {
+                        printf("In block %d, thread %d, triangle pair with robot triangle index %d and obstacle triangle index %d is %s\n", 
+                                blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx, valid ? "valid" : "invalid");
+                        
+                        printf("In block %d, thread %d, rob triangle vertices: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\nobs triangle vertices: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\n", 
+                                blockIdx.x, threadIdx.x, rob_v0[0], rob_v0[1], rob_v0[2], rob_v1[0], rob_v1[1], rob_v1[2], rob_v2[0], rob_v2[1], rob_v2[2],
+                                obs_v0[0], obs_v0[1], obs_v0[2], obs_v1[0], obs_v1[1], obs_v1[2], obs_v2[0], obs_v2[1], obs_v2[2]);
+                    }
+                }
                 // if(delete_me_4){
                 //     printf("In block %d, thread %d, triangle pair with robot triangle index %d and obstacle triangle index %d is %s\n", 
                 //             blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx, valid ? "valid" : "invalid");
