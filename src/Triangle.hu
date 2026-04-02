@@ -468,6 +468,9 @@ __device__ bool triangles_valid(Eigen::Vector3f rob_v1, Eigen::Vector3f rob_v2, 
 
     Eigen::Vector3f distR = compute_signed_dists(No, do_, rob_v1, rob_v2, rob_v3);
     if (no_overlap(distR)) {
+        if (delete_me) {
+            printf("No overlap found with dist0 %f, dist1 %f, dist2 %f\n", distR(0), distR(1), distR(2));
+        }
         return true;
     }
 
@@ -484,18 +487,24 @@ __device__ bool triangles_valid(Eigen::Vector3f rob_v1, Eigen::Vector3f rob_v2, 
     float t_r12 = compute_parametric_variable(rob_v2,
         rob_v3, distR[1], distR[2], D, O,delete_me);
 
-    float t_o01 = compute_parametric_variable(rob_v1,
-        rob_v2, distO[0], distO[1], D, O,delete_me);
+    float t_o01 = compute_parametric_variable(obs_v1,
+        obs_v2, distO[0], distO[1], D, O,delete_me);
 
-    float t_o12 = compute_parametric_variable(rob_v2,
-        rob_v3, distO[1], distO[2], D, O,delete_me);
+    float t_o12 = compute_parametric_variable(obs_v2,
+        obs_v3, distO[1], distO[2], D, O,delete_me);
 
     // There is no overlap
     if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
+        if (delete_me) {
+            printf("No Overlap found with t_r01 %f, t_r12 %f, t_o01 %f, t_o12 %f\n", t_r01, t_r12, t_o01, t_o12);
+        }
         return true;
 
     // Also no overlap
     } else if (min(t_o01, t_o12) > max(t_r01, t_r12)) {
+        if (delete_me) {
+            printf("No overlap found with t_o01 %f, t_o12 %f, t_r01 %f, t_r12 %f\n", t_o01, t_o12, t_r01, t_r12);
+        }
         return true;
 
     // There is overlap
