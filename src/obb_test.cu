@@ -1173,7 +1173,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     }
     __syncthreads();
 
-    bool delete_me_10 = index == 1428;
+    bool delete_me_10 = index == 20357;
 
     float t; // distance between centers of the two boxes as projected onto the axis
     const float epsilon = 1e-6f; // small value to avoid numerical issues
@@ -1418,7 +1418,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         T_conf = rob_confs_pend_trans[i];
         int global_conf_idx = rob_confs_pend_indices[i];
         // bool delete_me_3 = (global_conf_idx == 11488);
-        bool delete_me_4 = (global_conf_idx == 1428);
+        bool delete_me_4 = (global_conf_idx == 20357);
         //reset pending OBB lists
         if (threadIdx.x == 0){
             num_obb_pend = 1;
@@ -1426,7 +1426,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             rob_obb_pend[0] = 0; // root
             obs_obb_pend[0] = 0; // root
         }
-        
+
+        if (threadIdx.x == 0 && global_conf_idx % 1000 == 0){
+            printf("Processing configuration %d\n", global_conf_idx);
+        }
+
         __syncthreads();
 
         // intent: for each i in rob_obb_pend, need to check all children of rob_obb_pend[i] against all children of obs_obb_pend[j]
@@ -1437,24 +1441,25 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             if (num_obb_pend == 0){
                 break;
             }
-            // if (delete_me_4 && threadIdx.x == 0){
-            //     printf("num_obb_pend at start: %d\n", num_obb_pend);
-            //     for (uint16_t j = 0; j < num_obb_pend; j++){
-            //         printf("pending rob_obb_idx %d and obs_obb_idx %d\n", rob_obb_pend[j], obs_obb_pend[j]);
-            //     }
-            // }
+            if (delete_me_4 && threadIdx.x == 0){
+                printf("num_obb_pend at start: %d\n", num_obb_pend);
+                for (uint16_t j = 0; j < num_obb_pend; j++){
+                    printf("pending rob_obb_idx %d and obs_obb_idx %d\n", rob_obb_pend[j], obs_obb_pend[j]);
+                }
+             }
             __syncthreads();
 
 
             int16_t pend_idx = num_obb_pend + conf_offset;
             if (num_obb_pend >= MAX_BUFFER - 32){
                 if (threadIdx.x == 0) {
-                    printf("obb overflow with %d\n boxes on configuration with rotation matrix \n\
-                            %f, %f, %f, \n %f, %f, %f, \n %f, %f, %f, \n and translation \n \n with block index %d: \
-                            %f, %f, %f \n", num_obb_pend, R_conf(0, 0), R_conf(0, 1), R_conf(0, 2),
+                    printf("obb overflow with %d\n boxes on configuration with rotation matrix \n\r \
+                            %f, %f, %f, \n %f, %f, %f, \n %f, %f, %f, \n and translation \n \n with block index %d\n \
+                            %f, %f, %f \n", 
+                            num_obb_pend, R_conf(0, 0), R_conf(0, 1), R_conf(0, 2),
                             R_conf(1, 0), R_conf(1, 1), R_conf(1, 2),
                             R_conf(2, 0), R_conf(2, 1), R_conf(2, 2),
-                            T_conf[0], T_conf[1], T_conf[2]);
+                            T_conf[0], T_conf[1], T_conf[2], blockIdx.x);
                 }
                 break;
             }
@@ -1471,6 +1476,8 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             if (pend_idx < 0) {
                 continue;
             }
+
+            unsigned mask = __activemask();
             // something's going wrong here with the OBBs on 16-31, getting out of bounds errors.
             //  My hunch is that I'm changing num_obb_pend incorrectly 
             // if (num_obb_pend + conf_offset >= MAX_BUFFER){
@@ -1491,8 +1498,39 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             int16_t rob_obb_idx = rob_first_children[rob_obb_par_idx] + rob_child_idx;
             int16_t obs_obb_idx = obs_first_children[obs_obb_par_idx] + obs_child_idx;
 
+            bool delete_me_11 = delete_me_4 &&
+                            rob_obb_idx == 78 && obs_obb_idx == 83;
+
             int16_t rob_first_child_idx = rob_first_children[rob_obb_idx];
             int16_t obs_first_child_idx = obs_first_children[obs_obb_idx];
+
+            __syncwarp(mask);
+            // if either is a dummy node, skip check
+            //TODO: see if this is safe to do
+            if (rob_first_child_idx == 0 || obs_first_child_idx == 0){
+                continue;
+            }
+
+
+            // bool delete_me_8 = delete_me_4 && 
+            //     ((rob_obb_idx == 1833 && obs_obb_idx == 1239) ||
+            //     (rob_obb_idx == 1251 && obs_obb_idx == 1239) ||
+            //     (rob_obb_idx == 1835 && obs_obb_idx == 1239) ||
+            //     (rob_obb_idx == 1833 && obs_obb_idx == 326) ||
+            //     (rob_obb_idx == 1835 && obs_obb_idx == 326) ||
+            //     (rob_obb_idx == 1833 && obs_obb_idx == 1242) ||
+            //     (rob_obb_idx == 1835 && obs_obb_idx == 1242) ||
+            //     (rob_obb_idx == 1253 && obs_obb_idx == 1242) ||
+            //     (rob_obb_idx == 1837 && obs_obb_idx == 1242) ||
+            //     (rob_obb_idx == 1833 && obs_obb_idx == 338) ||
+            //     (rob_obb_idx == 1837 && obs_obb_idx == 338) ||
+            //     (rob_obb_idx == 1833 && obs_obb_idx == 1240) ||
+            //     (rob_obb_idx == 1835 && obs_obb_idx == 1240) ||
+            //     (rob_obb_idx == 1253 && obs_obb_idx == 1240) ||
+            //     (rob_obb_idx == 1837 && obs_obb_idx == 1240) ||
+            //     (rob_obb_idx == 1833 && obs_obb_idx == 339) ||
+            //     (rob_obb_idx == 1251 && obs_obb_idx == 339) ||
+            //     (rob_obb_idx == 1835 && obs_obb_idx == 339));
 
             // if (delete_me){
             //     printf("In block %d, thread %d, processing rob_obb_idx %d with first_child %d and obs_obb_idx %d with first_child %d\n", 
@@ -1510,10 +1548,6 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
 
 
-            // if either is a dummy node, skip check
-            if (rob_first_child_idx == 0 || obs_first_child_idx == 0){
-                continue;
-            }
 
             bool delete_me_5 = delete_me_4 && (rob_obb_idx == 83);
 
@@ -1561,6 +1595,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             // // Test #1
             if(t > (a[0] + Bf.row(0).dot(b))){
+                if (delete_me_11) {
+                    printf("Test #1 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf.row(0).dot(b) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], Bf.row(0).dot(b));
+                }
                 continue;
             }
 
@@ -1569,6 +1607,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             t = fabsf(B.col(0).dot(T));
 
             if(t > (b[0] + Bf.col(0).dot(a))){
+                if (delete_me_11) {
+                    printf("Test #2 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, b[0] = %f, and Bf.col(0).dot(a) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, b[0], Bf.col(0).dot(a));
+                }
                 continue;
             }
 
@@ -1577,6 +1619,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             t = fabsf(T[1]);
 
             if(t > (a[1] + Bf.row(1).dot(b))){
+                if (delete_me_11) {
+                    printf("Test #3 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf.row(1).dot(b) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[1], Bf.row(1).dot(b));
+                }
                 continue;
             }
 
@@ -1585,6 +1631,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             t = fabsf(T[2]);
 
             if(t > (a[2] + Bf.row(2).dot(b))){
+                if (delete_me_11) {
+                    printf("Test #4 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[2] = %f, and Bf.row(2).dot(b) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[2], Bf.row(2).dot(b));
+                }
                 continue;
             }
 
@@ -1593,6 +1643,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             t = fabsf(B.col(1).dot(T));
 
             if(t > (b[1] + Bf.col(1).dot(a))){
+                if (delete_me_11) {
+                    printf("Test #5 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, b[1] = %f, and Bf.col(1).dot(a) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, b[1], Bf.col(1).dot(a));
+                }
                 continue;
             }
 
@@ -1601,6 +1655,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             t = fabsf(B.col(2).dot(T));
 
             if(t > (b[2] + Bf.col(2).dot(a))){
+                if (delete_me_11) {
+                    printf("Test #6 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, b[2] = %f, and Bf.col(2).dot(a) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, b[2], Bf.col(2).dot(a));
+                }
+
                 continue;
             }
 
@@ -1610,6 +1669,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[1] * Bf(2, 0) + a[2] * Bf(1, 0) +
                     b[1] * Bf(0, 2) + b[2] * Bf(0, 1))){
+                if (delete_me_11) {
+                    printf("Test #7 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf(2, 0) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[1], Bf(2, 0));
+                }
                 continue;
             }
 
@@ -1619,6 +1682,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[1] * Bf(2, 1) + a[2] * Bf(1, 1) +
                     b[0] * Bf(0, 2) + b[2] * Bf(0, 0))){
+                if (delete_me_11) {
+                    printf("Test #8 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf(2, 1) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[1], Bf(2, 1));
+                }
                 continue;
             }
 
@@ -1628,6 +1695,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[1] * Bf(2, 2) + a[2] * Bf(1, 2) +
                     b[0] * Bf(0, 1) + b[1] * Bf(0, 0))){
+                if (delete_me_11) {
+                    printf("Test #9 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf(2, 2) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[1], Bf(2, 2));
+                }
                 continue;
             }
 
@@ -1637,6 +1708,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(2, 0) + a[2] * Bf(0, 0) +
                     b[1] * Bf(1, 2) + b[2] * Bf(1, 1))){
+                if (delete_me_11) {
+                    printf("Test #10 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(2, 0) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(2, 0));
+                }
+
                 continue;
             }
 
@@ -1646,6 +1722,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(2, 1) + a[2] * Bf(0, 1) +
                     b[0] * Bf(1, 2) + b[2] * Bf(1, 0))){
+                if (delete_me_11) {
+                    printf("Test #11 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(2, 1) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(2, 1));
+                }
+
                 continue;
             }
 
@@ -1655,6 +1736,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(2, 2) + a[2] * Bf(0, 2) +
                     b[0] * Bf(1, 1) + b[1] * Bf(1, 0))){
+                if (delete_me_11) {
+                    printf("Test #12 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(2, 2) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(2, 2));
+                }
                 continue;
             }
 
@@ -1664,6 +1749,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(1, 0) + a[1] * Bf(0, 0) +
                     b[1] * Bf(2, 2) + b[2] * Bf(2, 1))){
+                if (delete_me_11) {
+                    printf("Test #13 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(1, 0) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(1, 0));
+                }
                 continue;
             }
 
@@ -1673,6 +1762,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(1, 1) + a[1] * Bf(0, 1) +
                     b[0] * Bf(2, 2) + b[2] * Bf(2, 0))){
+                if (delete_me_11) {
+                    printf("Test #14 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(1,1) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(1, 1));
+                }
                 continue;
             }
 
@@ -1682,6 +1775,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(1, 2) + a[1] * Bf(0, 2) +
                     b[0] * Bf(2, 1) + b[1] * Bf(2, 0))){
+                if (delete_me_11) {
+                    printf("Test #15 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(1, 2) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(1, 2));
+                }
                 continue;
             }
 
@@ -1709,6 +1806,8 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             } 
 
             //TODO: this is causing duplicates to be added to the bad leaves list, causing extra work down the line, as the duplicates grow exponentially.
+            // this is caused by the fact that when one box is a leaf and the other is not, we add the parent of the leaf box back into the pending list, which can cause the same parent to be added multiple times for the same non-leaf box if multiple children of the non-leaf box overlap with the any of the leaf boxes of the parent
+
             else if (rob_first_child_idx < 0) {
                 // both are leaves
                 if (obs_first_child_idx < 0) {
@@ -1809,7 +1908,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 rob_v1 = R_conf * rob_v1 + T_conf;
                 rob_v2 = R_conf * rob_v2 + T_conf;
 
-                bool delete_me_6 = (rob_tri_idx == 168 && obs_tri_idx == 952) && delete_me_4;
+                bool delete_me_6 = (rob_tri_idx == 560 && obs_tri_idx == 281) && delete_me_4;
 
                 bool valid = triangles_valid(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2, delete_me_6);
                 // valid = triangles_valid(rob_tri, obs_tri, R_conf, T_conf, pRob_verts, pObs_verts);
@@ -1846,6 +1945,8 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             if (all_valid && threadIdx.x == 0) {
                 pdisjoint[global_conf_idx] = true;
             }
+            if (threadIdx.x == 0 && delete_me_4) {
+                printf("For block %d, configuration %d is %s \n", blockIdx.x, global_conf_idx, num_bad_leaves ? "valid" : "invalid");}
         }
         // if (threadIdx.x == 0 && num_bad_leaves != 0) {
         //     printf("For block %d, configuration %d has %d bad leaf pairs\n", blockIdx.x, global_conf_idx, num_bad_leaves);
@@ -2772,8 +2873,8 @@ int main() {
     // BVH_n_ary_hierarchy_from_mesh("/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj", 2);
     
     bvh_naive();
-    broad_coarsened_shared_mem_1S();
-    broad_coarsened_shared_mem_2S();
+    // broad_coarsened_shared_mem_1S();
+    // broad_coarsened_shared_mem_2S();
     // for (size_t i = 0; i < num_trials; ++i) {
     //     std::cout << "\rIteration " << i + 1 << " / " << num_trials;
     //     naive_times[i] = broad_naive_1();
