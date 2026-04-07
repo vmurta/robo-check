@@ -1144,7 +1144,7 @@ __global__ void d_obb_coursened_one_stage ( const Eigen::Matrix3f* pR_obs, const
 //assumes BVH of both trees have same depth
 __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
                                 const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
-                                const Eigen::Vector3f* pRob_dim, const Eigen::Vector3f* pObs_dim,
+                                const Eigen::Vector3f* pObs_dim, const Eigen::Vector3f* pRob_dim,
                                 const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
                                 const int16_t* pObs_first_child, const int16_t* pRob_first_child,
                                 const Eigen::Vector3f *pRob_verts, const Triangle *pRob_tris,
@@ -1495,8 +1495,8 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             //     printf("In block %d, thread %d, obs_obb_par_idx %d exceeds MAX_BUFFER %d, with num_obb_pend %d and conf_offset %d\n", 
             //             blockIdx.x, threadIdx.x, obs_obb_par_idx, MAX_BUFFER, num_obb_pend, conf_offset);
             // }
-            int16_t rob_obb_idx = rob_first_children[rob_obb_par_idx] + rob_child_idx;
-            int16_t obs_obb_idx = obs_first_children[obs_obb_par_idx] + obs_child_idx;
+            int rob_obb_idx = rob_first_children[rob_obb_par_idx] + rob_child_idx;
+            int obs_obb_idx = obs_first_children[obs_obb_par_idx] + obs_child_idx;
 
             bool delete_me_11 = delete_me_4 &&
                             rob_obb_idx == 78 && obs_obb_idx == 83;
@@ -1620,8 +1620,8 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[1] + Bf.row(1).dot(b))){
                 if (delete_me_11) {
-                    printf("Test #3 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf.row(1).dot(b) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[1], Bf.row(1).dot(b));
+                    printf("Test #3 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a = {%f, %f, %f}, and Bf.row(1).dot(b) = %f\n",
+                            rob_obb_idx, obs_obb_idx, t, a[0], a[1], a[2], Bf.row(1).dot(b));
                 }
                 continue;
             }
@@ -2654,31 +2654,31 @@ double bvh_naive() {
         }
     }
 
-    size_t num_bad_obs_triangles = 0;
-     for (size_t i = 0; i < obs_BVH.size; ++i){
-        if (obs_BVH.first_child[i] < 0){
-            size_t triangle_ind = -(obs_BVH.first_child[i]+1);
-            //confirm that each of the points in the triangle is in the bvh node's box
-            Triangle t = obs_triangles[triangle_ind];
-            Eigen::Vector3f v0 = obs_vertices[t.v1];
-            Eigen::Vector3f v1 = obs_vertices[t.v2];
-            Eigen::Vector3f v2 = obs_vertices[t.v3];
+    // size_t num_bad_obs_triangles = 0;
+    //  for (size_t i = 0; i < obs_BVH.size; ++i){
+    //     if (obs_BVH.first_child[i] < 0){
+    //         size_t triangle_ind = -(obs_BVH.first_child[i]+1);
+    //         //confirm that each of the points in the triangle is in the bvh node's box
+    //         Triangle t = obs_triangles[triangle_ind];
+    //         Eigen::Vector3f v0 = obs_vertices[t.v1];
+    //         Eigen::Vector3f v1 = obs_vertices[t.v2];
+    //         Eigen::Vector3f v2 = obs_vertices[t.v3];
 
-            fcl::OBB<float> obb(
-                obs_BVH.pR[i],
-                obs_BVH.pT[i],
-                obs_BVH.pDim[i]
-            );
-            if (!obb.contain(v0) || !obb.contain(v1) || !obb.contain(v2)){
-                // std::cout << "Error: Triangle " << triangle_ind << " is not contained in its BVH node " << i << std::endl;
-                // std::cout << "Triangle vertices: " << v0.transpose() << ", " << v1.transpose() << ", " << v2.transpose() << std::endl;
-                num_bad_obs_triangles++;
-            }
-        }
-    }
+    //         fcl::OBB<float> obb(
+    //             obs_BVH.pR[i],
+    //             obs_BVH.pT[i],
+    //             obs_BVH.pDim[i]
+    //         );
+    //         if (!obb.contain(v0) || !obb.contain(v1) || !obb.contain(v2)){
+    //             // std::cout << "Error: Triangle " << triangle_ind << " is not contained in its BVH node " << i << std::endl;
+    //             // std::cout << "Triangle vertices: " << v0.transpose() << ", " << v1.transpose() << ", " << v2.transpose() << std::endl;
+    //             num_bad_obs_triangles++;
+    //         }
+    //     }
+    // }
 
-    std::cout << "Number of robot triangles not contained in their BVH nodes: " << num_bad_rob_triangles << std::endl;
-    std::cout << "Number of obstacle triangles not contained in their BVH nodes: " << num_bad_obs_triangles << std::endl;
+    // std::cout << "Number of robot triangles not contained in their BVH nodes: " << num_bad_rob_triangles << std::endl;
+    // std::cout << "Number of obstacle triangles not contained in their BVH nodes: " << num_bad_obs_triangles << std::endl;
     // Load Configurations
     const int num_confs = 100000;
     std::vector<Configuration> confs;
@@ -2691,6 +2691,10 @@ double bvh_naive() {
         rob_conf_r[i] = createRotationMatrix(confs[i]);
         rob_conf_t[i] = Eigen::Vector3f(confs[i].x, confs[i].y, confs[i].z);
     }
+
+    std::vector<ConfigurationTagged> cpuCollisions(num_confs);
+    TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs);)
+    checkConfsCPU(cpuCollisions, confs);
     // std::cout << "Created Rotation matrices from configurations" << std::endl;
     bool disjoint[num_confs] = {false};
 
@@ -2771,11 +2775,12 @@ double bvh_naive() {
         checkCudaMem(cudaGetLastError());
         // Copy result back to host (num_confs * sizeof(bool))
         checkCudaMem(cudaMemcpy(disjoint, pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
+    std::cout << "BVH Naive GPU broad phase took " << duration << " ms for " << num_confs << " configurations." << std::endl;
+
     auto cpu_end = std::chrono::high_resolution_clock::now();
     double cpu_duration = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
-    std::vector<ConfigurationTagged> cpuCollisions(num_confs);
-    // TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs);)
-    checkConfsCPU(cpuCollisions, confs);
+
+    // checkConfsCPU(cpuCollisions, confs);
     // Check result
     size_t true_positives = 0; // num disjoint that are valid
     size_t false_positives = 0; // num disjoint that are not valid (should be 0)
@@ -2789,22 +2794,22 @@ double bvh_naive() {
                 true_positives++;
             } else {
                 false_positives++;
-                std::cout << "False positive at configuration " << i << ": "
-                          << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
-                          "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
+                // std::cout << "False positive at configuration " << i << ": "
+                //           << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
+                //           "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
 
-                //apply transformation to blank obb
-                // rob_BVH.set(0, rob_rotations[i], rob_translations[i], rob_BVH.pDim[0]);
-                std::vector<Eigen::Vector3f> vertices = rob_BVH.getBoxVertices(0);
-                Eigen::Matrix3f R = rob_conf_r[i];
-                Eigen::Vector3f T = rob_conf_t[i];
+                // //apply transformation to blank obb
+                // // rob_BVH.set(0, rob_rotations[i], rob_translations[i], rob_BVH.pDim[0]);
+                // std::vector<Eigen::Vector3f> vertices = rob_BVH.getBoxVertices(0);
+                // Eigen::Matrix3f R = rob_conf_r[i];
+                // Eigen::Vector3f T = rob_conf_t[i];
 
-                // for (auto p : vertices){
-                //     std::cout << p.transpose() << " --> ";
-                //     std::cout << (R * p + T).transpose() << std::endl;
-                // }
-                std::cout << "Invalid Robot Transform:" << std::endl;
-                std::cout << pythonifyEigenMatrix(createHomogeneousMatrix(confs[i])) << std::endl;
+                // // for (auto p : vertices){
+                // //     std::cout << p.transpose() << " --> ";
+                // //     std::cout << (R * p + T).transpose() << std::endl;
+                // // }
+                // std::cout << "Invalid Robot Transform:" << std::endl;
+                // std::cout << pythonifyEigenMatrix(createHomogeneousMatrix(confs[i])) << std::endl;
 
             }
         }
