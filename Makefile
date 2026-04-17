@@ -13,7 +13,6 @@ CUFLAGS=-DLOCAL_TESTING=1 -lineinfo -O3 -Wno-deprecated-declarations --expt-rela
 
 ifeq ($(DEBUG),1)
     CUFLAGS := -DLOCAL_TESTING=1 -G -g -O0 -Wno-deprecated-declarations -diag-suppress 20012
-    CXXFLAGS := -g
 endif
 # Default target
 all: Full-Integration-Test Generate-Tests
@@ -24,13 +23,16 @@ BUILD_DIR := build
 
 # Update targets to use build directory object files
 Full-Integration-Test: $(BUILD_DIR)/full-integration-test.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/generate-AABB.o $(BUILD_DIR)/broad-phase-fused.o $(BUILD_DIR)/narrow-phase.o  $(BUILD_DIR)/MegaKernel.o
-	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
+	$(CU) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
 Generate-Tests: $(BUILD_DIR)/generate-tests.o $(BUILD_DIR)/Utils.o
-	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
+	$(CU) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
 Eigen: $(BUILD_DIR)/obb_test.o $(BUILD_DIR)/Utils.o
-	$(CU) $(CXXFLAGS) $^ -g -o $@ $(LDFLAGS) $(CUFLAGS)
+	$(CU) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
+
+Debug:$(BUILD_DIR)/obb_test.o $(BUILD_DIR)/Utils.o
+	$(CU) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS) -G -g -O0
 
 $(BUILD_DIR):
 	mkdir -p $(BUILD_DIR)
@@ -69,4 +71,4 @@ $(BUILD_DIR)/obb_test.o: ${SRC_DIR}/obb_test.cu | $(BUILD_DIR)
 	$(CU) $(CUFLAGS) -dc $< -o $@ 
 
 clean:
-	rm -rf *.o Full-Integration-Test Generate-Tests build Eigen
+	rm -rf *.o Full-Integration-Test Generate-Tests build Eigen Debug
