@@ -43,12 +43,7 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
     // Access OBB data from rob_mesh
     // rob_mesh->getNumBVs() gives the number of OBBs in the hierarchy
     size_t num_boxes = rob_mesh->getNumBVs();
-    // for (size_t  i = 0; i < num_boxes; i++){
-    //     fcl::BVNode<fcl::OBB<float>> bv = rob_mesh->getBV(i);
-    //     if (bv.isLeaf()){
-    //         std::cout << "Node " << i << " is a leaf node with primitive id " << bv.primitiveId() << std::endl;
-    //     }
-    // }
+
 
     std::vector<size_t> leaf_depths = getBVHTreeDepths(*rob_mesh);
     size_t max_depth = *std::max_element(leaf_depths.begin(), leaf_depths.end());
@@ -56,9 +51,6 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
 
     std::vector<fcl::OBB<float>> flattened_n_ary;
     std::vector<int16_t> first_children;
-
-    //ASSUMPTION: a node in original BVH either has no children, or two children
-    //TODO: verify this assumption
 
     fcl::BVNode<fcl::OBB<float>> focus_node = rob_mesh->getBV(0); // start at root
     size_t parent_depth = 1;
@@ -83,20 +75,21 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
         ////////////////////////////////////////////////////////////////////////////////////////////////
         // prev_first_primitive is used to track primitive index of the previous node in the loop
         // if we see the same primitive index twice in a row, we know it's a dummy node
+        
+        //TODO: very hacky, do beter at determining which nodes are dummy nodes
         int prev_first_primitive = 80000;
         size_t num_parent_nodes = 0;
 
-        //issue: this is currently guessing ahead of time, does not take into account chance that grandchildren will be leaf
         for (const auto& pair : curr_frontier){
             focus_node = rob_mesh->getBV(pair.first);
             if (focus_node.isLeaf()){
                 if (prev_first_primitive == focus_node.first_primitive){
                     // this is a dummy node, indicate as such
-                    first_children.push_back(0); // dummy node
+                    first_children.push_back(0);
                     num_dummies++;
                 } else {
                     // real leaf node
-                    first_children.push_back(focus_node.first_child); // indicate leaf with negative numbers
+                    first_children.push_back(focus_node.first_child); 
                     prev_first_primitive = focus_node.first_primitive;
                     num_total_leafs++;
                 }
@@ -111,7 +104,6 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
 
         curr_frontier.clear();
 
-        //issue: leaves are getting pushed onto the current frontier before its their time
         while (!node_queue.empty()){
             auto [node_idx, depth] = node_queue.front();
             node_queue.pop();
@@ -134,21 +126,15 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
                     int right = focus_node.rightChild();
                     node_queue.push(std::make_pair(left, depth + 1));
                     node_queue.push(std::make_pair(right, depth + 1));
-
                 }
             }
         }
-
         parent_depth = curr_max_depth;
         curr_max_depth += power_of_2;
     }
 
     // update after the last iteration
     // turn current frontier into a stack for processing
-    // TODO: this is currently giving an insane number of dummy nodes, 4418 out of 5601 are dummies
-    // Maybe fix by after reduced_depth -1, just have nodes point to primitives instead?
-    // maybe add a num_children parameter instead of dummy nodes? better memory bandwidth
-
     // push the current frontier nodes into the flattened structure
     for (const auto& pair : curr_frontier){
         focus_node = rob_mesh->getBV(pair.first);
@@ -166,7 +152,6 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
         focus_node = rob_mesh->getBV(pair.first);
         if (focus_node.isLeaf()){
             if (prev_first_primitive == focus_node.first_primitive){
-                // this is a dummy node, indicate as such
                 first_children.push_back(0); // dummy node
                 num_dummies++;
             } else {
@@ -193,18 +178,7 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
         half_dimensions = obb.extent;
 
         result.set(i, rotation, translation, half_dimensions, first_children[i]);
-        // std::cout << "Node " << i << " has first child " << first_children[i] << " and half dimensions " << half_dimensions.transpose() << std::endl;
     }
-
-    //check to make sure tree is valid
-    // size_t num_leaves = 0;
-    // for (int i = 0; i < result.size; ++i) {
-    //     std::cout << "Node " << i << " has first child " << first_children[i] << " and half dimensions " << result.pDim[i].transpose() << std::endl;
-    // }
-    // std::cout << "Flattened tree has " << num_leaves << " leaves out of " << result.size << " nodes." << std::endl;
-    // std::cout << "Expected number of leaves: " << rob_mesh->num_tris << std::endl;
-    // std::cout << "Number of dummy nodes added: " << num_dummies << std::endl;
-    // std::cout << "number of real leaves found: " << num_total_leafs << std::endl;
 
     // delete rob_mesh manually to free memory
     rob_mesh.reset();
@@ -466,14 +440,6 @@ __global__ void d_obb_base(  const Eigen::Matrix3f* pB, const Eigen::Vector3f* p
 
     pdisjoint[blockIdx.x] = false;
 
-}
-__device__ inline bool contains(int val, const int* arr, size_t arr_size){
-    for (size_t i = 0; i < arr_size; i++){
-        if (arr[i] == val){
-            return true;
-        }
-    }
-    return false;
 }
 
 __global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
@@ -1139,18 +1105,24 @@ __global__ void d_obb_coursened_one_stage ( const Eigen::Matrix3f* pR_obs, const
                                 // is there a way to specify children with pointer arithmetic that respects coalescing?
                                 // maybe bring in all the children into shared memory first, then use pointers?
 
-#define NUM_ROB_NODES 1845
-#define NUM_OBS_NODES 1813
 //assumes BVH of both trees have same depth
 __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
                                 const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
                                 const Eigen::Vector3f* pObs_dim, const Eigen::Vector3f* pRob_dim,
                                 const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
                                 const int16_t* pObs_first_child, const int16_t* pRob_first_child,
-                                const Eigen::Vector3f *pRob_verts, const Triangle *pRob_tris,
-                                const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris,
+                                const Eigen::Vector3f *pRob_verts, const Triangle *pRob_tris, size_t num_rob_nodes,
+                                const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris, size_t num_obs_nodes,
                                 bool* pdisjoint) {
+
+    // extern __shared__                                     
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    extern __shared__ int16_t shared_mem[];
+    // reinterpret shared memory as arrays of the appropriate typesintint16_t16_t
+    int16_t* sObs_first_child = shared_mem;
+    int16_t* sRob_first_child = sObs_first_child + num_obs_nodes;
+
     Eigen::Matrix3f R_obs_abs = pR_obs[0]; // rotation of B wrt origin
     Eigen::Vector3f T_obs_abs = pT_obs[0]; // translation of B wrt origin
 
@@ -1163,17 +1135,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     Eigen::Matrix3f R_conf = pRob_conf_rot[index]; // rotation of robot wrt world
     Eigen::Vector3f T_conf = pRob_conf_trans[index]; // translation of robot wrt world
 
-    __shared__ bool delete_me;
-    if (threadIdx.x == 0){
-        delete_me = false;
-    }
     __syncthreads();
-    if (index == 8848){
-        delete_me = true;
-    }
-    __syncthreads();
-
-    bool delete_me_10 = index == 20357;
 
     float t; // distance between centers of the two boxes as projected onto the axis
     const float epsilon = 1e-6f; // small value to avoid numerical issues
@@ -1189,7 +1151,6 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     // first tests: cross product of axes within the same box
     // (always resulting in the third axis of the box)
     ////////////////////////////////////////////////////////////////////////////////
-    // A1 x A2 = A0
     __shared__ uint32_t num_confs_pend;
     if (threadIdx.x == 0){
         num_confs_pend = 0;
@@ -1364,34 +1325,34 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         // no pending configurations, we're done
         return;
     }
-    if (delete_me_10){
-        printf("num_confs_pend for index %d: %d\n", index, num_confs_pend);
-    }
-    __shared__ int16_t rob_first_children[NUM_ROB_NODES];
-    __shared__ int16_t obs_first_children[NUM_OBS_NODES];
 
-    for (uint16_t i = threadIdx.x; i < NUM_ROB_NODES; i += BLOCK_SIZE){
-        rob_first_children[i] = pRob_first_child[i];
+    // __shared__ int16_t rob_first_child[num_rob_nodes];
+    // __shared__ int16_t obs_first_child[num_obs_nodes];
+
+    for (uint16_t i = threadIdx.x; i < num_rob_nodes; i += BLOCK_SIZE){
+        sRob_first_child[i] = pRob_first_child[i];
     }
-    for (uint16_t i = threadIdx.x; i < NUM_OBS_NODES; i += BLOCK_SIZE){
-        obs_first_children[i] = pObs_first_child[i];
+    for (uint16_t i = threadIdx.x; i < num_obs_nodes; i += BLOCK_SIZE){
+        sObs_first_child[i] = pObs_first_child[i];
     }
     __syncthreads();
-    if (threadIdx.x == 0){
-        //check that the number of nodes with first_child < 0
-        uint16_t rob_leaf_count = 0;
-        for (uint16_t i = 0; i < NUM_ROB_NODES; i++){
-            if (rob_first_children[i] < 0){
-                rob_leaf_count++;
-            }
-        }
-        uint16_t obs_leaf_count = 0;
-        for (uint16_t i = 0; i < NUM_OBS_NODES; i++){
-            if (obs_first_children[i] < 0){
-                obs_leaf_count++;
-            }
-        }
-    }
+
+    //TODO: delete this? it doesn't seem to do anything?
+    // if (threadIdx.x == 0){
+    //     //check that the number of nodes with first_child < 0
+    //     uint16_t rob_leaf_count = 0;
+    //     for (uint16_t i = 0; i < num_rob_nodes; i++){
+    //         if (sRob_first_child[i] < 0){
+    //             rob_leaf_count++;
+    //         }
+    //     }
+    //     uint16_t obs_leaf_count = 0;
+    //     for (uint16_t i = 0; i < num_obs_nodes; i++){
+    //         if (sObs_first_child[i] < 0){
+    //             obs_leaf_count++;
+    //         }
+    //     }
+    // }
 
     // intent: for each i in rob_obb_pend, need to check all children of rob_obb_pend[i] against all children of obs_obb_pend[j]
 
@@ -1417,18 +1378,13 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         R_conf = rob_confs_pend_rot[i];
         T_conf = rob_confs_pend_trans[i];
         int global_conf_idx = rob_confs_pend_indices[i];
-        // bool delete_me_3 = (global_conf_idx == 11488);
-        bool delete_me_4 = (global_conf_idx == 20357);
+
         //reset pending OBB lists
         if (threadIdx.x == 0){
             num_obb_pend = 1;
             num_bad_leaves = 0;
             rob_obb_pend[0] = 0; // root
             obs_obb_pend[0] = 0; // root
-        }
-
-        if (threadIdx.x == 0 && global_conf_idx % 1000 == 0){
-            printf("Processing configuration %d\n", global_conf_idx);
         }
 
         __syncthreads();
@@ -1441,13 +1397,6 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             if (num_obb_pend == 0){
                 break;
             }
-            if (delete_me_4 && threadIdx.x == 0){
-                printf("num_obb_pend at start: %d\n", num_obb_pend);
-                for (uint16_t j = 0; j < num_obb_pend; j++){
-                    printf("pending rob_obb_idx %d and obs_obb_idx %d\n", rob_obb_pend[j], obs_obb_pend[j]);
-                }
-             }
-            __syncthreads();
 
 
             int16_t pend_idx = num_obb_pend + conf_offset;
@@ -1469,94 +1418,32 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             if(threadIdx.x == 0){
                 if (num_obb_pend > 1) {num_obb_pend -= 2;} 
                 else {num_obb_pend = 0;}
-                // printf("num_obb_pend before: %d; num_obb_pend after: %d\n", before, num_obb_pend);
-
             }
+
             __syncthreads();
             if (pend_idx < 0) {
                 continue;
             }
 
             unsigned mask = __activemask();
-            // something's going wrong here with the OBBs on 16-31, getting out of bounds errors.
-            //  My hunch is that I'm changing num_obb_pend incorrectly 
-            // if (num_obb_pend + conf_offset >= MAX_BUFFER){
-            //     printf("In block %d, thread %d, num_obb_pend %d with conf_offset %d exceeds MAX_BUFFER %d\n", 
-            //             blockIdx.x, threadIdx.x, num_obb_pend, conf_offset, MAX_BUFFER);
-            // }
+
             int16_t rob_obb_par_idx = rob_obb_pend[pend_idx];
             int16_t obs_obb_par_idx = obs_obb_pend[pend_idx];
 
-            // if (rob_obb_par_idx >= MAX_BUFFER){
-            //     printf("In block %d, thread %d, rob_obb_par_idx %d exceeds MAX_BUFFER %d\n", 
-            //             blockIdx.x, threadIdx.x, rob_obb_par_idx, MAX_BUFFER);
-            // }
-            // if (obs_obb_par_idx >= MAX_BUFFER){
-            //     printf("In block %d, thread %d, obs_obb_par_idx %d exceeds MAX_BUFFER %d, with num_obb_pend %d and conf_offset %d\n", 
-            //             blockIdx.x, threadIdx.x, obs_obb_par_idx, MAX_BUFFER, num_obb_pend, conf_offset);
-            // }
-            int rob_obb_idx = rob_first_children[rob_obb_par_idx] + rob_child_idx;
-            int obs_obb_idx = obs_first_children[obs_obb_par_idx] + obs_child_idx;
+            int rob_obb_idx = sRob_first_child[rob_obb_par_idx] + rob_child_idx;
+            int obs_obb_idx = sObs_first_child[obs_obb_par_idx] + obs_child_idx;
 
-            bool delete_me_11 = delete_me_4 &&
-                            rob_obb_idx == 78 && obs_obb_idx == 83;
-
-            int16_t rob_first_child_idx = rob_first_children[rob_obb_idx];
-            int16_t obs_first_child_idx = obs_first_children[obs_obb_idx];
+            int16_t rob_first_child_idx = sRob_first_child[rob_obb_idx];
+            int16_t obs_first_child_idx = sObs_first_child[obs_obb_idx];
 
             __syncwarp(mask);
+
             // if either is a dummy node, skip check
             //TODO: see if this is safe to do
             if (rob_first_child_idx == 0 || obs_first_child_idx == 0){
                 continue;
             }
 
-
-            // bool delete_me_8 = delete_me_4 && 
-            //     ((rob_obb_idx == 1833 && obs_obb_idx == 1239) ||
-            //     (rob_obb_idx == 1251 && obs_obb_idx == 1239) ||
-            //     (rob_obb_idx == 1835 && obs_obb_idx == 1239) ||
-            //     (rob_obb_idx == 1833 && obs_obb_idx == 326) ||
-            //     (rob_obb_idx == 1835 && obs_obb_idx == 326) ||
-            //     (rob_obb_idx == 1833 && obs_obb_idx == 1242) ||
-            //     (rob_obb_idx == 1835 && obs_obb_idx == 1242) ||
-            //     (rob_obb_idx == 1253 && obs_obb_idx == 1242) ||
-            //     (rob_obb_idx == 1837 && obs_obb_idx == 1242) ||
-            //     (rob_obb_idx == 1833 && obs_obb_idx == 338) ||
-            //     (rob_obb_idx == 1837 && obs_obb_idx == 338) ||
-            //     (rob_obb_idx == 1833 && obs_obb_idx == 1240) ||
-            //     (rob_obb_idx == 1835 && obs_obb_idx == 1240) ||
-            //     (rob_obb_idx == 1253 && obs_obb_idx == 1240) ||
-            //     (rob_obb_idx == 1837 && obs_obb_idx == 1240) ||
-            //     (rob_obb_idx == 1833 && obs_obb_idx == 339) ||
-            //     (rob_obb_idx == 1251 && obs_obb_idx == 339) ||
-            //     (rob_obb_idx == 1835 && obs_obb_idx == 339));
-
-            // if (delete_me){
-            //     printf("In block %d, thread %d, processing rob_obb_idx %d with first_child %d and obs_obb_idx %d with first_child %d\n", 
-            //             blockIdx.x, threadIdx.x, rob_obb_idx, rob_first_child_idx, obs_obb_idx, obs_first_child_idx);
-            // }
-            
-            // if (rob_obb_idx >= MAX_BUFFER){rob_first_child_idx
-            //     printf("In block %d, thread %d, rob_obb_idx %d exceeds MAX_BUFFER %d\n", 
-            //             blockIdx.x, threadIdx.x, rob_obb_idx, MAX_BUFFER);
-            // }
-            // if (obs_obb_idx >= MAX_BUFFER){
-            //     printf("In block %d, thread %d, obs_obb_idx %d exceeds MAX_BUFFER %d\n", 
-            //             blockIdx.x, threadIdx.x, obs_obb_par_idx, MAX_BUFFER);
-            // }
-
-
-
-
-            bool delete_me_5 = delete_me_4 && (rob_obb_idx == 83);
-
-            // if (delete_me_4){
-            //     printf("thread %d processing rob_obb_idx %d and obs_obb_idx %d with rob_child_idx %d and obs_child_idx %d, conf offset %d\n", 
-            //             threadIdx.x, rob_obb_idx, obs_obb_idx, rob_child_idx, obs_child_idx, conf_offset);
-            // }
-
-            bool delete_me2 = delete_me && obs_obb_idx == 80 && rob_obb_idx == 75;
             R_obs_abs = pR_obs[obs_obb_idx];
             T_obs_abs = pT_obs[obs_obb_idx];
             R_rob_abs = pR_rob[rob_obb_idx];
@@ -1572,22 +1459,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             // first tests: cross product of axes within the same box
             // (always resulting in the third axis of the box)
             ////////////////////////////////////////////////////////////////////////////////
+           
+           
             // A1 x A2 = A0
             t = fabsf(T[0]);
-
-            // if (delete_me){
-            //     printf("In block %d, thread %d, processing rob_obb_par_idx %d and obs_obb_par_idx %d with conf_offset %d\n\
-            //             with rob_obb_idx %d and obs_obb_idx %d, and rob_first_child_idx %d and obs_first_child_idx %d\n\
-            //             and rotation matrix,\n\
-            //                 %f, %f, %f, \n %f, %f, %f, \n %f, %f, %f, \n and translation \n: \
-            //                 %f, %f, %f \n ", 
-            //             blockIdx.x, threadIdx.x, rob_obb_par_idx, obs_obb_par_idx, conf_offset, rob_obb_idx, obs_obb_idx, rob_first_child_idx, obs_first_child_idx,
-            //             R_conf(0, 0), R_conf(0, 1), R_conf(0, 2),
-            //             R_conf(1, 0), R_conf(1, 1), R_conf(1, 2),
-            //             R_conf(2, 0), R_conf(2, 1), R_conf(2, 2),
-            //             T_conf[0], T_conf[1], T_conf[2]
-            //         );
-            // }
             //Since L = A0 is a unit vector (as it is the cross product of unit vectors), no need to multiply t
             // t dot L = t
             // \sum |a_i A^i * L | = a_0 + 0 + 0
@@ -1595,58 +1470,34 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             // // Test #1
             if(t > (a[0] + Bf.row(0).dot(b))){
-                if (delete_me_11) {
-                    printf("Test #1 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf.row(0).dot(b) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], Bf.row(0).dot(b));
-                }
                 continue;
             }
 
             // Test #2
             // B1 x B2 = B0
             t = fabsf(B.col(0).dot(T));
-
             if(t > (b[0] + Bf.col(0).dot(a))){
-                if (delete_me_11) {
-                    printf("Test #2 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, b[0] = %f, and Bf.col(0).dot(a) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, b[0], Bf.col(0).dot(a));
-                }
                 continue;
             }
 
             // Test #3
             // A2 x A0 = A1
             t = fabsf(T[1]);
-
             if(t > (a[1] + Bf.row(1).dot(b))){
-                if (delete_me_11) {
-                    printf("Test #3 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a = {%f, %f, %f}, and Bf.row(1).dot(b) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], a[1], a[2], Bf.row(1).dot(b));
-                }
                 continue;
             }
 
             // Test #4
             // A0 x A1 = A2
             t = fabsf(T[2]);
-
             if(t > (a[2] + Bf.row(2).dot(b))){
-                if (delete_me_11) {
-                    printf("Test #4 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[2] = %f, and Bf.row(2).dot(b) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[2], Bf.row(2).dot(b));
-                }
                 continue;
             }
 
             // Test #5
             // B2 x B0 = B1
             t = fabsf(B.col(1).dot(T));
-
             if(t > (b[1] + Bf.col(1).dot(a))){
-                if (delete_me_11) {
-                    printf("Test #5 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, b[1] = %f, and Bf.col(1).dot(a) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, b[1], Bf.col(1).dot(a));
-                }
                 continue;
             }
 
@@ -1655,50 +1506,30 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             t = fabsf(B.col(2).dot(T));
 
             if(t > (b[2] + Bf.col(2).dot(a))){
-                if (delete_me_11) {
-                    printf("Test #6 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, b[2] = %f, and Bf.col(2).dot(a) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, b[2], Bf.col(2).dot(a));
-                }
-
                 continue;
             }
 
             // Test #7
             // A0 x B0
             t = fabsf(T[2] * B(1, 0) - T[1] * B(2, 0));
-
             if(t > (a[1] * Bf(2, 0) + a[2] * Bf(1, 0) +
                     b[1] * Bf(0, 2) + b[2] * Bf(0, 1))){
-                if (delete_me_11) {
-                    printf("Test #7 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf(2, 0) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[1], Bf(2, 0));
-                }
                 continue;
             }
 
             // Test #8
             // A0 x B1
             t = fabsf(T[2] * B(1, 1) - T[1] * B(2, 1));
-
             if(t > (a[1] * Bf(2, 1) + a[2] * Bf(1, 1) +
                     b[0] * Bf(0, 2) + b[2] * Bf(0, 0))){
-                if (delete_me_11) {
-                    printf("Test #8 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf(2, 1) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[1], Bf(2, 1));
-                }
                 continue;
             }
 
             // Test #9
             // A0 x B2
             t = fabsf(T[2] * B(1, 2) - T[1] * B(2, 2));
-
             if(t > (a[1] * Bf(2, 2) + a[2] * Bf(1, 2) +
                     b[0] * Bf(0, 1) + b[1] * Bf(0, 0))){
-                if (delete_me_11) {
-                    printf("Test #9 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[1] = %f, and Bf(2, 2) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[1], Bf(2, 2));
-                }
                 continue;
             }
 
@@ -1708,51 +1539,30 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(2, 0) + a[2] * Bf(0, 0) +
                     b[1] * Bf(1, 2) + b[2] * Bf(1, 1))){
-                if (delete_me_11) {
-                    printf("Test #10 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(2, 0) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(2, 0));
-                }
-
                 continue;
             }
 
             // Test #11
             // A1 x B1
             t = fabsf(T[0] * B(2, 1) - T[2] * B(0, 1));
-
             if(t > (a[0] * Bf(2, 1) + a[2] * Bf(0, 1) +
                     b[0] * Bf(1, 2) + b[2] * Bf(1, 0))){
-                if (delete_me_11) {
-                    printf("Test #11 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(2, 1) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(2, 1));
-                }
-
                 continue;
             }
 
             // Test #12
             // A1 x B2
             t = fabsf(T[0] * B(2, 2) - T[2] * B(0, 2));
-
             if(t > (a[0] * Bf(2, 2) + a[2] * Bf(0, 2) +
                     b[0] * Bf(1, 1) + b[1] * Bf(1, 0))){
-                if (delete_me_11) {
-                    printf("Test #12 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(2, 2) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(2, 2));
-                }
                 continue;
             }
 
             // Test #13
             // A2 x B0
             t = fabsf(T[1] * B(0, 0) - T[0] * B(1, 0));
-
             if(t > (a[0] * Bf(1, 0) + a[1] * Bf(0, 0) +
                     b[1] * Bf(2, 2) + b[2] * Bf(2, 1))){
-                if (delete_me_11) {
-                    printf("Test #13 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(1, 0) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(1, 0));
-                }
                 continue;
             }
 
@@ -1762,47 +1572,25 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
             if(t > (a[0] * Bf(1, 1) + a[1] * Bf(0, 1) +
                     b[0] * Bf(2, 2) + b[2] * Bf(2, 0))){
-                if (delete_me_11) {
-                    printf("Test #14 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(1,1) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(1, 1));
-                }
                 continue;
             }
 
             // Test #15
             // A2 x B2
             t = fabsf(T[1] * B(0, 2) - T[0] * B(1, 2));
-
             if(t > (a[0] * Bf(1, 2) + a[1] * Bf(0, 2) +
                     b[0] * Bf(2, 1) + b[1] * Bf(2, 0))){
-                if (delete_me_11) {
-                    printf("Test #15 falsely passed for rob_obb_idx %d and obs_obb_idx %d, with t = %f, a[0] = %f, and Bf(1, 2) = %f\n",
-                            rob_obb_idx, obs_obb_idx, t, a[0], Bf(1, 2));
-                }
                 continue;
             }
 
             // printf("Thread %d in block %d found overlap at robot OBB %d and obstacle OBB %d\n\
             //         With rob_first_child_idx %d and obs_first_child_idx %d\n", 
             //         threadIdx.x, blockIdx.x, rob_obb_idx, obs_obb_idx, rob_first_child_idx, obs_first_child_idx);
-            // if (delete_me){
-            //     printf("In block %d, thread %d, found overlap at robot OBB %d and obstacle OBB %d\n\
-            //             With rob_first_child_idx %d and obs_first_child_idx %d\n", 
-            //             blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_idx, rob_first_child_idx, obs_first_child_idx);
-            // }
-            // if (rob_first_child_idx < 0 || obs_first_child_idx < 0) {
-            //     printf("Found leaf node pair at robot OBB %d and obstacle OBB %d\nrob_first_child_idx = %d, obs_first_child_idx = %d\n",
-            //         rob_obb_idx, obs_obb_idx, rob_first_child_idx, obs_first_child_idx);
-            // }
             if (rob_first_child_idx > 0 && obs_first_child_idx > 0) {
                 // add children to pending lists
                 int pos = atomicAdd(&num_obb_pend, 1);
                 obs_obb_pend[pos] = obs_obb_idx;
                 rob_obb_pend[pos] = rob_obb_idx;
-                if(delete_me_4){
-                    printf("Line 1698: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at pending index %d\n", 
-                            blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_idx, pos);
-                }
             } 
 
             //TODO: this is causing duplicates to be added to the bad leaves list, causing extra work down the line, as the duplicates grow exponentially.
@@ -1814,21 +1602,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
                     // add leaves to bad leaves list
                     int pos = atomicAdd(&num_bad_leaves, 1);
-                    if(delete_me_4){
-                        printf("Line 1712: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at tri index %d\n", 
-                                blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_idx, pos);
-                    }
-                    // if (delete_me_4) {
-                    //     printf("For conf 2504, thread %d, found leaf node pair at robot OBB %d and obstacle OBB %d\nrob_first_child_idx = %d, obs_first_child_idx = %d\n",
-                    //         threadIdx.x, rob_obb_idx, obs_obb_idx, rob_first_child_idx, obs_first_child_idx);
-                    // }   
-                    int rob_tri_idx = -1 * (rob_first_child_idx + 1); // TODO: double check that this is how fcl stores triangle indices
+
+                    int rob_tri_idx = -1 * (rob_first_child_idx + 1); 
                     int obs_tri_idx = -1 * (obs_first_child_idx + 1); //TODO: maybe consider having a leaf step instead of doing redundant checks
-                    // if (delete_me_3) {
-                    //     printf("OBS box with index %d and ROB box with index %d with robot triangle index %d and obstacle triangle index %d \n", 
-                    //             obs_obb_idx, rob_obb_idx, rob_tri_idx, obs_tri_idx);
-                    // }
-                    bad_rob_leaves[pos] = rob_tri_idx; // TODO: double check that this is how fcl stores triangle indices
+
+                    bad_rob_leaves[pos] = rob_tri_idx; 
                     bad_obs_leaves[pos] = obs_tri_idx; //TODO: maybe consider having a leaf step instead of doing redundant checks
                 }
                 // robot is leaf, obstacle is not
@@ -1837,20 +1615,12 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                     obs_obb_pend[pos] = obs_obb_idx;
                     rob_obb_pend[pos] = rob_obb_par_idx; // just shove the parent back in, recurse only on obstacle children
                     // TODO: this is a weird hack, figure out a better way to do this
-                    if(delete_me_4){
-                    printf("Line 1737: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at pending index %d\n", 
-                            blockIdx.x, threadIdx.x, rob_obb_par_idx, obs_obb_idx, pos);
-                }
                 }
             } 
             // obstacle is leaf, robot is not
             else if (obs_first_child_idx < 0) {
 
                 int pos = atomicAdd(&num_obb_pend, 1);
-                if(delete_me_4){
-                    printf("Line 1745: In block %d, thread %d, adding rob_obb_idx %d and obs_obb_idx %d at pending index %d\n", 
-                            blockIdx.x, threadIdx.x, rob_obb_idx, obs_obb_par_idx, pos);
-                }
                 rob_obb_pend[pos] = rob_obb_idx;
                 obs_obb_pend[pos] = obs_obb_par_idx; // just shove the parent back in, recurse only on robot children
             }
@@ -1858,9 +1628,6 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         __syncthreads();
         if (num_bad_leaves == 0){
             if (threadIdx.x == 0) {
-                if (delete_me_4) {
-                    printf("Configuration %d has no bad leaf pairs, num_obb_pend %d\n", global_conf_idx, num_obb_pend);
-                }
                 pdisjoint[global_conf_idx] = true;
             }
             continue;
@@ -1869,31 +1636,14 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             //TODO: this doesn't actually work if there are more than BLOCK_SIZE bad leaves, need to add some sort of batching mechanism
             bool valid = true;
             size_t leaf_idx = threadIdx.x;
-            if (threadIdx.x == 0 && delete_me_4) {
-                printf("Configuration %d has the following bad leaf pairs, totalling %d:\n", global_conf_idx, num_bad_leaves);
-                for (size_t j = 0; j < num_bad_leaves; j++)                {
-                    printf("robot triangle index %d and obstacle triangle index %d \n", bad_rob_leaves[j], bad_obs_leaves[j]);
-                }
-            }
             bool all_valid = true;
             __syncthreads();
 
             while(leaf_idx < num_bad_leaves){
                 unsigned mask = __activemask();
-                // if(delete_me_4 ){
-                //     printf("Current active mask in block %d, thread %d is %u\n", blockIdx.x, threadIdx.x, mask);
-                // }
                 int rob_tri_idx = bad_rob_leaves[leaf_idx];
                 int obs_tri_idx = bad_obs_leaves[leaf_idx];
-                if (delete_me_4) {
-                    if (rob_tri_idx == 113 && obs_tri_idx == 841) {
-                    printf("In block %d, thread %d, processing leaf pair with robot triangle index %d and obstacle triangle index %d \n", 
-                            blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx);
-                    }
-                }
-               
-                // printf("In block %d, thread %d, processing leaf pair with robot triangle index %d and obstacle triangle index %d\n", 
-                //         blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx);
+
                 Triangle rob_tri = pRob_tris[rob_tri_idx];
                 Triangle obs_tri = pObs_tris[obs_tri_idx];
                 Eigen::Vector3f rob_v0 = pRob_verts[rob_tri.v1];
@@ -1908,32 +1658,8 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 rob_v1 = R_conf * rob_v1 + T_conf;
                 rob_v2 = R_conf * rob_v2 + T_conf;
 
-                bool delete_me_6 = (rob_tri_idx == 560 && obs_tri_idx == 281) && delete_me_4;
+                bool valid = triangles_valid(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2);
 
-                bool valid = triangles_valid(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2, delete_me_6);
-                // valid = triangles_valid(rob_tri, obs_tri, R_conf, T_conf, pRob_verts, pObs_verts);
-                // if (valid != backup_valid) {
-                //     printf("Discrepancy found in triangle-triangle test for robot triangle index %d and obstacle triangle index %d: valid = %s, backup_valid = %s\n",
-                //             rob_tri_idx, obs_tri_idx, valid ? "true" : "false", backup_valid ? "true" : "false");
-                // }
-                if (delete_me_4) {
-                    if (rob_tri_idx == 113 && obs_tri_idx == 841) {
-                        printf("In block %d, thread %d, triangle pair with robot triangle index %d and obstacle triangle index %d is %s\n", 
-                                blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx, valid ? "valid" : "invalid");
-                        
-                        printf("In block %d, thread %d, rob triangle vertices: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\nobs triangle vertices: (%f, %f, %f), (%f, %f, %f), (%f, %f, %f)\n", 
-                                blockIdx.x, threadIdx.x, rob_v0[0], rob_v0[1], rob_v0[2], rob_v1[0], rob_v1[1], rob_v1[2], rob_v2[0], rob_v2[1], rob_v2[2],
-                                obs_v0[0], obs_v0[1], obs_v0[2], obs_v1[0], obs_v1[1], obs_v1[2], obs_v2[0], obs_v2[1], obs_v2[2]);
-                    }
-                }
-                // if(delete_me_4){
-                //     printf("In block %d, thread %d, triangle pair with robot triangle index %d and obstacle triangle index %d is %s\n", 
-                //             blockIdx.x, threadIdx.x, rob_tri_idx, obs_tri_idx, valid ? "valid" : "invalid");
-                // }
-                if (!valid && delete_me_4) {
-                    printf("In block %d, thread %d, conf %d found invalid leaf pair with robot triangle index %d and obstacle triangle index %d\n", 
-                            blockIdx.x, threadIdx.x, global_conf_idx, rob_tri_idx, obs_tri_idx);
-                }
                 if (!__all_sync(mask, valid)) {   
                     all_valid = false;
                     break;
@@ -1945,19 +1671,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             if (all_valid && threadIdx.x == 0) {
                 pdisjoint[global_conf_idx] = true;
             }
-            if (threadIdx.x == 0 && delete_me_4) {
-                printf("For block %d, configuration %d is %s \n", blockIdx.x, global_conf_idx, num_bad_leaves ? "valid" : "invalid");}
         }
-        // if (threadIdx.x == 0 && num_bad_leaves != 0) {
-        //     printf("For block %d, configuration %d has %d bad leaf pairs\n", blockIdx.x, global_conf_idx, num_bad_leaves);
-        // }
-        // if (threadIdx.x == 0 && num_bad_leaves == 0) {
-        //     pdisjoint[rob_confs_pend_indices[i]] = true;
-        // }
-        
     }
     return;
 }
+
 // Code for 1 single box test
 void dummy_test() {
     // Test OBB disjoint function
@@ -2512,10 +2230,10 @@ double broad_coarsened_shared_mem_1S() {
     cudaEventSynchronize(stop);
     float duration = 0;
     cudaEventElapsedTime(&duration, start, stop);
-        cudaDeviceSynchronize();
-        checkCudaMem(cudaGetLastError());
-        // Copy result back to host (num_confs * sizeof(bool))
-        checkCudaMem(cudaMemcpy(disjoint, pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
+    cudaDeviceSynchronize();
+    checkCudaMem(cudaGetLastError());
+    // Copy result back to host (num_confs * sizeof(bool))
+    checkCudaMem(cudaMemcpy(disjoint, pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
     auto cpu_end = std::chrono::high_resolution_clock::now();
     double cpu_duration = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
     std::vector<ConfigurationTagged> cpuCollisions(num_confs);
@@ -2591,100 +2309,35 @@ double broad_coarsened_shared_mem_1S() {
 }
 
 
-double bvh_naive() {
+double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_file) {
     // Similar setup as broad_naive_1 but using d_obb_coursened_two_stage kernel
         // Load Robot and Obstacle BVH
     cudaEvent_t start, stop;
-    std::string rob_file = "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj";
-    std::string obs_file = "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj";
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
     BVNode_soa rob_BVH = BVH_n_ary_hierarchy_from_mesh(rob_file.c_str(), 2);
     BVNode_soa obs_BVH = BVH_n_ary_hierarchy_from_mesh(obs_file.c_str(), 2);
 
+    
+    std::cout << "Rob BVH size: " << rob_BVH.size << std::endl;
+    std::cout << "Obs BVH size: " << obs_BVH.size << std::endl;
+
     //Load Robot
     std::vector<Eigen::Vector3f> rob_vertices;
     std::vector<Triangle> rob_triangles;
     loadOBJFile(rob_file, rob_vertices, rob_triangles);
-    std::cout << "Robot has " << rob_vertices.size() << " vertices " <<std::endl;
-    std::cout << "Robot has " << rob_triangles.size() << " triangles " <<std::endl;
 
     //Load Obstacles
     std::vector<Eigen::Vector3f> obs_vertices;
     std::vector<Triangle> obs_triangles;
     loadOBJFile(obs_file, obs_vertices, obs_triangles);
-    std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
-    std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
-    size_t num_bad_rob_triangles = 0;
-    for (size_t i = 0; i < rob_BVH.size; ++i){
-        if (rob_BVH.first_child[i] < 0){
-            size_t triangle_ind = -(rob_BVH.first_child[i]+1);
-            fcl::OBB<float> obb(
-                rob_BVH.pR[i],
-                rob_BVH.pT[i],
-                rob_BVH.pDim[i] + Eigen::Vector3f(1e-4, 1e-4, 1e-4) // add a small epsilon to account for numerical errors
-            );
-            //confirm that each of the points in the triangle is in the bvh node's box
-            // for (size_t j = 0; j < rob_triangles.size(); ++j){
-            //     Triangle t = rob_triangles[j];
-            //     Eigen::Vector3f v0 = rob_vertices[t.v1];
-            //     Eigen::Vector3f v1 = rob_vertices[t.v2];
-            //     Eigen::Vector3f v2 = rob_vertices[t.v3];
-
-            //     if (obb.contain(v0) && obb.contain(v1) && obb.contain(v2)){
-            //         std::cout << "Triangle " << j << " is contained in BVH node " << i << std::endl;
-            //     }
-
-            // }
-
-            Triangle t = rob_triangles[triangle_ind];
-            Eigen::Vector3f v0 = rob_vertices[t.v1];
-            Eigen::Vector3f v1 = rob_vertices[t.v2];
-            Eigen::Vector3f v2 = rob_vertices[t.v3];
-
-            if (!obb.contain(v0) || !obb.contain(v1) || !obb.contain(v2)){
-                // std::cout << "Error: Triangle " << triangle_ind << " is not contained in its BVH node " << i << std::endl;
-                // std::cout << "Triangle vertices: " << v0.transpose() << ", " << v1.transpose() << ", " << v2.transpose() << std::endl;
-                num_bad_rob_triangles++;
-
-            }
-
-        }
-    }
-
-    // size_t num_bad_obs_triangles = 0;
-    //  for (size_t i = 0; i < obs_BVH.size; ++i){
-    //     if (obs_BVH.first_child[i] < 0){
-    //         size_t triangle_ind = -(obs_BVH.first_child[i]+1);
-    //         //confirm that each of the points in the triangle is in the bvh node's box
-    //         Triangle t = obs_triangles[triangle_ind];
-    //         Eigen::Vector3f v0 = obs_vertices[t.v1];
-    //         Eigen::Vector3f v1 = obs_vertices[t.v2];
-    //         Eigen::Vector3f v2 = obs_vertices[t.v3];
-
-    //         fcl::OBB<float> obb(
-    //             obs_BVH.pR[i],
-    //             obs_BVH.pT[i],
-    //             obs_BVH.pDim[i]
-    //         );
-    //         if (!obb.contain(v0) || !obb.contain(v1) || !obb.contain(v2)){
-    //             // std::cout << "Error: Triangle " << triangle_ind << " is not contained in its BVH node " << i << std::endl;
-    //             // std::cout << "Triangle vertices: " << v0.transpose() << ", " << v1.transpose() << ", " << v2.transpose() << std::endl;
-    //             num_bad_obs_triangles++;
-    //         }
-    //     }
-    // }
-
-    // std::cout << "Number of robot triangles not contained in their BVH nodes: " << num_bad_rob_triangles << std::endl;
-    // std::cout << "Number of obstacle triangles not contained in their BVH nodes: " << num_bad_obs_triangles << std::endl;
     // Load Configurations
     const int num_confs = 100000;
     std::vector<Configuration> confs;
     confs.reserve(num_confs);
-    // std::cout << "Reading configurations from file..." << std::endl;
-    readConfigurationFromFile("/home/victor/Projects/robo-check/data/configurations/hard_confs100,000.conf", confs);
+    readConfigurationFromFile(conf_file, confs);
     Eigen::Matrix3f rob_conf_r[num_confs];
     Eigen::Vector3f rob_conf_t[num_confs];
     for (int i = 0; i < num_confs; ++i) {
@@ -2693,10 +2346,13 @@ double bvh_naive() {
     }
 
     std::vector<ConfigurationTagged> cpuCollisions(num_confs);
-    TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs);)
-    checkConfsCPU(cpuCollisions, confs);
-    // std::cout << "Created Rotation matrices from configurations" << std::endl;
+    TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs, rob_file, obs_file);)
     bool disjoint[num_confs] = {false};
+
+    const int blockSize = BLOCK_SIZE;
+    const int confs_per_block = blockSize;
+    const int gridSize = (num_confs + confs_per_block - 1) / confs_per_block; // ceil division
+
 
     Eigen::Matrix3f* d_R_obs;
     Eigen::Vector3f* d_T_obs;
@@ -2716,16 +2372,17 @@ double bvh_naive() {
     // std::cout << "Allocated host memory" << std::endl;
 
     // Allocate memory for device pointers
-    cudaMalloc((void**)&d_R_obs, NUM_OBS_NODES * sizeof(Eigen::Matrix3f));
-    cudaMalloc((void**)&d_T_obs, NUM_OBS_NODES * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_R_rob, NUM_ROB_NODES * sizeof(Eigen::Matrix3f));
-    cudaMalloc((void**)&d_T_rob, NUM_ROB_NODES * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Rob_dim, NUM_ROB_NODES * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Obs_dim, NUM_OBS_NODES * sizeof(Eigen::Vector3f));
+    cudaEventRecord(start, 0);
+    cudaMalloc((void**)&d_R_obs, obs_BVH.size * sizeof(Eigen::Matrix3f));
+    cudaMalloc((void**)&d_T_obs, obs_BVH.size * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_R_rob, rob_BVH.size * sizeof(Eigen::Matrix3f));
+    cudaMalloc((void**)&d_T_rob, rob_BVH.size * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_Rob_dim, rob_BVH.size * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_Obs_dim, obs_BVH.size * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_conf_rot, num_confs * sizeof(Eigen::Matrix3f));
     cudaMalloc((void**)&d_Rob_conf_trans, num_confs * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Obs_first_child, NUM_OBS_NODES * sizeof(int16_t));
-    cudaMalloc((void**)&d_Rob_first_child, NUM_ROB_NODES * sizeof(int16_t));
+    cudaMalloc((void**)&d_Obs_first_child, obs_BVH.size * sizeof(int16_t));
+    cudaMalloc((void**)&d_Rob_first_child, rob_BVH.size * sizeof(int16_t));
     cudaMalloc((void**)&d_Rob_vertices, rob_vertices.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_vertices, obs_vertices.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_triangles, rob_triangles.size() * sizeof(Triangle));
@@ -2733,49 +2390,60 @@ double bvh_naive() {
     cudaMalloc((void**)&pdisjoint, num_confs * sizeof(bool));
 
     cudaDeviceSynchronize();
-    checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, NUM_OBS_NODES * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, NUM_OBS_NODES * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_R_rob, rob_BVH.pR, NUM_ROB_NODES * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_T_rob, rob_BVH.pT, NUM_ROB_NODES * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_R_rob, rob_BVH.pR, rob_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_T_rob, rob_BVH.pT, rob_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_conf_rot, rob_conf_r, num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_conf_trans, rob_conf_t, num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_dim, rob_BVH.pDim, NUM_ROB_NODES * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, NUM_OBS_NODES * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_first_child, rob_BVH.first_child, NUM_ROB_NODES * sizeof(int16_t), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Obs_first_child, obs_BVH.first_child, NUM_OBS_NODES * sizeof(int16_t), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_dim, rob_BVH.pDim, rob_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_first_child, rob_BVH.first_child, rob_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Obs_first_child, obs_BVH.first_child, obs_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_triangles, obs_triangles.data(), obs_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(pdisjoint, disjoint, num_confs * sizeof(bool), cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    float duration = 0;
+    cudaEventElapsedTime(&duration, start, stop);
+    std::cout << "Data allocation and transfer to GPU took " << duration << " ms." << std::endl;
     // )
-
     // Launch kernel with correct grid size
-    const int blockSize = BLOCK_SIZE;
-    const int confs_per_block = blockSize;
-    const int gridSize = (num_confs + confs_per_block - 1) / confs_per_block; // ceil division
+
 
     // std::cout << "Launching coarsened_1S kernel with grid size " << gridSize << " and block size " << blockSize << std::endl;
     // std::cout << "Each block processes " << confs_per_block << " configurations for a total of " << gridSize * confs_per_block << " configurations." << std::endl;
 
     cudaEventRecord(start, 0);
     auto cpu_start = std::chrono::high_resolution_clock::now();
-    d_bvh_naive<<<gridSize, blockSize>>>(   d_R_obs, d_T_obs, d_R_rob, 
-                                            d_T_rob, d_Obs_dim, d_Rob_dim, 
+    d_bvh_naive<<<gridSize, blockSize, (obs_BVH.size + rob_BVH.size) * sizeof(int16_t)>>>(   
+                                            d_R_obs, d_T_obs, 
+                                            d_R_rob, d_T_rob, 
+                                            d_Obs_dim, d_Rob_dim, 
                                             d_Rob_conf_rot, d_Rob_conf_trans,
                                             d_Obs_first_child, d_Rob_first_child, 
-                                            d_Rob_vertices, d_Rob_triangles, d_Obs_vertices, d_Obs_triangles,
+                                            d_Rob_vertices, d_Rob_triangles, rob_BVH.size,
+                                            d_Obs_vertices, d_Obs_triangles, obs_BVH.size,
                                             pdisjoint);
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
-    float duration = 0;
     cudaEventElapsedTime(&duration, start, stop);
-        cudaDeviceSynchronize();
-        checkCudaMem(cudaGetLastError());
-        // Copy result back to host (num_confs * sizeof(bool))
-        checkCudaMem(cudaMemcpy(disjoint, pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
     std::cout << "BVH Naive GPU broad phase took " << duration << " ms for " << num_confs << " configurations." << std::endl;
+
+    // Copy result back to host (num_confs * sizeof(bool))
+    cudaEventRecord(start, 0);
+    checkCudaMem(cudaGetLastError());
+    checkCudaMem(cudaMemcpy(disjoint, pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
+    cudaDeviceSynchronize();
+    cudaEventRecord(stop, 0);
+    cudaEventSynchronize(stop);
+    cudaEventElapsedTime(&duration, start, stop);
+    std::cout << "Copying results from GPU took " << duration << " ms." << std::endl;
+
 
     auto cpu_end = std::chrono::high_resolution_clock::now();
     double cpu_duration = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
@@ -2798,16 +2466,16 @@ double bvh_naive() {
                 //           << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
                 //           "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
 
-                // //apply transformation to blank obb
-                // // rob_BVH.set(0, rob_rotations[i], rob_translations[i], rob_BVH.pDim[0]);
+                //apply transformation to blank obb
+                // rob_BVH.set(0, rob_rotations[i], rob_translations[i], rob_BVH.pDim[0]);
                 // std::vector<Eigen::Vector3f> vertices = rob_BVH.getBoxVertices(0);
                 // Eigen::Matrix3f R = rob_conf_r[i];
                 // Eigen::Vector3f T = rob_conf_t[i];
 
-                // // for (auto p : vertices){
-                // //     std::cout << p.transpose() << " --> ";
-                // //     std::cout << (R * p + T).transpose() << std::endl;
-                // // }
+                // for (auto p : vertices){
+                //     std::cout << p.transpose() << " --> ";
+                //     std::cout << (R * p + T).transpose() << std::endl;
+                // }
                 // std::cout << "Invalid Robot Transform:" << std::endl;
                 // std::cout << pythonifyEigenMatrix(createHomogeneousMatrix(confs[i])) << std::endl;
 
@@ -2858,7 +2526,32 @@ double bvh_naive() {
     return duration;
 }
 
-int main() {
+int main(int argc, char** argv) {
+
+    std::string rob_file  = "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj";
+    std::string obs_file  = "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj";
+    std::string conf_file = "/home/victor/Projects/robo-check/data/configurations/hard_confs100,000.conf";
+
+    if (argc > 1) {rob_file  = argv[1];}
+    if (argc > 2) {obs_file  = argv[2];}
+    if (argc > 3) {conf_file = argv[3];}
+    
+    if (argc > 4) {
+        std::cerr << "Usage: " << argv[0] << " [robot.obj] [obstacle.obj] [config.conf]\n";
+        return 1;
+    }
+
+    // Validate files
+    bool ok = true;
+    ok &= check_file_exists(rob_file);
+    ok &= check_file_exists(obs_file);
+    ok &= check_file_exists(conf_file);
+
+    if (!ok) {
+        std::cerr << "Aborting due to invalid input files.\n";
+        return 1;
+    }
+
     // dummy run to "warm up" the GPU and avoid initialization overhead in timing
 
     // const size_t num_trials = 1000;
@@ -2877,7 +2570,7 @@ int main() {
     // std::cout<< "Obstacle 2nary BVH:" << std::endl;
     // BVH_n_ary_hierarchy_from_mesh("/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj", 2);
     
-    bvh_naive();
+    bvh_naive(rob_file, obs_file, conf_file);
     // broad_coarsened_shared_mem_1S();
     // broad_coarsened_shared_mem_2S();
     // for (size_t i = 0; i < num_trials; ++i) {

@@ -546,12 +546,6 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
       // std::cout << "starting conf " << i << std::endl;
       fcl::Transform3f transform = configurationToTransform(confs[i]);
       rob_col_obj.setTransform(transform);
-      // if (i == 20357){
-      //   std::cout << "conf " << i << " has transform: " << std::endl;
-      //   std::cout << transform.matrix() << std::endl;
-      // } else { //TODO: remove this WHOLE BLOCK
-      //   continue;
-      // }
 
       // Define CollisionRequest and CollisionResult objects
       fcl::CollisionRequest<float> request(1);
@@ -559,17 +553,6 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
 
       // // Perform collision detection
       fcl::collide(&obs_col_obj, &rob_col_obj, request, result);
-
-      if (i == 20357 ){
-        std::cout << "conf " << i << " has " << result.numContacts() << " contacts" << std::endl;
-        std::vector<fcl::Contact<float>> contacts;
-        result.getContacts(contacts);
-        for (size_t j = 0; j < result.numContacts(); j++) {
-          std::cout   << "rob primitive: " << contacts[j].b2 << " obs primitive: " << contacts[j].b1 <<std::endl;
-          // std::cout << "obs vertices: " << obs_mesh->vertices[obs_triangles[contacts[j].b1][0]] << "," << obs_mesh->vertices[obs_triangles[contacts[j].b1][1]] << "," << obs_mesh->vertices[obs_triangles[contacts[j].b1][2]] << std::endl;
-          // std::cout << "rob vertices: " << rob_mesh->vertices[rob_triangles[contacts[j].b2][0]].applyOnTheRight(transform.matrix()) << "," << rob_mesh->vertices[rob_triangles[contacts[j].b2][1]].applyOnTheRight(transform.matrix()) << "," << rob_mesh->vertices[rob_triangles[contacts[j].b2][2]].applyOnTheRight(transform.matrix()) << std::endl;
-        }
-      }
 
       out[i] = makeTagged(confs[i]);
       // Check if collision occurred
@@ -583,4 +566,20 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
     auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
     std::cout << "cpu collision detection execution time: " << cpu_elapsed_time.count() << " milliseconds for " <<confs.size() << " configurations." << std::endl;
 
+}
+
+bool check_file_exists(const std::string& path) {
+    std::filesystem::path p(path);
+
+    if (!std::filesystem::exists(p)) {
+        std::cerr << "Error: file does not exist: " << path << "\n";
+        return false;
+    }
+
+    if (!std::filesystem::is_regular_file(p)) {
+        std::cerr << "Error: not a regular file: " << path << "\n";
+        return false;
+    }
+
+    return true;
 }

@@ -11,6 +11,7 @@
 #include <sstream>
 #include <fcl/common/types.h>
 #include <fcl/geometry/shape/utility.h>
+#include <filesystem>
 #include <fcl/fcl.h>
 
 #include <Eigen/Dense>
@@ -287,6 +288,9 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
                     std::string obstacle_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj");
 
 void flushCudaCache();
+
+
+bool check_file_exists(const std::string& path);
 
 class tranform_soa {
     //spatial coordinates
