@@ -412,3 +412,7 @@ std::vector<size_t> getBVHTreeDepths(const fcl::BVHModel<BV>& model)
 
     return leaf_depths;
 }
+
+// TODO: This assumes that B is a rotation matrix of B with respect to the axes of A
+// we may want to calculate this dynamically, but for now, assume A axis aligned and centered at origin
+OBB_soa hierarchy_from_mesh(const char* mesh_path);

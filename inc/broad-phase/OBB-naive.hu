@@ -1,0 +1,7 @@
+#include "Utils.h"
+
+__global__ void d_obb_dyn_1box( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
+                                const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
+                                const Eigen::Vector3f* pRob_dim, const Eigen::Vector3f* pObs_dim,
+                                const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
+                                bool* pdisjoint);

@@ -1,0 +1,99 @@
+#pragma once
+#include "./Utils.h"
+// NOTE: everything below between the stars had the following headers in the initial version of this file, need to reevaluate which ones are actually needed
+// #define NUM_CONFS_PER_BLOCK 32
+// #define MEGA_BLOCK_SIZE 32
+// #define TRIANGLE_BUFFER_SIZE 128
+#define TOL 1e-6
+
+__host__ __device__ bool isclose(float v1, float v2);
+
+//TODO: figure out how these functions work
+//it seems like they just reorder the vertices of the triangle so that... 
+__host__ __device__ void canonicalize_triangle(const Triangle t, const Eigen::Vector3f dists, Triangle *new_t, Eigen::Vector3f *new_dists);
+
+//TODO: template float / double
+__host__ __device__ void canonicalize_triangle ( Eigen::Vector3d &v1, Eigen::Vector3d &v2, Eigen::Vector3d &v3, Eigen::Vector3d &dists);
+
+__host__ __device__ void canonicalize_triangle_sep(const float dists_x, const float dists_y, const float dists_z, int *v1, int *v2, int *v3);
+
+
+// TODO: investigate a more numerically stable way to do this
+// TODO: template this to use doubles / floats
+__host__ __device__ void la_solve(const double A1, const double A2, const double A3, const double A4,
+        const double b1, const double b2, double *x1, double *x2);
+
+__host__ __device__ void la_solve(const float A1, const float A2, const float A3, const float A4,
+        const float b1, const float b2, float *x1, float *x2);
+
+//TODO: template this to use doubles
+__host__ __device__ Eigen::Vector3d compute_signed_dists(   const Eigen::Vector3d N, const double d, 
+                                                            const Eigen::Vector3d &v1, const Eigen::Vector3d &v2, const Eigen::Vector3d &v3);
+
+__host__ __device__ Eigen::Vector3f compute_signed_dists(const Eigen::Vector3f N, const float d, const Triangle tr,
+                                                            const Eigen::Vector3f *pts);
+
+__host__ __device__ void compute_signed_dists_sep(const float Nx, const float Ny, const float Nz, const float d, 
+            const float pt1_x, const float pt1_y, const float pt1_z,
+            const float pt2_x, const float pt2_y, const float pt2_z, 
+            const float pt3_x, const float pt3_y, const float pt3_z, 
+            float* dists_x, float* dists_y, float* dists_z);
+
+__host__ __device__ bool no_overlap(const Eigen::Vector3f dists);
+
+//TODO: template this to use doubles
+__host__ __device__ bool no_overlap(const Eigen::Vector3d dists);
+
+__host__ __device__ bool no_overlap_sep(const float dists_x, const float dists_y, const float dists_z);
+
+
+__host__ __device__ void compute_intersect_line(const Eigen::Vector3d N1, const double d1,
+        const Eigen::Vector3d N2, const double d2, Eigen::Vector3d *D, Eigen::Vector3d *O);
+
+__host__ __device__ void compute_intersect_line_sep(
+        const float N1_x, const float N1_y, const float N1_z, const float d1,
+        const float N2_x, const float N2_y, const float N2_z, const float d2,
+        float *Dx, float *Dy, float *Dz, float *Ox, float *Oy, float *Oz);
+
+__host__ __device__ float project_vertex(const Eigen::Vector3f &V, const Eigen::Vector3f &D, const Eigen::Vector3f &O);
+
+__host__ __device__ double project_vertex(const Eigen::Vector3d &V, const Eigen::Vector3d &D, const Eigen::Vector3d &O);
+
+
+__host__ __device__ float compute_parametric_variable_sep(const float v0_x, const float v0_y, const float v0_z, const float v1_x, const float v1_y, const float v1_z, const float d0, const float d1, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
+
+extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
+extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
+
+
+
+__host__ __device__ bool is_coplanar(const Eigen::Vector3f N1, const float d1, const Eigen::Vector3f N2, const float d2); 
+
+__host__ __device__ bool is_coplanar(const Eigen::Vector3d N1, const double d1, const Eigen::Vector3d N2, const double d2);
+
+__host__ __device__ bool is_coplanar_sep(const float N1_x, const float N1_y, const float N1_z, const float d1, const float N2_x, const float N2_y, const float N2_z, const float d2);
+
+__host__ __device__ void compute_plane(const Triangle tr, const Eigen::Vector3f *pts, Eigen::Vector3f *N,
+    float *d);
+
+//TODO: template this to use doubles
+__host__ __device__ void compute_plane(const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const Eigen::Vector3f &v3, Eigen::Vector3d &N, double &d);
+
+//TODO: template this to use doubles
+__host__ __device__ void compute_plane(const Eigen::Vector3d &v1, const Eigen::Vector3d &v2, const Eigen::Vector3d &v3, Eigen::Vector3d &N, double &d);
+
+__host__ __device__ void compute_plane_sep(const float pt1_x, const float pt1_y, const float pt1_z, const float pt2_x, const float pt2_y, const float pt2_z, const float pt3_x, const float pt3_y, const float pt3_z, float *Nx, float *Ny, float *Nz, float *d);
+    
+__host__ __device__ AABB generateTriangleAABB(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2, const Eigen::Vector3f &p3);
+
+
+void generateTriAABBs(const std::vector<Triangle> &triangles, const std::vector<Eigen::Vector3f> &points, std::vector<AABB> &aabbs);
+
+//TODO: make it work assuming that the OBBs of the triangles already intersect (should be able to save some steps)
+//TODO: make it work with templated floats/doubles
+// __device__ bool triangles_valid(Eigen::Vector3d rob_v1, Eigen::Vector3d rob_v2,  Eigen::Vector3d rob_v3,
+//                                     Eigen::Vector3d obs_v1, Eigen::Vector3d obs_v2, Eigen::Vector3d obs_v3, bool delete_me) {
+__device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_rob_v2,  Eigen::Vector3f f_rob_v3,
+                                    Eigen::Vector3f f_obs_v1, Eigen::Vector3f f_obs_v2, Eigen::Vector3f f_obs_v3, bool delete_me = false);

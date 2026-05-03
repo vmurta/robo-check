@@ -1,0 +1,10 @@
+#include "Utils.h"
+
+#define TWO_STAGE_CF 29
+#define BLOCK_SIZE 32
+#define NUM_CONFS_PER_BLOCK_2S (TWO_STAGE_CF * BLOCK_SIZE)
+__global__ void d_obb_coursened_two_stage ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
+                                const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
+                                const Eigen::Vector3f* pRob_dim, const Eigen::Vector3f* pObs_dim,
+                                const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
+                                bool* pdisjoint);

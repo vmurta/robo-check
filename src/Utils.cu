@@ -583,3 +583,103 @@ bool check_file_exists(const std::string& path) {
 
     return true;
 }
+
+// TODO: This assumes that B is a rotation matrix of B with respect to the axes of A
+// we may want to calculate this dynamically, but for now, assume A axis aligned and centered at origin
+OBB_soa hierarchy_from_mesh(const char* mesh_path){
+    // Load Robot
+    std::vector<fcl::Vector3f> rob_vertices;
+    std::vector<fcl::Triangle> rob_triangles;
+
+
+    loadOBJFileFCL(mesh_path, rob_vertices, rob_triangles);
+
+    // why is this a pointer???
+    std::shared_ptr<fcl::BVHModel<fcl::OBB<float>>> rob_mesh(new fcl::BVHModel<fcl::OBB<float>>);
+    rob_mesh->beginModel(rob_triangles.size(), rob_vertices.size());
+    rob_mesh->addSubModel(rob_vertices, rob_triangles);
+    rob_mesh->endModel();
+
+    getBVHTreeDepths(*rob_mesh);
+    // Access OBB data from rob_mesh
+    // rob_mesh->getNumBVs() gives the number of OBBs in the hierarchy
+    size_t num_boxes = rob_mesh->getNumBVs();
+    OBB_soa result(num_boxes);
+
+    Eigen::Matrix3f rotation;
+    Eigen::Vector3f translation;
+    Eigen::Vector3f half_dimensions;
+
+    //check to make sure all primitive ids are accounted for
+    std::vector<bool> primitive_id_found(rob_mesh->num_tris, false);
+    for (int i = 0; i < num_boxes; ++i) {
+
+        fcl::OBB<float> obb = rob_mesh->getBV(i).bv;
+        rotation = obb.axis;
+        translation = obb.To;
+        half_dimensions = obb.extent;
+        auto node = rob_mesh->getBV(i);
+
+        if (node.isLeaf()){
+            // std::cout << "Node " << i << " is a leaf with type"  << typeid(obb).name() << std::endl;
+            // std::cout << "It has axis :" << obb.axis << std::endl;
+            // std::cout << "It has translation :" << obb.To.transpose() << std::endl;
+            // std::cout << "It has half-dimensions :" << obb.extent.transpose() << std::endl;
+            // fcl::Triangle triangle = rob_mesh->tri_indices[node.primitiveId()] ;
+            // std::cout << "It has triangle " << triangle[0] << ", " << triangle[1] << ", " << triangle[2] << std::endl;
+            primitive_id_found[node.primitiveId()] = true;
+        }
+
+
+        // if (i == 0){
+        //     std::cout << "The outermost OBB has: " << std::endl;
+        //     std::cout << "Height " << obb.height() << std::endl;
+        //     std::cout << "Width " << obb.width() << std::endl;
+        //     std::cout << "Depth " << obb.depth() << std::endl;
+
+        // }
+        // std::cout << "Rotation: " << rotation << std::endl;
+        // std::cout << "Translation: " << translation.transpose() << std::endl;
+        // std::cout << "Half Dimensions: " << half_dimensions.transpose() << std::endl;
+
+        // // print out the values to verify
+        // std::cout << "OBB " << i << ":\n";
+        // std::cout << "Rotation:\n" << rotation << "\n";
+        // std::cout << "Translation:\n" << translation.transpose() << "\n";
+        // std::cout << "Half Dimensions:\n" << half_dimensions.transpose() << "\n";
+        // std::cout << "-----------------------\n";
+        result.set(i, rotation, translation, half_dimensions);
+    }
+
+    //verify all primitive ids were found
+    for (size_t i = 0; i < primitive_id_found.size(); i++){
+        if (!primitive_id_found[i]){
+            std::cout << "Warning: Primitive ID " << i << " was not found in any leaf OBB." << std::endl;
+        }
+    }
+    // fcl::OBB<float> outer_obb = rob_mesh->getBV(0).bv;
+    // bool all_in = true;
+    // for (fcl::Vector3f vertex : rob_vertices){
+    //     if (!outer_obb.contain(vertex)){
+    //         all_in = false;
+    //         std::cout << vertex << " not in outermost OBB" << std::endl;
+    //     }
+    // }
+
+
+    // delete rob_mesh manually to free memory
+    rob_mesh.reset();
+
+    //verify that the data was copied correctly
+    // for (int i = 0; i < num_boxes; ++i) {
+    //     std::cout << "Verifying OBB " << i << ":\n";
+    //     std::cout << "Rotation:\n" << result.pR[i] << "\n";
+    //     std::cout << "Translation:\n" << result.pT[i].transpose() << "\n";
+    //     std::cout << "Half Dimensions:\n" << result.pDim[i].transpose() << "\n";
+    //     std::cout << "-----------------------\n";
+    // }
+
+
+
+    return result;
+}

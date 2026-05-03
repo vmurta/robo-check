@@ -1,0 +1,15 @@
+#include "Utils.h"
+#include "Triangle.hu"
+
+BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 5);
+
+__global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
+                                const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
+                                const Eigen::Vector3f* pObs_dim, const Eigen::Vector3f* pRob_dim,
+                                const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
+                                const int16_t* pObs_first_child, const int16_t* pRob_first_child,
+                                const Eigen::Vector3f *pRob_verts, const Triangle *pRob_tris, size_t num_rob_nodes,
+                                const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris, size_t num_obs_nodes,
+                                bool* pdisjoint);
+
+double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_file);
