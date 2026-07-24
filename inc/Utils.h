@@ -355,63 +355,7 @@ class tranform_soa {
 
 
 template <typename BV>
-std::vector<size_t> getBVHTreeDepths(const fcl::BVHModel<BV>& model)
-{
-    const int n = model.getNumBVs();
-    if (n == 0) return {};
-
-    size_t max_depth = 0;
-
-    // stack of (node_index, depth)
-    std::stack<std::pair<int, size_t>> st;
-    st.push({0, 1});   // root is depth 1
-
-    std::vector<size_t> leaf_depths(n, 0);
-    while (!st.empty()) {
-        auto [node_idx, depth] = st.top();
-        st.pop();
-        max_depth = std::max(max_depth, depth);
-
-        const auto& node = model.getBV(node_idx);
-        if (node.isLeaf()) {
-            leaf_depths[node_idx] = depth;
-            continue;
-        }       
-        // std::cout << "Node " << node_idx << " is " << node.isLeaf() << " and has " << node.num_primitives << "\n";
-        int left  = node.leftChild();
-        int right = node.rightChild();
-
-        if (right >= 0)
-            st.push({right, depth + 1});
-        if (left >= 0)
-            st.push({left, depth + 1});
-        
-
-    }
-
-    // //print histogram of leaf depths
-    // std::unordered_map<size_t, size_t> depth_hist;
-    // size_t depth_sum = 0;
-    // size_t total_count = leaf_depths.size();
-    // size_t leaf_count = 0;
-    // for (size_t i = 0; i < total_count; ++i) {
-    //     if (leaf_depths[i] > 0) {
-    //         depth_hist[leaf_depths[i]]++;
-    //         depth_sum += leaf_depths[i];
-    //         leaf_count++;
-    //     }
-    // }   
-    // std::cout << "Leaf depth histogram:\n";
-    // for (const auto& [depth, count] : depth_hist) {
-    //     std::cout << "Depth " << depth << ": " << count << " leaves\n";
-    // }
-
-    // double average_depth = static_cast<double>(depth_sum) / leaf_count;
-    // std::cout << "Average leaf depth: " << average_depth << "\n";
-    // std::cout << "Total leaves: " << leaf_count << " out of " << total_count << " nodes.\n";
-
-    return leaf_depths;
-}
+std::vector<size_t> getBVHTreeDepths(const fcl::BVHModel<BV>& model);
 
 // TODO: This assumes that B is a rotation matrix of B with respect to the axes of A
 // we may want to calculate this dynamically, but for now, assume A axis aligned and centered at origin

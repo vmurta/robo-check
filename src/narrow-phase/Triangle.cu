@@ -254,7 +254,7 @@ __host__ __device__ float project_vertex_sep(const float Vx, const float Vy, con
 }
 
 __host__ __device__ float compute_parametric_variable(const Eigen::Vector3f v0, const Eigen::Vector3f v1,
-        const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O, bool delete_me) {
+        const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O) {
     float p_v0 = project_vertex(v0, D, O);
     float p_v1 = project_vertex(v1, D, O);
 
@@ -263,7 +263,7 @@ __host__ __device__ float compute_parametric_variable(const Eigen::Vector3f v0, 
 
 //TODO: template this to use doubles
 __host__ __device__ double compute_parametric_variable(const Eigen::Vector3d v0, const Eigen::Vector3d v1,
-        const double d0, const double d1, const Eigen::Vector3d D, const Eigen::Vector3d O, bool delete_me) {
+        const double d0, const double d1, const Eigen::Vector3d D, const Eigen::Vector3d O) {
     double p_v0 = project_vertex(v0, D, O);
     double p_v1 = project_vertex(v1, D, O);
 
@@ -515,10 +515,8 @@ void generateTriAABBs(const std::vector<Triangle> &triangles, const std::vector<
 
 //TODO: make it work assuming that the OBBs of the triangles already intersect (should be able to save some steps)
 //TODO: make it work with templated floats/doubles
-// __device__ bool triangles_valid(Eigen::Vector3d rob_v1, Eigen::Vector3d rob_v2,  Eigen::Vector3d rob_v3,
-//                                     Eigen::Vector3d obs_v1, Eigen::Vector3d obs_v2, Eigen::Vector3d obs_v3, bool delete_me) {
 __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_rob_v2,  Eigen::Vector3f f_rob_v3,
-                                    Eigen::Vector3f f_obs_v1, Eigen::Vector3f f_obs_v2, Eigen::Vector3f f_obs_v3, bool delete_me = false) {       
+                                    Eigen::Vector3f f_obs_v1, Eigen::Vector3f f_obs_v2, Eigen::Vector3f f_obs_v3) {       
     
     Eigen::Vector3d rob_v1 = f_rob_v1.cast <double> ();
     Eigen::Vector3d rob_v2 = f_rob_v2.cast <double> ();
@@ -532,27 +530,11 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
     bool req_coplanar = false;
 
     compute_plane(f_rob_v1, f_rob_v2, f_rob_v3, Nr, dr);
-    if (delete_me) {
-        printf("Nr: %f, %f, %f, dr: %f\n", Nr(0), Nr(1), Nr(2), dr);
-    }
-    if(delete_me) {
-        printf("obs_v1: %f, %f, %f\n", obs_v1(0), obs_v1(1), obs_v1(2));
-        printf("obs_v2: %f, %f, %f\n", obs_v2(0), obs_v2(1), obs_v2(2));
-        printf("obs_v3: %f, %f, %f\n", obs_v3(0), obs_v3(1), obs_v3(2));
-    }
-    if(delete_me) {
-        printf("rob_v1: %f, %f, %f\n", rob_v1(0), rob_v1(1), rob_v1(2));
-        printf("rob_v2: %f, %f, %f\n", rob_v2(0), rob_v2(1), rob_v2(2));
-        printf("rob_v3: %f, %f, %f\n", rob_v3(0), rob_v3(1), rob_v3(2));
-    }
 
     Eigen::Vector3d distO = compute_signed_dists(Nr, dr, obs_v1, obs_v2, obs_v3);
 
     // Eigen::Vector3f distO = compute_signed_dists(Nr, dr, base_obs_vertices[obs_tri.v1], base_obs_vertices[obs_tri.v2], base_obs_vertices[obs_tri.v3]);
     if (no_overlap(distO)) {
-        if (delete_me) {
-            printf("No overlap found with dist0 %f, dist1 %f, dist2 %f\n", distO(0), distO(1), distO(2));
-        }
         return true;
     }
 
@@ -563,17 +545,11 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
     //TODO: i think this code can't handle coplanar triangles? return false if that's the case
     if (is_coplanar(Nr, dr, No, do_)) {
         req_coplanar = true;
-        if (delete_me) {
-            printf("Coplanar triangles found\n");
-        }
         return false;
     }
 
     Eigen::Vector3d distR = compute_signed_dists(No, do_, rob_v1, rob_v2, rob_v3);
     if (no_overlap(distR)) {
-        if (delete_me) {
-            printf("No overlap found with dist0 %f, dist1 %f, dist2 %f\n", distR(0), distR(1), distR(2));
-        }
         return true;
     }
 
@@ -585,37 +561,28 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
     canonicalize_triangle(obs_v1, obs_v2, obs_v3, distO);
 
     float t_r01 = compute_parametric_variable(rob_v1,
-        rob_v2, distR[0], distR[1], D, O,delete_me);
+        rob_v2, distR[0], distR[1], D, O);
 
     float t_r12 = compute_parametric_variable(rob_v2,
-        rob_v3, distR[1], distR[2], D, O,delete_me);
+        rob_v3, distR[1], distR[2], D, O);
 
     float t_o01 = compute_parametric_variable(obs_v1,
-        obs_v2, distO[0], distO[1], D, O,delete_me);
+        obs_v2, distO[0], distO[1], D, O);
 
     float t_o12 = compute_parametric_variable(obs_v2,
-        obs_v3, distO[1], distO[2], D, O,delete_me);
+        obs_v3, distO[1], distO[2], D, O);
 
     // There is no overlap
     if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
-        if (delete_me) {
-            printf("No Overlap found with t_r01 %f, t_r12 %f, t_o01 %f, t_o12 %f\n", t_r01, t_r12, t_o01, t_o12);
-        }
         return true;
 
     // Also no overlap
     } else if (min(t_o01, t_o12) > max(t_r01, t_r12)) {
-        if (delete_me) {
-            printf("No overlap found with t_o01 %f, t_o12 %f, t_r01 %f, t_r12 %f\n", t_o01, t_o12, t_r01, t_r12);
-        }
         return true;
 
     // There is overlap
     } else {
         req_coplanar = false;
-        if (delete_me) {
-            printf("Overlap found with t_r01 %f, t_r12 %f, t_o01 %f, t_o12 %f\n", t_r01, t_r12, t_o01, t_o12);
-        }
         return false;
     }
 }

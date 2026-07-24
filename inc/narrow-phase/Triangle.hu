@@ -96,4 +96,4 @@ void generateTriAABBs(const std::vector<Triangle> &triangles, const std::vector<
 // __device__ bool triangles_valid(Eigen::Vector3d rob_v1, Eigen::Vector3d rob_v2,  Eigen::Vector3d rob_v3,
 //                                     Eigen::Vector3d obs_v1, Eigen::Vector3d obs_v2, Eigen::Vector3d obs_v3, bool delete_me) {
 __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_rob_v2,  Eigen::Vector3f f_rob_v3,
-                                    Eigen::Vector3f f_obs_v1, Eigen::Vector3f f_obs_v2, Eigen::Vector3f f_obs_v3, bool delete_me = false);
+                                    Eigen::Vector3f f_obs_v1, Eigen::Vector3f f_obs_v2, Eigen::Vector3f f_obs_v3);

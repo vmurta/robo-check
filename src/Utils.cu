@@ -584,6 +584,43 @@ bool check_file_exists(const std::string& path) {
     return true;
 }
 
+template <typename BV>
+std::vector<size_t> getBVHTreeDepths(const fcl::BVHModel<BV>& model)
+{
+    const int n = model.getNumBVs();
+    if (n == 0) return {};
+
+    size_t max_depth = 0;
+
+    // stack of (node_index, depth)
+    std::stack<std::pair<int, size_t>> st;
+    st.push({0, 1});   // root is depth 1
+
+    std::vector<size_t> leaf_depths(n, 0);
+    while (!st.empty()) {
+        auto [node_idx, depth] = st.top();
+        st.pop();
+        max_depth = std::max(max_depth, depth);
+
+        const auto& node = model.getBV(node_idx);
+        if (node.isLeaf()) {
+            leaf_depths[node_idx] = depth;
+            continue;
+        }       
+        // std::cout << "Node " << node_idx << " is " << node.isLeaf() << " and has " << node.num_primitives << "\n";
+        int left  = node.leftChild();
+        int right = node.rightChild();
+
+        if (right >= 0){
+            st.push({right, depth + 1});
+        }
+        if (left >= 0) {
+            st.push({left, depth + 1});
+        }
+    }
+    return leaf_depths;
+}
+
 // TODO: This assumes that B is a rotation matrix of B with respect to the axes of A
 // we may want to calculate this dynamically, but for now, assume A axis aligned and centered at origin
 OBB_soa hierarchy_from_mesh(const char* mesh_path){
@@ -613,7 +650,6 @@ OBB_soa hierarchy_from_mesh(const char* mesh_path){
     //check to make sure all primitive ids are accounted for
     std::vector<bool> primitive_id_found(rob_mesh->num_tris, false);
     for (int i = 0; i < num_boxes; ++i) {
-
         fcl::OBB<float> obb = rob_mesh->getBV(i).bv;
         rotation = obb.axis;
         translation = obb.To;
@@ -621,33 +657,9 @@ OBB_soa hierarchy_from_mesh(const char* mesh_path){
         auto node = rob_mesh->getBV(i);
 
         if (node.isLeaf()){
-            // std::cout << "Node " << i << " is a leaf with type"  << typeid(obb).name() << std::endl;
-            // std::cout << "It has axis :" << obb.axis << std::endl;
-            // std::cout << "It has translation :" << obb.To.transpose() << std::endl;
-            // std::cout << "It has half-dimensions :" << obb.extent.transpose() << std::endl;
-            // fcl::Triangle triangle = rob_mesh->tri_indices[node.primitiveId()] ;
-            // std::cout << "It has triangle " << triangle[0] << ", " << triangle[1] << ", " << triangle[2] << std::endl;
-            primitive_id_found[node.primitiveId()] = true;
+          primitive_id_found[node.primitiveId()] = true;
         }
 
-
-        // if (i == 0){
-        //     std::cout << "The outermost OBB has: " << std::endl;
-        //     std::cout << "Height " << obb.height() << std::endl;
-        //     std::cout << "Width " << obb.width() << std::endl;
-        //     std::cout << "Depth " << obb.depth() << std::endl;
-
-        // }
-        // std::cout << "Rotation: " << rotation << std::endl;
-        // std::cout << "Translation: " << translation.transpose() << std::endl;
-        // std::cout << "Half Dimensions: " << half_dimensions.transpose() << std::endl;
-
-        // // print out the values to verify
-        // std::cout << "OBB " << i << ":\n";
-        // std::cout << "Rotation:\n" << rotation << "\n";
-        // std::cout << "Translation:\n" << translation.transpose() << "\n";
-        // std::cout << "Half Dimensions:\n" << half_dimensions.transpose() << "\n";
-        // std::cout << "-----------------------\n";
         result.set(i, rotation, translation, half_dimensions);
     }
 
@@ -657,29 +669,9 @@ OBB_soa hierarchy_from_mesh(const char* mesh_path){
             std::cout << "Warning: Primitive ID " << i << " was not found in any leaf OBB." << std::endl;
         }
     }
-    // fcl::OBB<float> outer_obb = rob_mesh->getBV(0).bv;
-    // bool all_in = true;
-    // for (fcl::Vector3f vertex : rob_vertices){
-    //     if (!outer_obb.contain(vertex)){
-    //         all_in = false;
-    //         std::cout << vertex << " not in outermost OBB" << std::endl;
-    //     }
-    // }
-
 
     // delete rob_mesh manually to free memory
     rob_mesh.reset();
-
-    //verify that the data was copied correctly
-    // for (int i = 0; i < num_boxes; ++i) {
-    //     std::cout << "Verifying OBB " << i << ":\n";
-    //     std::cout << "Rotation:\n" << result.pR[i] << "\n";
-    //     std::cout << "Translation:\n" << result.pT[i].transpose() << "\n";
-    //     std::cout << "Half Dimensions:\n" << result.pDim[i].transpose() << "\n";
-    //     std::cout << "-----------------------\n";
-    // }
-
-
 
     return result;
 }
