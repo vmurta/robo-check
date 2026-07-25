@@ -91,6 +91,16 @@ __host__ __device__ AABB generateTriangleAABB(const Eigen::Vector3f &p1, const E
 
 void generateTriAABBs(const std::vector<Triangle> &triangles, const std::vector<Eigen::Vector3f> &points, std::vector<AABB> &aabbs);
 
+__host__ __device__ float compute_parametric_variable(const Eigen::Vector3f v0, const Eigen::Vector3f v1,
+        const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O);
+
+__host__ __device__ void compute_plane(const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const Eigen::Vector3f &v3, Eigen::Vector3f *N, float *d);
+
+__host__ __device__ Eigen::Vector3f compute_signed_dists(const Eigen::Vector3f N, const float d, const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const Eigen::Vector3f &v3);
+
+__host__ __device__ void compute_intersect_line(const Eigen::Vector3f N1, const float d1,
+        const Eigen::Vector3f N2, const float d2, Eigen::Vector3f *D, Eigen::Vector3f *O);
+
 //TODO: make it work assuming that the OBBs of the triangles already intersect (should be able to save some steps)
 //TODO: make it work with templated floats/doubles
 // __device__ bool triangles_valid(Eigen::Vector3d rob_v1, Eigen::Vector3d rob_v2,  Eigen::Vector3d rob_v3,

@@ -1,9 +1,9 @@
-#include "../src/broad-phase/broad-phase-fused.hu"
-#include "../src/narrow-phase/narrow-phase.hu"
-#include "../src/MegaKernel.hu"
+#include "broad-phase-fused.hu"
+#include "narrow-phase.hu"
+#include "MegaKernel.hu"
 
 #include <fcl/fcl.h>
-#include "../src/Utils.h"
+#include "Utils.h"
 
 #ifdef COALESCE
 
@@ -20,11 +20,6 @@ __constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
 __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
 __constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 
-#else
-__constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
-__constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
-__constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
 #endif
 
 
@@ -199,29 +194,44 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs, const cha
 //TODO: refactor code to minimize loads by interleaving file reads and device memory operations
 int main(int argc, char *argv[])
 {
-      // load configurations, should have 6990 valids and 3010 invalids
-    std::vector<Configuration> confs;
-        if (argc < 2) {
-        std::cerr << "Usage: " << argv[0] << " <configuration file>" << std::endl;
+    std::string algo = "fused-sep";
+    std::string confFile;
+
+    // Parse arguments
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+        if (arg == "--algo" && i + 1 < argc) {
+            algo = argv[++i];
+        } else if (arg == "--help" || arg == "-h") {
+            std::cout << "Usage: " << argv[0] << " [options] <configuration file>" << std::endl;
+            std::cout << "Options:" << std::endl;
+            std::cout << "  --algo <name>   Algorithm to run (default: fused-sep)" << std::endl;
+            std::cout << "    fused-sep     Broad phase SOA + narrow phase coarse (default)" << std::endl;
+            std::cout << "    mega          Fused 3-stage mega kernel" << std::endl;
+            std::cout << "  -h, --help      Show this help message" << std::endl;
+            return 0;
+        } else if (confFile.empty()) {
+            confFile = arg;
+        } else {
+            std::cerr << "Unknown argument: " << arg << std::endl;
+            return 1;
+        }
+    }
+
+    if (confFile.empty()) {
+        std::cerr << "Usage: " << argv[0] << " [options] <configuration file>" << std::endl;
         return 1;
     }
 
-    std::string confFile = argv[1];
-
+    std::vector<Configuration> confs;
     readConfigurationFromFile(confFile, confs);
     std::cout << "Read " << confs.size() << " configurations" << std::endl;
 
-    Eigen::Vector3f* gpu_transformed_vertices = new Eigen::Vector3f[confs.size() * 792];
-    AABB* bot_bounds_GPU = new AABB[confs.size()];
-
     bool *valid_conf = new bool[confs.size()];
-
     for (int i = 0; i < confs.size(); i++){
         valid_conf[i] = false;
     }
     bool *cpu_valid_conf = new bool[confs.size()];
-    AABB* bot_bounds_CPU = new AABB[confs.size()];
-    fcl::Vector3f* cpu_transformed_vertices = new fcl::Vector3f[confs.size() * 792];
 
     auto cpu_start_time = std::chrono::high_resolution_clock::now();
     collisionCheckCPU(cpu_valid_conf, confFile);
@@ -229,11 +239,22 @@ int main(int argc, char *argv[])
     auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
     std::cout << "collision check cpu execution time: " << cpu_elapsed_time.count() << " milliseconds" << std::endl;
 
+    std::cout << "Running algorithm: " << algo << std::endl;
     std::chrono::time_point<std::chrono::high_resolution_clock> start_time, end_time;
     start_time = std::chrono::high_resolution_clock::now();
-    broadPhaseFused_sep(confs, valid_conf);
-    // broadPhaseFused(confs, valid_conf);
-    // CallMegaKernel(confs, valid_conf);
+
+        if (algo == "fused-sep") {
+        broadPhaseFused_sep(confs, valid_conf);
+    } else if (algo == "mega") {
+        CallMegaKernel(confs, valid_conf);
+    } else {
+        std::cerr << "Unknown algorithm: " << algo << std::endl;
+        std::cerr << "Available algorithms: fused-sep, mega" << std::endl;
+        delete[] valid_conf;
+        delete[] cpu_valid_conf;
+        return 1;
+    }
+
     end_time = std::chrono::high_resolution_clock::now();
     auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time);
     std::cout << "collision GPU execution time: " << elapsed_time.count() << " milliseconds" << std::endl;
@@ -246,20 +267,14 @@ int main(int argc, char *argv[])
             num_true++;
             if (valid_conf[i]==cpu_valid_conf[i]){
                 num_correct_true++;
-            } else {
-                // std::cout << "conf " << i << " is a false positive" << std::endl;
             }
         } else {
-            if (valid_conf[i]==cpu_valid_conf[i]){
-            } else {
+            if (valid_conf[i]!=cpu_valid_conf[i]){
                 std::cout << "conf " << i << " is a false negative" << std::endl;
             }
         }
         if (valid_conf[i]==cpu_valid_conf[i]){
             num_correct++;
-            // std::cout << "conf " << i << " is " << valid_conf[i] << std::endl;
-        } else {
-            // std::cout << "conf " << i << " is " << valid_conf[i] << " but should be " << cpu_valid_conf[i] << std::endl;
         }
     }
     std::cout << "Num valid configurations " << num_true << std::endl;
@@ -269,10 +284,8 @@ int main(int argc, char *argv[])
             std::cout << "\033[31m" << "KERNEL BROKEN " << "\033[0m" << std::endl;
     }
 
-
     confirmConfs(valid_conf, confs.size());
 
-    // delete[](gpu_transformed_vertices);
-    delete[](bot_bounds_GPU);
     delete[](valid_conf);
+    delete[](cpu_valid_conf);
 }

@@ -13,7 +13,7 @@ NAR_DIR=${SRC_DIR}/narrow-phase
 TRANS_DIR=${SRC_DIR}/transformation #TODO: this directory no longer exists
 
 INC_DIR=./inc
-INCLUDES:=-I${INC_DIR} -I${INC_DIR}/full-stack-cc -I${INC_DIR}/broad-phase -I${INC_DIR}/generate-AABB -I${INC_DIR}/narrow-phase
+INCLUDES:=-I${INC_DIR} -I${INC_DIR}/full-stack-cc -I${INC_DIR}/broad-phase -I${INC_DIR}/generate-AABB -I${INC_DIR}/narrow-phase -I${SRC_DIR}/generate-AABB
 TEST_DIR=./test
 
 CUFLAGS := $(COMMON_FLAGS) $(OPT_FLAGS)
@@ -30,7 +30,7 @@ all: Full-Integration-Test Generate-Tests
 BUILD_DIR := build
 
 # Update targets to use build directory object files
-Full-Integration-Test: $(BUILD_DIR)/full-integration-test.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/generate-AABB.o $(BUILD_DIR)/broad-phase-fused.o $(BUILD_DIR)/narrow-phase.o  $(BUILD_DIR)/MegaKernel.o
+Full-Integration-Test: $(BUILD_DIR)/full-integration-test.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/generate-AABB.o $(BUILD_DIR)/broad-phase-fused.o $(BUILD_DIR)/narrow-phase.o $(BUILD_DIR)/MegaKernel.o
 	$(NVCC) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
 Generate-Tests: $(BUILD_DIR)/generate-tests.o $(BUILD_DIR)/Utils.o
@@ -70,7 +70,7 @@ $(BUILD_DIR)/broad-phase-fused.o : ${BROAD_DIR}/broad-phase-fused.cu | $(BUILD_D
 	$(NVCC) $(CUFLAGS) -dc $< -o $@ $(INCLUDES)
 
 $(BUILD_DIR)/full-integration-test.o: ${TEST_DIR}/full-integration-test.cu | $(BUILD_DIR)
-	$(NVCC) $(CUFLAGS) -dc $^ -o $@
+	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $^ -o $@
 
 $(BUILD_DIR)/transform.o: ${TRANS_DIR}/transform.cu | $(BUILD_DIR)
 	$(NVCC) $(CUFLAGS) -dc $< -o $@ $(INCLUDES). 
@@ -84,8 +84,8 @@ $(BUILD_DIR)/generate-tests.o: ${TEST_DIR}/generate-tests.cu | $(BUILD_DIR)
 $(BUILD_DIR)/narrow-phase.o: ${NAR_DIR}/narrow-phase.cu | $(BUILD_DIR)
 	$(NVCC) $(CUFLAGS) -dc $< -o $@ $(INCLUDES)
 
-$(BUILD_DIR)/MegaKernel.o: ${SRC_DIR}/MegaKernel.cu | $(BUILD_DIR)
-	$(NVCC) $(CUFLAGS) -dc $< -o $@ $(INCLUDES)
+$(BUILD_DIR)/MegaKernel.o: ${SRC_DIR}/full-stack-cc/MegaKernel.cu | $(BUILD_DIR)
+	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $< -o $@
 
 $(BUILD_DIR)/OBB-BVH-naive.o: $(SRC_DIR)/full-stack-cc/OBB-BVH-naive.cu | $(BUILD_DIR)
 	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $< -o $@

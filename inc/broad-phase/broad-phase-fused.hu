@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../Utils.h"
-#include "../generate-AABB/generate-AABB.hu"
+#include "generate-AABB.hu"
 // #include "../broad-phase/broad-phase.hu"
 
 
@@ -15,7 +15,6 @@ __global__ void broadPhaseFusedKernel(Configuration *configs, const AABB *obstac
 
 // helper functions
 __device__ Eigen::Matrix4f createTransformationMatrix(const Configuration config);
-__device__ Eigen::Matrix3f createRotationMatrix(const Configuration config);
 
 inline __device__ Eigen::Vector3f transformVector(const Eigen::Vector3f &v, const Eigen::Matrix3f &R, const Eigen::Vector3f &t){
     return R * v + t;

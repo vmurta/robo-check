@@ -495,6 +495,38 @@ __host__ __device__ void compute_plane_sep(const float pt1_x, const float pt1_y,
     *d = -1 * (*Nx * pt1_x + *Ny * pt1_y + *Nz * pt1_z);
 }
 
+__host__ __device__ void compute_plane(const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const Eigen::Vector3f &v3, Eigen::Vector3f *N, float *d) {
+    Eigen::Vector3f v2_v1(v2[0] - v1[0], v2[1] - v1[1], v2[2] - v1[2]);
+    Eigen::Vector3f v3_v2(v3[0] - v2[0], v3[1] - v2[1], v3[2] - v2[2]);
+
+    (*N)[0] = v2_v1[1] * v3_v2[2] - v2_v1[2] * v3_v2[1];
+    (*N)[1] = v2_v1[2] * v3_v2[0] - v2_v1[0] * v3_v2[2];
+    (*N)[2] = v2_v1[0] * v3_v2[1] - v2_v1[1] * v3_v2[0];
+
+    *d = -1 * ((*N)[0] * v1[0] + (*N)[1] * v1[1] + (*N)[2] * v1[2]);
+}
+
+__host__ __device__ Eigen::Vector3f compute_signed_dists(const Eigen::Vector3f N, const float d, const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const Eigen::Vector3f &v3) {
+    Eigen::Vector3f dists;
+    dists(0) = N(0) * v1(0) + N(1) * v1(1) + N(2) * v1(2) + d;
+    dists(1) = N(0) * v2(0) + N(1) * v2(1) + N(2) * v2(2) + d;
+    dists(2) = N(0) * v3(0) + N(1) * v3(1) + N(2) * v3(2) + d;
+    return dists;
+}
+
+__host__ __device__ void compute_intersect_line(const Eigen::Vector3f N1, const float d1,
+        const Eigen::Vector3f N2, const float d2, Eigen::Vector3f *D, Eigen::Vector3f *O) {
+    (*D)(0) = N1(1) * N2(2) - N1(2) * N2(1);
+    (*D)(1) = N1(2) * N2(0) - N1(0) * N2(2);
+    (*D)(2) = N1(0) * N2(1) - N1(1) * N2(0);
+
+    float den = (*D)(0) * (*D)(0) + (*D)(1) * (*D)(1) + (*D)(2) * (*D)(2);
+
+    (*O)(0) = (d2 * N1(0) - d1 * N2(0)) / den;
+    (*O)(1) = (d2 * N1(1) - d1 * N2(1)) / den;
+    (*O)(2) = (d2 * N1(2) - d1 * N2(2)) / den;
+}
+
 
 __host__ __device__ AABB generateTriangleAABB(const Eigen::Vector3f &p1, const Eigen::Vector3f &p2, const Eigen::Vector3f &p3){
     AABB aabb;

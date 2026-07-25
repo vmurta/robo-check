@@ -8,3 +8,5 @@ __global__ void d_obb_coursened_two_stage ( const Eigen::Matrix3f* pR_obs, const
                                 const Eigen::Vector3f* pRob_dim, const Eigen::Vector3f* pObs_dim,
                                 const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
                                 bool* pdisjoint);
+
+double broad_coarsened_shared_mem_2S();
