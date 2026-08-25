@@ -8,6 +8,8 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
+#include <algorithm>
+#include <cassert>
 
 void writeConfigurationToFileTagged(const std::vector<ConfigurationTagged> &confs, const std::string& filename) {
     std::ofstream file(filename);
@@ -105,34 +107,185 @@ ConfigurationTagged makeTagged(const Configuration& config) {
     return tagged;
 }
 
-void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs, bool hard){
-  // these are the max and min values for vertices in alpha1.0/robot.obj
-    float x_min = 3.72119;
-    float y_min = -11.0518;
-    float z_min = -0.608012;
-    float x_max = 65.9453;
-    float y_max = 26.0984;
-    float z_max = 18.6984;
+void loadGFile(std::string filename, std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles){
+  FILE* file = fopen(filename.c_str(), "rb");
+  if(!file)
+  {
+    std::cerr << "file not exist: " << filename << std::endl;
+    return;
+  }
+
+  int numParts, numVerts, numPolys, numEdges;
+  if(fscanf(file, "%d %d %d %d", &numParts, &numVerts, &numPolys, &numEdges) != 4)
+  {
+    std::cerr << "error reading BYU header" << std::endl;
+    fclose(file);
+    return;
+  }
+
+  for(int i = 0; i < numParts; ++i)
+  {
+    int start, end;
+    fscanf(file, "%d %d", &start, &end);
+  }
+
+  for(int i = 0; i < numVerts; ++i)
+  {
+    float x, y, z;
+    fscanf(file, "%f %f %f", &x, &y, &z);
+    points.push_back(Eigen::Vector3f(x, y, z));
+  }
+
+  // consume the rest of the last vertex line
+  char line_buffer[2000];
+  fgets(line_buffer, 2000, file);
+
+  for(int poly = 0; poly < numPolys; ++poly)
+  {
+    fgets(line_buffer, 2000, file);
+    char* ptr = line_buffer;
+    std::vector<int> indices;
+    int idx;
+    while(sscanf(ptr, "%d", &idx) == 1)
+    {
+      while(*ptr && *ptr != ' ' && *ptr != '\t' && *ptr != '\n') ++ptr;
+      while(*ptr == ' ' || *ptr == '\t') ++ptr;
+      if(idx < 0)
+      {
+        indices.push_back(-idx - 1);
+        break;
+      }
+      indices.push_back(idx - 1);
+    }
+    for(size_t t = 1; t + 1 < indices.size(); ++t)
+    {
+      Triangle tri;
+      tri.v1 = indices[0];
+      tri.v2 = indices[t];
+      tri.v3 = indices[t + 1];
+      triangles.push_back(tri);
+    }
+  }
+
+  fclose(file);
+}
+
+static bool checkSingleConfCPU(const Configuration &conf,
+                               fcl::CollisionObject<float> &rob_col_obj,
+                               fcl::CollisionObject<float> &obs_col_obj){
+    fcl::Transform3f transform = configurationToTransform(conf);
+    rob_col_obj.setTransform(transform);
+    fcl::CollisionRequest<float> request(1);
+    fcl::CollisionResult<float> result;
+    fcl::collide(&obs_col_obj, &rob_col_obj, request, result);
+    return result.isCollision();
+}
+
+//fills confs with num_confs_in_collision configurations that are in collision and
+// total_num_confs - num_confs_in_collision configurations that are not in collision wrt the alpha obstacle
+void createAlphaBotConfigurations(const std::string &model_path, std::vector<Configuration> &confs,
+                                   int num_confs_in_collision, int total_num_confs){
+    std::vector<Eigen::Vector3f> points;
+    std::vector<Triangle> triangles;
+
+    std::string ext = model_path.substr(model_path.find_last_of('.') + 1);
+    if(ext == "g")
+      loadGFile(model_path, points, triangles);
+    else
+      loadOBJFile(model_path, points, triangles);
+
+    if(points.empty()){
+      std::cerr << "no vertices loaded from " << model_path << std::endl;
+      return;
+    }
+
+    float x_min = points[0].x(), x_max = points[0].x();
+    float y_min = points[0].y(), y_max = points[0].y();
+    float z_min = points[0].z(), z_max = points[0].z();
+    for(size_t i = 1; i < points.size(); ++i){
+      x_min = std::min(x_min, points[i].x());
+      x_max = std::max(x_max, points[i].x());
+      y_min = std::min(y_min, points[i].y());
+      y_max = std::max(y_max, points[i].y());
+      z_min = std::min(z_min, points[i].z());
+      z_max = std::max(z_max, points[i].z());
+    }
 
     float x_range = x_max - x_min;
     float y_range = y_max - y_min;
     float z_range = z_max - z_min;
 
-    if(hard){
-      generateConfs(confs,  -x_range/200, x_range/200,
-                            -y_range/200, y_range/200,
-                            -z_range/200, z_range/200,
-                         num_confs);
-    } else {
-      generateConfs(confs,  -x_range * 10, x_range* 10,
-                            -y_range * 10, y_range* 10,
-                            -z_range * 10, z_range* 10,
-                         num_confs);
+    // Load FCL models once for collision checking
+    std::vector<fcl::Vector3f> rob_vertices, obs_vertices;
+    std::vector<fcl::Triangle> rob_triangles_fcl, obs_triangles_fcl;
+    loadOBJFileFCL("/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj", rob_vertices, rob_triangles_fcl);
+    loadOBJFileFCL("/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj", obs_vertices, obs_triangles_fcl);
+
+    std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
+    rob_mesh->beginModel(rob_triangles_fcl.size(), rob_vertices.size());
+    rob_mesh->addSubModel(rob_vertices, rob_triangles_fcl);
+    rob_mesh->endModel();
+
+    std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> obs_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
+    obs_mesh->beginModel(obs_triangles_fcl.size(), obs_vertices.size());
+    obs_mesh->addSubModel(obs_vertices, obs_triangles_fcl);
+    obs_mesh->endModel();
+
+    fcl::CollisionObject<float> rob_col_obj(rob_mesh);
+    fcl::CollisionObject<float> obs_col_obj(obs_mesh);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<float> dis_rot(-M_PI, M_PI);
+
+    int num_written = 0;
+
+    // Generate configs that are in collision
+    {
+      std::uniform_real_distribution<float> dis_x(-x_range/2, x_range/2);
+      std::uniform_real_distribution<float> dis_y(-y_range/2, y_range/2);
+      std::uniform_real_distribution<float> dis_z(-z_range/2, z_range/2);
+      int count = 0;
+      while(count < num_confs_in_collision){
+        Configuration conf;
+        conf.x = dis_x(gen);
+        conf.y = dis_y(gen);
+        conf.z = dis_z(gen);
+        conf.pitch = dis_rot(gen);
+        conf.yaw = dis_rot(gen);
+        conf.roll = dis_rot(gen);
+        if(checkSingleConfCPU(conf, rob_col_obj, obs_col_obj)){
+          confs[num_written++] = conf;
+          count++;
+        }
+      }
     }
 
+    // Generate configs that are not in collision
+    {
+      std::uniform_real_distribution<float> dis_x(-x_range * 10, x_range * 10);
+      std::uniform_real_distribution<float> dis_y(-y_range * 10, y_range * 10);
+      std::uniform_real_distribution<float> dis_z(-z_range * 10, z_range * 10);
+      int num_not_in_collision = total_num_confs - num_confs_in_collision;
+      int count = 0;
+      while(count < num_not_in_collision){
+        Configuration conf;
+        conf.x = dis_x(gen);
+        conf.y = dis_y(gen);
+        conf.z = dis_z(gen);
+        conf.pitch = dis_rot(gen);
+        conf.yaw = dis_rot(gen);
+        conf.roll = dis_rot(gen);
+        if(!checkSingleConfCPU(conf, rob_col_obj, obs_col_obj)){
+          confs[num_written++] = conf;
+          count++;
+        }
+      }
+    }
+
+    assert(num_written == total_num_confs);
 }
 
-//TODO: modify this to directly write to device memory
 void loadOBJFile(std::string filename, std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles){
   FILE* file = fopen(filename.c_str(), "rb");
   if(!file)
@@ -319,7 +472,7 @@ void loadOBJFile(std::string filename,  std::vector<float>& x, std::vector<float
 void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
                                                       float y_min, float y_max,
                                                       float z_min, float z_max,
-                                                      int num_confs){
+                                                      int num_confs, int offset){
     // Define a uniform real distribution for x, y, z values
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -339,7 +492,7 @@ void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
         conf.pitch = dis_rot(gen);
         conf.yaw = dis_rot(gen);
         conf.roll = dis_rot(gen);
-        confs[i] =conf;
+        confs[offset + i] = conf;
     }
 
 }

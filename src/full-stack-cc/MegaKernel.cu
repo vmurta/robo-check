@@ -5,6 +5,24 @@
 #define MEGA_BLOCK_SIZE 32
 #define TRIANGLE_BUFFER_SIZE 128
 
+#ifdef MEGA_CONSTANT
+// POD layout identical to Eigen::Vector3f so the mesh can be stored in constant memory
+// (Eigen::Vector3f itself has a non-trivial constructor, which CUDA rejects for __constant__)
+struct ConstantPoint {
+    float x;
+    float y;
+    float z;
+};
+
+__constant__ ConstantPoint mega_robot_vertices[NUM_ROB_VERTICES];
+__constant__ Triangle mega_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
+#define ROBOT_VERTICES mega_robot_vertices
+#define ROBOT_TRIANGLES mega_robot_triangles
+#else
+#define ROBOT_VERTICES d_robot_vertices
+#define ROBOT_TRIANGLES d_robot_triangles
+#endif
+
 
 inline __device__ bool overlaps(const AABB &a1, const AABB &a2){
     return (a1.x_min <= a2.x_max && a1.x_max >= a2.x_min) &&
@@ -97,8 +115,12 @@ __device__ bool triangles_valid(const Triangle &rob_tri, const Triangle &obs_tri
 
 __global__ void MegaKernel(const Configuration *configs, const AABB *p_obsAABB, const AABB *obs_tri_AABBs,
                                      bool *valid_confs, const int _num_configs,
+#ifdef MEGA_CONSTANT
+                                     const Eigen::Vector3f *d_obs_vertices, const Triangle *d_obs_triangles){
+#else
                                      const Eigen::Vector3f *d_robot_vertices, const Triangle *d_robot_triangles,
                                      const Eigen::Vector3f *d_obs_vertices, const Triangle *d_obs_triangles){
+#endif
 
     //stage one variables
     ////////////////////////////////////////////////////////////////////////////////
@@ -150,7 +172,12 @@ __global__ void MegaKernel(const Configuration *configs, const AABB *p_obsAABB, 
         valid = true;
         for(int vertex_idx = threadIdx.x ; vertex_idx < NUM_ROB_VERTICES; vertex_idx += MEGA_BLOCK_SIZE)
         {
-            transformed_vertices[vertex_idx] = transformVector(d_robot_vertices[vertex_idx], rotation_matrix, translation_vector);
+#ifdef MEGA_CONSTANT
+            Eigen::Vector3f robot_vertex(ROBOT_VERTICES[vertex_idx].x, ROBOT_VERTICES[vertex_idx].y, ROBOT_VERTICES[vertex_idx].z);
+            transformed_vertices[vertex_idx] = transformVector(robot_vertex, rotation_matrix, translation_vector);
+#else
+            transformed_vertices[vertex_idx] = transformVector(ROBOT_VERTICES[vertex_idx], rotation_matrix, translation_vector);
+#endif
         }
         __syncthreads();
 
@@ -192,9 +219,9 @@ __global__ void MegaKernel(const Configuration *configs, const AABB *p_obsAABB, 
 
         // stage two
         for (int j = threadIdx.x; j < MAX_NUM_ROBOT_TRIANGLES; j+=MEGA_BLOCK_SIZE){
-            rob_tri_AABB = generateTriangleAABB(   transformed_vertices[d_robot_triangles[j].v1],
-                                                        transformed_vertices[d_robot_triangles[j].v2],
-                                                        transformed_vertices[d_robot_triangles[j].v3]);
+            rob_tri_AABB = generateTriangleAABB(   transformed_vertices[ROBOT_TRIANGLES[j].v1],
+                                                        transformed_vertices[ROBOT_TRIANGLES[j].v2],
+                                                        transformed_vertices[ROBOT_TRIANGLES[j].v3]);
             rob_tri_AABBs[j] = rob_tri_AABB;
 
             if (!overlaps(rob_tri_AABB, obsAABB)){
@@ -231,7 +258,7 @@ __global__ void MegaKernel(const Configuration *configs, const AABB *p_obsAABB, 
                     if (k < MAX_NUM_ROBOT_TRIANGLES){
                         if (overlaps(rob_tri_AABBs[j], obs_tri_AABBs[k])){
                             curr_tri_index = atomicAdd(&num_invalid_tris, 1);
-                            invalid_rob_tris[curr_tri_index] = d_robot_triangles[j];
+                            invalid_rob_tris[curr_tri_index] = ROBOT_TRIANGLES[j];
                             invalid_obs_tris[curr_tri_index] = d_obs_triangles[k];
                         }
                     }
@@ -287,16 +314,23 @@ void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs, const
     std::cout << "Obstacle has " << obs_vertices.size() << " vertices " <<std::endl;
     std::cout << "Obstacle has " << obs_triangles.size() << " triangles " <<std::endl;
 
-    Eigen::Vector3f *d_robot_vertices;
-    Triangle *d_robot_triangles;
     Eigen::Vector3f *d_obs_vertices;
     Triangle *d_obs_triangles;
+
+#ifdef MEGA_CONSTANT
+    checkCudaMem(cudaMemcpyToSymbol(mega_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(ConstantPoint)));
+    checkCudaMem(cudaMemcpyToSymbol(mega_robot_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle)));
+    std::cout << "Copied the robot vertices and triangles to constant memory" << std::endl;
+#else
+    Eigen::Vector3f *d_robot_vertices;
+    Triangle *d_robot_triangles;
 
     checkCudaCall(cudaMalloc(&d_robot_vertices, rob_vertices.size() * sizeof(Eigen::Vector3f)));
     checkCudaMem(cudaMemcpy(d_robot_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaCall(cudaMalloc(&d_robot_triangles, rob_triangles.size() * sizeof(Triangle)));
     checkCudaMem(cudaMemcpy(d_robot_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     std::cout << "Copied the robot vertices and triangles " << std::endl;
+#endif
 
     checkCudaCall(cudaMalloc(&d_obs_vertices, obs_vertices.size() * sizeof(Eigen::Vector3f)));
     checkCudaMem(cudaMemcpy(d_obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
@@ -333,9 +367,15 @@ void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs, const
     checkCudaCall(cudaMemcpy(valid_conf_d, arr_of_true, configs.size() * sizeof(bool), cudaMemcpyHostToDevice));
 
     std::cout << "About to call mega kernel" << std::endl;
+#ifdef MEGA_CONSTANT
+    MegaKernel<<<(configs.size() - 1) / (NUM_CONFS_PER_BLOCK) + 1, MEGA_BLOCK_SIZE>>>(
+        d_configs, obstacle_AABB_d, obstacle_tris_AABB_d, valid_conf_d, configs.size(),
+        d_obs_vertices, d_obs_triangles);
+#else
     MegaKernel<<<(configs.size() - 1) / (NUM_CONFS_PER_BLOCK) + 1, MEGA_BLOCK_SIZE>>>(
         d_configs, obstacle_AABB_d, obstacle_tris_AABB_d, valid_conf_d, configs.size(),
         d_robot_vertices, d_robot_triangles, d_obs_vertices, d_obs_triangles);
+#endif
 
     checkCudaMem(cudaMemcpy(valid_confs, valid_conf_d, configs.size() * sizeof(bool), cudaMemcpyDeviceToHost));
 
@@ -343,9 +383,14 @@ void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs, const
     checkCudaCall(cudaFree(obstacle_AABB_d));
     checkCudaCall(cudaFree(obstacle_tris_AABB_d));
     checkCudaCall(cudaFree(valid_conf_d));
+#ifdef MEGA_CONSTANT
+    checkCudaCall(cudaFree(d_obs_vertices));
+    checkCudaCall(cudaFree(d_obs_triangles));
+#else
     checkCudaCall(cudaFree(d_robot_vertices));
     checkCudaCall(cudaFree(d_robot_triangles));
     checkCudaCall(cudaFree(d_obs_vertices));
     checkCudaCall(cudaFree(d_obs_triangles));
+#endif
     std::cout << "Copied back memory and synchronized" << std::endl;
 }

@@ -67,9 +67,6 @@
 #define TIMEIT(msg, ...) __VA_ARGS__
 #endif
 
-
-
-//TODO: use eigen types whenever possible
 struct Configuration {
     float x;
     float y;
@@ -88,20 +85,6 @@ struct ConfigurationTagged {
     float roll;
     bool valid;
 };
-
-// struct Matrix4f {
-//     float m[4][4];
-// };
-
-// struct Eigen::Matrix3f {
-//     float m[3][3];
-// };
-
-// struct Eigen::Vector3f {
-//   float x, y, z;
-//   __device__ __host__ Eigen::Vector3f(float _x, float _y, float _z) : x(_x), y(_y), z(_z) {}\
-//   __device__ __host__ Eigen::Vector3f(){};
-// };
 
 struct Triangle {
   int v1, v2, v3;
@@ -242,15 +225,17 @@ void readConfigurationFromFileTagged(const std::string& filename, std::vector<Co
 void readConfigurationFromFile(const std::string& filename, std::vector<Configuration> &confs);
 ConfigurationTagged makeTagged(const Configuration& conf);
 
-void createAlphaBotConfigurations(std::vector<Configuration> &confs, int num_confs, bool hard);
+void createAlphaBotConfigurations(const std::string &model_path, std::vector<Configuration> &confs,
+                                   int num_confs_in_collision, int total_num_confs);
 void loadOBJFile(std::string filename,  std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles);
 void loadOBJFile(std::string filename,  std::vector<float>& x, std::vector<float> &y, std::vector<float> &z,
                                         std::vector<int>& v1, std::vector<int>& v2, std::vector<int>& v3);
+void loadGFile(std::string filename, std::vector<Eigen::Vector3f>& points, std::vector<Triangle>& triangles);
 
 void generateConfs(std::vector<Configuration> &confs, float x_min, float x_max,
                                                       float y_min, float y_max,
                                                       float z_min, float z_max,
-                                                      int num_confs);
+                                                      int num_confs, int offset = 0);
 
 void printConfiguration(const Configuration& conf);
 void printConfigurationTagged(const ConfigurationTagged& conf);

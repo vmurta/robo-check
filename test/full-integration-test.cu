@@ -105,7 +105,7 @@ void collisionCheckCPU(bool *valid, std::string confFile, const char* rob_file= 
     // load configurations, should have  valids and 3010 invalids
     std::vector<Configuration> confs;
     readConfigurationFromFile(confFile, confs);
-    // createAlphaBotConfigurations(confs, confs.size());
+    // createAlphaBotConfigurations("data/models/alpha1.0/robot.obj", confs, 0, confs.size());
 
     //Load Robot
     std::vector<fcl::Vector3f> rob_vertices;

@@ -8,7 +8,6 @@
 
 __host__ __device__ bool isclose(float v1, float v2);
 
-//TODO: figure out how these functions work
 //it seems like they just reorder the vertices of the triangle so that... 
 __host__ __device__ void canonicalize_triangle(const Triangle t, const Eigen::Vector3f dists, Triangle *new_t, Eigen::Vector3f *new_dists);
 

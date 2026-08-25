@@ -12,4 +12,4 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                                 const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris, size_t num_obs_nodes,
                                 bool* pdisjoint);
 
-double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_file);
+double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_file, bool dry_run = false);

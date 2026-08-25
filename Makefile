@@ -23,17 +23,23 @@ ifeq ($(DEBUG),1)
     CUFLAGS := $(COMMON_FLAGS) $(DEBUG_FLAGS) 
 endif
 
+# Build MegaKernel with the robot mesh stored in constant memory
+# Usage: make MEGA_CONST=1
+ifeq ($(MEGA_CONST),1)
+    CUFLAGS += -DMEGA_CONSTANT
+endif
+
 # Build directory
 BUILD_DIR := build
 
 # ---- Targets ----
 
 # Library + test binaries (default)
-all: Full-Integration-Test Generate-Tests
+all: Full-Integration-Test Generate-Tests profiling
 .PHONY: clean all tests profiling
 
 tests: Test-Narrow-Phase
-profiling: Eigen
+profiling: BVH
 
 # ---- Build rules ----
 
@@ -46,7 +52,7 @@ Generate-Tests: $(BUILD_DIR)/generate-tests.o $(BUILD_DIR)/Utils.o
 Test-Narrow-Phase: $(BUILD_DIR)/test-narrow-phase.o $(BUILD_DIR)/narrow-phase.o $(BUILD_DIR)/Triangle.o
 	$(NVCC) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
-Eigen: $(BUILD_DIR)/Utils.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/OBB-single-buff.o $(BUILD_DIR)/OBB-double-buff.o $(BUILD_DIR)/OBB-naive.o $(BUILD_DIR)/Triangle.o $(BUILD_DIR)/obb_test.o
+BVH: $(BUILD_DIR)/Utils.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/OBB-single-buff.o $(BUILD_DIR)/OBB-double-buff.o $(BUILD_DIR)/OBB-naive.o $(BUILD_DIR)/Triangle.o $(BUILD_DIR)/obb_test.o
 	$(NVCC) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
 Debug: $(BUILD_DIR)/obb_test.o $(BUILD_DIR)/Utils.o
@@ -110,4 +116,4 @@ $(BUILD_DIR)/OBB-BVH-naive.o: $(SRC_DIR)/full-stack-cc/OBB-BVH-naive.cu | $(BUIL
 	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $< -o $@
 
 clean:
-	rm -rf *.o Full-Integration-Test Generate-Tests Test-Narrow-Phase Eigen Debug build
+	rm -rf *.o Full-Integration-Test Generate-Tests Test-Narrow-Phase BVH Debug build

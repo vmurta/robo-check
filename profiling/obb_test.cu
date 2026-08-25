@@ -19,6 +19,7 @@ void print_usage(const char *prog) {
     std::cout << "    obb-1s        OBB coarsened single-stage" << std::endl;
     std::cout << "    obb-2s        OBB coarsened two-stage" << std::endl;
     std::cout << "  -h, --help      Show this help message" << std::endl;
+    std::cout << "  --dry-run       Warm up the kernel with an untimed launch before timing" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -27,12 +28,15 @@ int main(int argc, char** argv) {
     std::string obs_file  = "./data/models/alpha1.0/obstacle.obj";
     std::string conf_file = "./data/configurations/hard_confs100,000.conf";
     std::string algo = "bvh";
+    bool dry_run = false;
 
     // Parse arguments
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--algo" && i + 1 < argc) {
             algo = argv[++i];
+        } else if (arg == "--dry-run") {
+            dry_run = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -69,7 +73,7 @@ int main(int argc, char** argv) {
     std::cout << "Algorithm: " << algo << std::endl;
 
     if (algo == "bvh") {
-        bvh_naive(rob_file, obs_file, conf_file);
+        bvh_naive(rob_file, obs_file, conf_file, dry_run);
     } else if (algo == "obb-1s") {
         broad_coarsened_shared_mem_1S();
     } else if (algo == "obb-2s") {

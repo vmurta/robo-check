@@ -1,8 +1,14 @@
 #include "broad-phase/broad-phase-fused.hu"
 
+#ifdef MEGA_CONSTANT
+__global__ void MegaKernel(const Configuration *configs, const AABB *p_obsAABB, const AABB *obs_tri_AABBs,
+                                     bool *valid_confs, const int _num_configs,
+                                     const Eigen::Vector3f *obs_vertices, const Triangle *obs_triangles);
+#else
 __global__ void MegaKernel(const Configuration *configs, const AABB *p_obsAABB, const AABB *obs_tri_AABBs,
                                      bool *valid_confs, const int _num_configs,
                                      const Eigen::Vector3f *robot_vertices, const Triangle *robot_triangles,
                                      const Eigen::Vector3f *obs_vertices, const Triangle *obs_triangles);
+#endif
 void CallMegaKernel(std::vector<Configuration> configs, bool *valid_confs,
-        const char * rob_file = "./data/models/robot.obj", const char * obs_file = "./data/models/obstacle.obj");
+        const char * rob_file = "./data/models/alpha1.0/robot.obj", const char * obs_file = "./data/models/alpha1.0/obstacle.obj");
