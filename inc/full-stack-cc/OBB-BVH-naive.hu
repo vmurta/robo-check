@@ -1,7 +1,14 @@
 #include "Utils.h"
 #include "Triangle.hu"
+#include <vector>
 
 BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 5);
+
+// Bundles the triangle-level data needed by the narrow phase alongside the BVH
+struct MeshData {
+    std::vector<Eigen::Vector3f> vertices;
+    std::vector<Triangle> triangles;
+};
 
 __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
                                 const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
@@ -12,4 +19,9 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                                 const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris, size_t num_obs_nodes,
                                 bool* pdisjoint);
 
-double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_file, bool dry_run = false);
+// Checks the given configurations for collisions against the obstacle.
+// Returns one entry per configuration: true if the configuration is valid (no collision).
+double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
+                 const MeshData& rob_mesh, const MeshData& obs_mesh,
+                 const std::vector<Configuration>& confs,
+                 std::vector<bool>& valid, bool dry_run = false);

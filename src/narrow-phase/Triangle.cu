@@ -577,6 +577,7 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
     //TODO: i think this code can't handle coplanar triangles? return false if that's the case
     if (is_coplanar(Nr, dr, No, do_)) {
         req_coplanar = true;
+        // printf("coplanar triangles detected, returning false\n");
         return false;
     }
 
@@ -592,16 +593,16 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
     canonicalize_triangle(rob_v1, rob_v2, rob_v3, distR);
     canonicalize_triangle(obs_v1, obs_v2, obs_v3, distO);
 
-    float t_r01 = compute_parametric_variable(rob_v1,
+    double t_r01 = compute_parametric_variable(rob_v1,
         rob_v2, distR[0], distR[1], D, O);
 
-    float t_r12 = compute_parametric_variable(rob_v2,
+    double t_r12 = compute_parametric_variable(rob_v2,
         rob_v3, distR[1], distR[2], D, O);
 
-    float t_o01 = compute_parametric_variable(obs_v1,
+    double t_o01 = compute_parametric_variable(obs_v1,
         obs_v2, distO[0], distO[1], D, O);
 
-    float t_o12 = compute_parametric_variable(obs_v2,
+    double t_o12 = compute_parametric_variable(obs_v2,
         obs_v3, distO[1], distO[2], D, O);
 
     // There is no overlap
@@ -614,6 +615,7 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
 
     // There is overlap
     } else {
+        // printf("triangles overlap, returning false with values t_r01=%f, t_r12=%f, t_o01=%f, t_o12=%f\n", t_r01, t_r12, t_o01, t_o12);
         req_coplanar = false;
         return false;
     }

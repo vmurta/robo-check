@@ -1,4 +1,5 @@
 #include <iostream>
+#include <chrono>
 #include <Eigen/Dense>
 #include <fcl/fcl.h>
 #include "Utils.h"
@@ -20,6 +21,7 @@ void print_usage(const char *prog) {
     std::cout << "    obb-2s        OBB coarsened two-stage" << std::endl;
     std::cout << "  -h, --help      Show this help message" << std::endl;
     std::cout << "  --dry-run       Warm up the kernel with an untimed launch before timing" << std::endl;
+    std::cout << "  --cpu-check     Also run the CPU collision check and report true/false positives/negatives" << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -29,6 +31,7 @@ int main(int argc, char** argv) {
     std::string conf_file = "./data/configurations/hard_confs100,000.conf";
     std::string algo = "bvh";
     bool dry_run = false;
+    bool cpu_check = false;
 
     // Parse arguments
     for (int i = 1; i < argc; i++) {
@@ -37,6 +40,8 @@ int main(int argc, char** argv) {
             algo = argv[++i];
         } else if (arg == "--dry-run") {
             dry_run = true;
+        } else if (arg == "--cpu-check") {
+            cpu_check = true;
         } else if (arg == "--help" || arg == "-h") {
             print_usage(argv[0]);
             return 0;
@@ -73,7 +78,81 @@ int main(int argc, char** argv) {
     std::cout << "Algorithm: " << algo << std::endl;
 
     if (algo == "bvh") {
-        bvh_naive(rob_file, obs_file, conf_file, dry_run);
+        // Build BVH hierarchies and load mesh data
+        BVNode_soa rob_BVH = BVH_n_ary_hierarchy_from_mesh(rob_file.c_str(), 2);
+        BVNode_soa obs_BVH = BVH_n_ary_hierarchy_from_mesh(obs_file.c_str(), 2);
+
+        MeshData rob_mesh;
+        loadOBJFile(rob_file, rob_mesh.vertices, rob_mesh.triangles);
+
+        MeshData obs_mesh;
+        loadOBJFile(obs_file, obs_mesh.vertices, obs_mesh.triangles);
+
+        // Load configurations
+        std::vector<Configuration> confs;
+        readConfigurationFromFile(conf_file, confs);
+
+        std::vector<bool> valid;
+        bvh_naive(rob_BVH, obs_BVH, rob_mesh, obs_mesh, confs, valid, dry_run);
+
+        if (cpu_check) {
+            std::vector<ConfigurationTagged> cpuCollisions(confs.size());
+            checkConfsCPU(cpuCollisions, confs, rob_file, obs_file);
+
+            size_t true_positives = 0;   // GPU valid, CPU valid
+            size_t false_positives = 0;  // GPU valid, CPU invalid (should be 0)
+            size_t true_negatives = 0;   // GPU invalid, CPU invalid
+            size_t false_negatives = 0;  // GPU invalid, CPU valid (expected: broad phase)
+            for (size_t i = 0; i < confs.size(); ++i) {
+                if (valid[i]) {
+                    if (cpuCollisions[i].valid) {
+                        true_positives++;
+                    } else {
+                        false_positives++;
+                                        std::cout << "False positive at configuration " << i << ": "
+                          << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
+                          "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
+
+                        // apply transformation to blank obb
+                        // rob_BVH.set(0, rob_rotations[i], rob_translations[i], rob_BVH.pDim[0]);
+                        // std::vector<Eigen::Vector3f> vertices = rob_BVH.getBoxVertices(0);
+                        // Eigen::Matrix3f R = rob_conf_r[i];
+                        // Eigen::Vector3f T = rob_conf_t[i];
+
+                        // for (auto p : vertices){
+                        //     std::cout << p.transpose() << " --> ";
+                        //     std::cout << (R * p + T).transpose() << std::endl;
+                        // }
+                        // std::cout << "Invalid Robot Transform:" << std::endl;
+                        // std::cout << pythonifyEigenMatrix(createHomogeneousMatrix(confs[i])) << std::endl;
+
+                    }
+                } else {
+                    if (!cpuCollisions[i].valid) {
+                        true_negatives++;
+                    } else {
+                        false_negatives++;
+                        std::cout << "False negative at configuration " << i << ": "
+                          << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
+                          "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
+                    }
+                }
+            }
+            
+            std::cout << "for BVH traversal, Out of " << confs.size() << " configurations, " << true_positives << " were true positives and " << false_positives << " were false positives." << std::endl;
+            std::cout << "for BVH traversal, Out of " << confs.size() << " configurations, " << true_negatives << " were true negatives and " << false_negatives << " were false negatives." << std::endl;
+
+            int cpu_positives = 0;
+            int cpu_negatives = 0;
+            for (const auto& c : cpuCollisions) {
+                if (c.valid) {
+                    cpu_positives++;
+                } else {
+                    cpu_negatives++;
+                }
+            }
+            std::cout << "CPU Collision checker found " << cpu_positives << " valid collisions and " << cpu_negatives << " invalid collisions." << std::endl;
+        }
     } else if (algo == "obb-1s") {
         broad_coarsened_shared_mem_1S();
     } else if (algo == "obb-2s") {

@@ -732,44 +732,35 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     return;
 }
 
-double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_file, bool dry_run) {
-    // Similar setup as broad_naive_1 but using d_obb_coursened_two_stage kernel
-        // Load Robot and Obstacle BVH
+double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
+                 const MeshData& rob_mesh, const MeshData& obs_mesh,
+                 const std::vector<Configuration>& confs,
+                 std::vector<bool>& valid, bool dry_run) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
 
-    BVNode_soa rob_BVH = BVH_n_ary_hierarchy_from_mesh(rob_file.c_str(), 2);
-    BVNode_soa obs_BVH = BVH_n_ary_hierarchy_from_mesh(obs_file.c_str(), 2);
-
-    
     std::cout << "Rob BVH size: " << rob_BVH.size << std::endl;
     std::cout << "Obs BVH size: " << obs_BVH.size << std::endl;
 
-    //Load Robot
-    std::vector<Eigen::Vector3f> rob_vertices;
-    std::vector<Triangle> rob_triangles;
-    loadOBJFile(rob_file, rob_vertices, rob_triangles);
-
-    //Load Obstacles
-    std::vector<Eigen::Vector3f> obs_vertices;
-    std::vector<Triangle> obs_triangles;
-    loadOBJFile(obs_file, obs_vertices, obs_triangles);
-
-    // Load Configurations
-    std::vector<Configuration> confs;
-    readConfigurationFromFile(conf_file, confs);
     const int num_confs = confs.size();
-    Eigen::Matrix3f rob_conf_r[num_confs];
-    Eigen::Vector3f rob_conf_t[num_confs];
+    valid.assign(num_confs, false);
+    if (num_confs == 0) {
+        return 0.0;
+    }
+
+    std::unique_ptr<bool[]> disjoint(new bool[num_confs]);
+    for (int i = 0; i < num_confs; ++i) {
+        disjoint.get()[i] = false;
+    }
+
+
+    std::vector<Eigen::Matrix3f> rob_conf_r(num_confs);
+    std::vector<Eigen::Vector3f> rob_conf_t(num_confs);
     for (int i = 0; i < num_confs; ++i) {
         rob_conf_r[i] = createRotationMatrix(confs[i]);
         rob_conf_t[i] = Eigen::Vector3f(confs[i].x, confs[i].y, confs[i].z);
     }
-
-    std::vector<ConfigurationTagged> cpuCollisions(num_confs);
-    TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs, rob_file, obs_file);)
-    bool disjoint[num_confs] = {false};
 
     const int blockSize = 32;
     const int confs_per_block = blockSize;
@@ -791,7 +782,6 @@ double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_fi
     int16_t* d_Obs_first_child;
     int16_t* d_Rob_first_child;
     bool* pdisjoint;
-    // std::cout << "Allocated host memory" << std::endl;
 
     // Allocate memory for device pointers
     cudaEventRecord(start, 0);
@@ -805,10 +795,10 @@ double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_fi
     cudaMalloc((void**)&d_Rob_conf_trans, gridSize * blockSize * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_first_child, obs_BVH.size * sizeof(int16_t));
     cudaMalloc((void**)&d_Rob_first_child, rob_BVH.size * sizeof(int16_t));
-    cudaMalloc((void**)&d_Rob_vertices, rob_vertices.size() * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Obs_vertices, obs_vertices.size() * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Rob_triangles, rob_triangles.size() * sizeof(Triangle));
-    cudaMalloc((void**)&d_Obs_triangles, obs_triangles.size() * sizeof(Triangle));
+    cudaMalloc((void**)&d_Rob_vertices, rob_mesh.vertices.size() * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_Obs_vertices, obs_mesh.vertices.size() * sizeof(Eigen::Vector3f));
+    cudaMalloc((void**)&d_Rob_triangles, rob_mesh.triangles.size() * sizeof(Triangle));
+    cudaMalloc((void**)&d_Obs_triangles, obs_mesh.triangles.size() * sizeof(Triangle));
     cudaMalloc((void**)&pdisjoint, gridSize * blockSize * sizeof(bool));
 
     cudaDeviceSynchronize();
@@ -820,11 +810,11 @@ double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_fi
     checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_first_child, rob_BVH.first_child, rob_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_first_child, obs_BVH.first_child, obs_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_vertices, rob_vertices.data(), rob_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Obs_vertices, obs_vertices.data(), obs_vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_triangles, rob_triangles.data(), rob_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Obs_triangles, obs_triangles.data(), obs_triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(pdisjoint, disjoint, num_confs * sizeof(bool), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_vertices, rob_mesh.vertices.data(), rob_mesh.vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Obs_vertices, obs_mesh.vertices.data(), obs_mesh.vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_triangles, rob_mesh.triangles.data(), rob_mesh.triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Obs_triangles, obs_mesh.triangles.data(), obs_mesh.triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(pdisjoint, disjoint.get(), num_confs * sizeof(bool), cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
@@ -834,27 +824,21 @@ double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_fi
 
     // Copy configurations over separately
     cudaEventRecord(start, 0);
-    checkCudaMem(cudaMemcpy(d_Rob_conf_rot, rob_conf_r, num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_conf_trans, rob_conf_t, num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_conf_rot, rob_conf_r.data(), num_confs * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_conf_trans, rob_conf_t.data(), num_confs * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&duration, start, stop);
     std::cout << "Copying configurations to GPU took " << duration << " ms." << std::endl;
-    // )
-    // Launch kernel with correct grid size
-
-
-    // std::cout << "Launching coarsened_1S kernel with grid size " << gridSize << " and block size " << blockSize << std::endl;
-    // std::cout << "Each block processes " << confs_per_block << " configurations for a total of " << gridSize * confs_per_block << " configurations." << std::endl;
 
     auto launch_bvh_naive = [&]() {
         d_bvh_naive<<<gridSize, blockSize, (obs_BVH.size + rob_BVH.size) * sizeof(int16_t)>>>(
-                                                d_R_obs, d_T_obs, 
-                                                d_R_rob, d_T_rob, 
-                                                d_Obs_dim, d_Rob_dim, 
+                                                d_R_obs, d_T_obs,
+                                                d_R_rob, d_T_rob,
+                                                d_Obs_dim, d_Rob_dim,
                                                 d_Rob_conf_rot, d_Rob_conf_trans,
-                                                d_Obs_first_child, d_Rob_first_child, 
+                                                d_Obs_first_child, d_Rob_first_child,
                                                 d_Rob_vertices, d_Rob_triangles, rob_BVH.size,
                                                 d_Obs_vertices, d_Obs_triangles, obs_BVH.size,
                                                 pdisjoint);
@@ -863,11 +847,11 @@ double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_fi
     // Dry run: single-block launch, untimed, purely to get the kernel loaded onto the device
     if (dry_run) {
         d_bvh_naive<<<1, blockSize, (obs_BVH.size + rob_BVH.size) * sizeof(int16_t)>>>(
-                                                d_R_obs, d_T_obs, 
-                                                d_R_rob, d_T_rob, 
-                                                d_Obs_dim, d_Rob_dim, 
+                                                d_R_obs, d_T_obs,
+                                                d_R_rob, d_T_rob,
+                                                d_Obs_dim, d_Rob_dim,
                                                 d_Rob_conf_rot, d_Rob_conf_trans,
-                                                d_Obs_first_child, d_Rob_first_child, 
+                                                d_Obs_first_child, d_Rob_first_child,
                                                 d_Rob_vertices, d_Rob_triangles, rob_BVH.size,
                                                 d_Obs_vertices, d_Obs_triangles, obs_BVH.size,
                                                 pdisjoint);
@@ -881,80 +865,21 @@ double bvh_naive(std::string rob_file, std::string obs_file, std::string conf_fi
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&duration, start, stop);
-    std::cout << "BVH Naive GPU broad phase took " << duration << " ms for " << num_confs << " configurations." << std::endl;
+    std::cout << "BVH Naive GPU kernel took " << duration << " ms for " << num_confs << " configurations." << std::endl;
 
     // Copy result back to host (num_confs * sizeof(bool))
     cudaEventRecord(start, 0);
     checkCudaMem(cudaGetLastError());
-    checkCudaMem(cudaMemcpy(disjoint, pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
+    checkCudaMem(cudaMemcpy(disjoint.get(), pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
     cudaDeviceSynchronize();
     cudaEventRecord(stop, 0);
     cudaEventSynchronize(stop);
     cudaEventElapsedTime(&duration, start, stop);
     std::cout << "Copying results from GPU took " << duration << " ms." << std::endl;
 
-    auto cpu_start = std::chrono::high_resolution_clock::now();
-    checkConfsCPU(cpuCollisions, confs);
-    auto cpu_end = std::chrono::high_resolution_clock::now();
-    double cpu_duration = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
-    std::cout << "CPU collision check took " << cpu_duration << " ms." << std::endl;
-
-    // Check result
-    size_t true_positives = 0; // num disjoint that are valid
-    size_t false_positives = 0; // num disjoint that are not valid (should be 0)
-    size_t false_negatives = 0; // num not disjoint that are valid (likely to be high since this is broad phase)
-    size_t true_negatives = 0; // num not disjoint that are not valid (unsure how many of these will be)
-    // if obb is disjoint, then we know for sure there is no collision
-    // verify that the cpu said the same thing
     for (int i = 0; i < num_confs; ++i) {
-        if (disjoint[i]) {
-            if (cpuCollisions[i].valid) {
-                true_positives++;
-            } else {
-                false_positives++;
-                // std::cout << "False positive at configuration " << i << ": "
-                //           << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
-                //           "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
-
-                //apply transformation to blank obb
-                // rob_BVH.set(0, rob_rotations[i], rob_translations[i], rob_BVH.pDim[0]);
-                // std::vector<Eigen::Vector3f> vertices = rob_BVH.getBoxVertices(0);
-                // Eigen::Matrix3f R = rob_conf_r[i];
-                // Eigen::Vector3f T = rob_conf_t[i];
-
-                // for (auto p : vertices){
-                //     std::cout << p.transpose() << " --> ";
-                //     std::cout << (R * p + T).transpose() << std::endl;
-                // }
-                // std::cout << "Invalid Robot Transform:" << std::endl;
-                // std::cout << pythonifyEigenMatrix(createHomogeneousMatrix(confs[i])) << std::endl;
-
-            }
-        }
-        else {
-            if (!cpuCollisions[i].valid) {
-                true_negatives++;
-            } else {
-                false_negatives++;
-                // std::cout << "False negative at configuration " << i << ": "
-                //           << "Position (" << confs[i].x << ", " << confs[i].y << ", " << confs[i].z << "), " <<
-                //           "Orientation (roll: " << confs[i].roll << ", pitch: " << confs[i].pitch << ", yaw: " << confs[i].yaw << ")" << std::endl;
-            }
-        }
+        valid[i] = disjoint[i];
     }
-    std::cout << "for BVH traversal, Out of " << num_confs << " configurations, " << true_positives << " were true positives and " << false_positives << " were false positives." << std::endl;
-    std::cout << "for BVH traversal, Out of " << num_confs << " configurations, " << true_negatives << " were true negatives and " << false_negatives << " were false negatives." << std::endl;
-
-    int cpu_positives = 0;
-    int cpu_negatives = 0;
-    for (const auto& c : cpuCollisions) {
-        if (c.valid) {
-            cpu_positives++;
-        } else {
-            cpu_negatives++;
-        }
-    }
-    std::cout << "CPU Collision checker found " << cpu_positives << " valid collisions and " << cpu_negatives << " invalid collisions." << std::endl;
 
     // Free device memory
     cudaFree(d_R_obs);

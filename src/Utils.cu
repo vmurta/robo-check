@@ -290,7 +290,7 @@ void loadOBJFile(std::string filename, std::vector<Eigen::Vector3f>& points, std
   FILE* file = fopen(filename.c_str(), "rb");
   if(!file)
   {
-    std::cerr << "file not exist" << std::endl;
+    std::cerr << "file not exist:" << filename << std::endl;
     return;
   }
 
@@ -381,7 +381,7 @@ void loadOBJFile(std::string filename,  std::vector<float>& x, std::vector<float
   FILE* file = fopen(filename.c_str(), "rb");
   if(!file)
   {
-    std::cerr << "file not exist" << std::endl;
+    std::cerr << "file not exist:" << filename << std::endl;
     return;
   }
 
@@ -556,7 +556,7 @@ void loadOBJFileFCL(std::string filename, std::vector<fcl::Vector3f>& points, st
   FILE* file = fopen(filename.c_str(), "rb");
   if(!file)
   {
-    std::cerr << "file not exist" << std::endl;
+    std::cerr << "file not exist:" << filename << std::endl;
     return;
   }
 
@@ -674,7 +674,6 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
     loadOBJFileFCL(obstacle_filename, obs_vertices, obs_triangles);
 
     // std::cout << "robot has " << rob_vertices.size() << " vertices " <<std::endl;
-    auto cpu_start_time = std::chrono::high_resolution_clock::now();
 
     std::shared_ptr<fcl::BVHModel<fcl::OBBRSS<float>>> rob_mesh(new fcl::BVHModel<fcl::OBBRSS<float>>);
     rob_mesh->beginModel(rob_triangles.size(), rob_vertices.size());
@@ -691,7 +690,9 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
     fcl::CollisionObject<float> rob_col_obj(rob_mesh);
     fcl::CollisionObject<float> obs_col_obj(obs_mesh);
 
-
+    
+    auto cpu_start_time = std::chrono::high_resolution_clock::now();
+    
     // ************************************************************************//
 
     // perform collision detection on each of the randomly generated configs
@@ -716,8 +717,9 @@ void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Con
       }
     }
     auto cpu_end_time = std::chrono::high_resolution_clock::now();
-    auto cpu_elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(cpu_end_time - cpu_start_time);
-    std::cout << "cpu collision detection execution time: " << cpu_elapsed_time.count() << " milliseconds for " <<confs.size() << " configurations." << std::endl;
+    double cpu_duration = std::chrono::duration<double, std::milli>(cpu_end_time - cpu_start_time).count();
+
+    std::cout << "cpu collision detection execution time: " << cpu_duration << " ms for" <<confs.size() << " configurations." << std::endl;
 
 }
 

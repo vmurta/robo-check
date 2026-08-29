@@ -8,9 +8,12 @@ generate-test
 Eigen
 Full-Integration-Test
 Generate-Tests
+BVH
+
 
 # Test files
 tmp/*
+data/configurations/*
 
 # Vim files
 *.swp

@@ -1,0 +1,7 @@
+category,test,algorithm,num_configs,cpu_ms,gpu_ms,wall_s,correct,notes
+integration,Full-Integration-Test,fused-sep,10000,62,2947,3.087,10000/10000,100% correct collision detections
+integration,Full-Integration-Test,fused-sep,100000,494,21538,22.295,100000/100000,100% correct collision detections
+profiling,Eigen,bvh,100000,57,477,0.817,100000/100000,0 false positives 0 false negatives
+profiling,Eigen,bvh,100000,525,93,0.920,100000/100000,0 false positives 0 false negatives
+profiling,Eigen,obb-1s,100000,,,0.295,,single-stage OBB broad-phase
+profiling,Eigen,obb-2s,100000,558,,0.897,,double-stage OBB broad-phase

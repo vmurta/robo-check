@@ -269,8 +269,7 @@ std::string pythonifyEigenMatrix(const Eigen::MatrixBase<Derived>& m)
 }
 
 void checkConfsCPU( std::vector<ConfigurationTagged> &out, const std::vector<Configuration> &confs, 
-                    std::string robot_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj",
-                    std::string obstacle_filename = "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj");
+                    std::string robot_filename, std::string obstacle_filename);
 
 void flushCudaCache();
 
