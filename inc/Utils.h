@@ -175,13 +175,13 @@ struct OBB_soa {
 };
 
 // Extends OBB to include BVH tree information
-// each node either has 0 or 32 children
+// each node either has 0 or 32 children //TODO: confirm this is still true
 
 struct BVNode_soa : OBB_soa {
     // using the same pattern as fcl::BVNodeBase 
     /// If the value is positive, it is the index of the first child bv node
     /// If the value is negative, it is -(primitive index + 1)
-    /// Zero implies this node has no children and no primitives, used only for padding
+    /// Zero implies this node has no BVNode_soachildren and no primitives, used only for padding
     int16_t *first_child;
 
     BVNode_soa(size_t size) : OBB_soa(size) {

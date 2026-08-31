@@ -606,13 +606,12 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
         obs_v3, distO[1], distO[2], D, O);
 
     // There is no overlap
-    if (min(t_r01, t_r12) > max(t_o01, t_o12)) {
+    if (min(t_r01, t_r12) > max(t_o01, t_o12) + 1e-7) {
         return true;
 
     // Also no overlap
-    } else if (min(t_o01, t_o12) > max(t_r01, t_r12)) {
+    } else if (min(t_o01, t_o12) > max(t_r01, t_r12) + 1e-7) {
         return true;
-
     // There is overlap
     } else {
         // printf("triangles overlap, returning false with values t_r01=%f, t_r12=%f, t_o01=%f, t_o12=%f\n", t_r01, t_r12, t_o01, t_o12);

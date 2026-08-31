@@ -160,6 +160,51 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
     return result;
 }
 
+
+__device__ bool areTrianglesDisjoint (    uint32_t &num_bad_leaves, uint16_t *bad_rob_leaves, uint16_t *bad_obs_leaves, 
+                                        const Eigen::Matrix3f &R_conf, const Eigen::Vector3f &T_conf,
+                                        const Eigen::Vector3f *pRob_verts, const Triangle *pRob_tris,
+                                        const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris)
+
+{
+    //TODO: go through leaves collaboratively with a queue instead of this
+    //TODO: this doesn't actually work if there are more than BLOCK_SIZE bad leaves, need to add some sort of batching mechanism
+    bool valid = true;
+    size_t leaf_idx = threadIdx.x;
+    bool all_valid = true;
+    __syncthreads();
+
+    while(leaf_idx < num_bad_leaves){
+        unsigned mask = __activemask();
+        int rob_tri_idx = bad_rob_leaves[leaf_idx];
+        int obs_tri_idx = bad_obs_leaves[leaf_idx];
+
+        Triangle rob_tri = pRob_tris[rob_tri_idx];
+        Triangle obs_tri = pObs_tris[obs_tri_idx];
+        Eigen::Vector3f rob_v0 = pRob_verts[rob_tri.v1];
+        Eigen::Vector3f rob_v1 = pRob_verts[rob_tri.v2];
+        Eigen::Vector3f rob_v2 = pRob_verts[rob_tri.v3];
+        Eigen::Vector3f obs_v0 = pObs_verts[obs_tri.v1];
+        Eigen::Vector3f obs_v1 = pObs_verts[obs_tri.v2];
+        Eigen::Vector3f obs_v2 = pObs_verts[obs_tri.v3];
+
+        // transform robot triangle vertices to world frame
+        rob_v0 = R_conf * rob_v0 + T_conf;
+        rob_v1 = R_conf * rob_v1 + T_conf;
+        rob_v2 = R_conf * rob_v2 + T_conf;
+
+        bool valid = triangles_valid(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2);
+
+        if (!__all_sync(mask, valid)) {   
+            all_valid = false;
+            break;
+        }
+        leaf_idx += blockDim.x;
+    }
+    __syncthreads();
+    return all_valid;
+}
+
 #define BLOCK_SIZE 32
 //assumes BVH of both trees have same depth // <-- does it?? I think currently it detects when something is a leaf appropriately
 __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
@@ -171,7 +216,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                                 const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris, size_t num_obs_nodes,
                                 bool* pdisjoint) {
 
-    // extern __shared__                                     
+    // extern __shared__      
+    if (num_obs_nodes == 0) {
+        printf("Error: num_obs_nodes is zero. Exiting kernel.\n");
+        return;
+    }                               
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
 
     extern __shared__ int16_t shared_mem[];
@@ -220,6 +269,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     __syncthreads();
 
 
+    //initial per conf outermost bounding box check
     while (true) {
 
         t = fabsf(T[0]);
@@ -391,7 +441,15 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
     for (uint16_t i = threadIdx.x; i < num_obs_nodes; i += BLOCK_SIZE){
         sObs_first_child[i] = pObs_first_child[i];
     }
+
     __syncthreads();
+
+        //todo: deleteme
+    // for (uint16_t i = 0; i < num_rob_nodes; i++){
+    //    if (threadIdx.x == 0){
+    //         printf("Rob node %d has first child %d\n", i, sRob_first_child[i]);
+    //    }
+    // }
 
     //TODO: delete this? it doesn't seem to do anything?
     // if (threadIdx.x == 0){
@@ -426,13 +484,16 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
     //TODO: need failsafe if this overflows
 
-    int conf_offset = (threadIdx.x >> 4)-2; // divide by 16 to see if thread works on the 0th pair or 1st pair of pending boxes
-    int rob_child_idx = (threadIdx.x >> 2) & 0x3; // divide by 4, then mod by 4to see which child of the robot box this thread is assigned to
-    int obs_child_idx = threadIdx.x & 0x3; // mod 4 to see which child of the obstacle box this thread is assigned to
+    int16_t conf_offset = (threadIdx.x >> 4)-2; // divide by 16 to see if thread works on the 0th pair or 1st pair of pending boxes
+    int16_t rob_child_idx = (threadIdx.x >> 2) & 0x3; // divide by 4, then mod by 4to see which child of the robot box this thread is assigned to
+    int16_t obs_child_idx = threadIdx.x & 0x3; // mod 4 to see which child of the obstacle box this thread is assigned to
     for (uint8_t i = 0; i < num_confs_pend; i++){
         __syncthreads();
         R_conf = rob_confs_pend_rot[i];
         T_conf = rob_confs_pend_trans[i];
+        if (num_confs_pend > 255){
+            printf("Error, too many confs\n");
+        }
         int global_conf_idx = rob_confs_pend_indices[i];
 
         //reset pending OBB lists
@@ -448,14 +509,14 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
         // intent: for each i in rob_obb_pend, need to check all children of rob_obb_pend[i] against all children of obs_obb_pend[j]
         // these should be 4-ary trees, meaning we grab up to two pending boxes at a time so that we have 16 threads doing the children 
         // of each pair of boxes. 
+        bool collision_found = false;
         while(true){
             __syncthreads();
             if (num_obb_pend == 0){
                 break;
             }
 
-
-            int16_t pend_idx = num_obb_pend + conf_offset;
+            int pend_idx = num_obb_pend + conf_offset;
             if (num_obb_pend >= MAX_BUFFER - 32){
                 if (threadIdx.x == 0) {
                     printf("obb overflow with %d\n boxes on configuration with rotation matrix \n\r \
@@ -467,6 +528,27 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                             T_conf[0], T_conf[1], T_conf[2], blockIdx.x);
                 }
                 break;
+            }
+            if (num_bad_leaves >= MAX_BUFFER - 32){
+                // if (threadIdx.x == 0) {
+                //     printf("bad leaves overflow with %d\n boxes on configuration with rotation matrix \n\r \
+                //             %f, %f, %f, \n %f, %f, %f, \n %f, %f, %f, \n and translation \n \n with block index %d\n \
+                //             %f, %f, %f \n", 
+                //             num_bad_leaves, R_conf(0, 0), R_conf(0, 1), R_conf(0, 2),
+                //             R_conf(1, 0), R_conf(1, 1), R_conf(1, 2),
+                //             R_conf(2, 0), R_conf(2, 1), R_conf(2, 2),
+                //             T_conf[0], T_conf[1], T_conf[2], blockIdx.x);
+                // }
+                if (!areTrianglesDisjoint ( num_bad_leaves, bad_rob_leaves, bad_obs_leaves,
+                                R_conf, T_conf,
+                                pRob_verts,   pRob_tris, 
+                                pObs_verts,   pObs_tris)) {
+                    collision_found = true;
+                    break;
+                }
+                else if (threadIdx.x == 0) {
+                    num_bad_leaves = 0;
+                }  
             }
 
             __syncthreads();
@@ -482,15 +564,40 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             }
 
             unsigned mask = __activemask();
+            
+            int rob_obb_par_idx = rob_obb_pend[pend_idx];
 
-            int16_t rob_obb_par_idx = rob_obb_pend[pend_idx];
-            int16_t obs_obb_par_idx = obs_obb_pend[pend_idx];
-
+            // if (rob_obb_par_idx > 0) {
+            //     if (rob_child_idx + obs_child_idx == 0 ) {
+            //         printf("Error: rob_obb_par_idx is %d for pend_idx %d on Iteration %d of conf %d for thread %d on block %d. with pend_idx %d FATAL\n", rob_obb_par_idx, pend_idx, delete_me_num_iter, global_conf_idx, threadIdx.x, blockIdx.x, pend_idx);
+            //     }
+            // }
+            int obs_obb_par_idx = obs_obb_pend[pend_idx];
+            
+            // if (rob_child_idx + obs_child_idx == 0 ) {
+            //     printf("rob_obb_par_idx is %d and obs_obb_par_idx is %d for pend_idx %d on Iteration %d of conf %d for thread %d on block %d. with pend_idx %d\n", rob_obb_par_idx, obs_obb_par_idx, pend_idx, delete_me_num_iter, global_conf_idx, threadIdx.x, blockIdx.x, pend_idx);
+            // }
             int rob_obb_idx = sRob_first_child[rob_obb_par_idx] + rob_child_idx;
             int obs_obb_idx = sObs_first_child[obs_obb_par_idx] + obs_child_idx;
 
-            int16_t rob_first_child_idx = sRob_first_child[rob_obb_idx];
-            int16_t obs_first_child_idx = sObs_first_child[obs_obb_idx];
+            if (rob_obb_idx < 0) {
+                if (rob_child_idx + obs_child_idx == 0 ) {
+                    printf("Error: rob_obb_idx is negative (%d) for rob_obb_par_idx %d of conf %d for thread %d on block %d. with pend_idx %d FATAL\n", rob_obb_idx, rob_obb_par_idx, global_conf_idx, threadIdx.x, blockIdx.x, pend_idx);
+                }
+            }
+
+            if (obs_obb_idx < 0) {
+                if (rob_child_idx + obs_child_idx == 0) {
+                    printf("Error: obs_obb_idx is negative (%d) for obs_obb_par_idx %d of conf %d for thread %d on block %d. with pend_idx %d FATAL\n", obs_obb_idx, obs_obb_par_idx, global_conf_idx, threadIdx.x, blockIdx.x, pend_idx);
+                }
+            }
+
+            int rob_first_child_idx = sRob_first_child[rob_obb_idx];
+            int obs_first_child_idx = sObs_first_child[obs_obb_idx];
+
+
+
+
 
             __syncwarp(mask);
 
@@ -505,6 +612,18 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
             R_rob_abs = pR_rob[rob_obb_idx];
             T_rob_abs = pT_rob[rob_obb_idx];
             b = pRob_dim[rob_obb_idx];
+            // if (obs_obb_idx >= static_cast<int>(num_obs_nodes)){
+            //     if (threadIdx.x == 0){
+            //         printf("obs_obb_idx %d >= num_obs_nodes %llu\n", obs_obb_idx, num_obs_nodes);
+            //     }
+            //     continue;
+            // }
+            // if (obs_obb_idx < 0){
+            //     if (threadIdx.x == 0){
+            //         printf("obs_obb_idx %d < 0\n", obs_obb_idx);
+            //     }
+            //     continue;
+            // }
             a = pObs_dim[obs_obb_idx];
 
             B = R_obs_abs.transpose() * (R_conf * R_rob_abs); // rotation of A wrt B
@@ -661,7 +780,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
 
                     int rob_tri_idx = -1 * (rob_first_child_idx + 1); 
                     int obs_tri_idx = -1 * (obs_first_child_idx + 1); //TODO: maybe consider having a leaf step instead of doing redundant checks
-
+                    
                     bad_rob_leaves[pos] = rob_tri_idx; 
                     bad_obs_leaves[pos] = obs_tri_idx; //TODO: maybe consider having a leaf step instead of doing redundant checks
                 }
@@ -669,7 +788,14 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 else {
                     int pos = atomicAdd(&num_obb_pend, 1);
                     obs_obb_pend[pos] = obs_obb_idx;
-                    rob_obb_pend[pos] = rob_obb_par_idx; // just shove the parent back in, recurse only on obstacle children
+                    rob_obb_pend[pos] = rob_obb_par_idx; 
+                    
+                    //TODO: delete me
+                    // if (rob_obb_par_idx > 0) {
+                    //     printf("Error: Rob leaf, obs non-leaf, rob_obb_par_idx is positive (%d) for rob_obb_idx %d and block %d on iteration %d of conf %d. FATAL\n", rob_obb_par_idx, rob_obb_idx, blockIdx.x, delete_me_num_iter, i);
+                    //     // return;
+                    // }
+                    // just shove the parent back in, recurse only on obstacle children
                     // TODO: this is a weird hack, figure out a better way to do this
                 }
             } 
@@ -679,9 +805,28 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 int pos = atomicAdd(&num_obb_pend, 1);
                 rob_obb_pend[pos] = rob_obb_idx;
                 obs_obb_pend[pos] = obs_obb_par_idx; // just shove the parent back in, recurse only on robot children
+                //TODO: delete me
+                // if (rob_obb_par_idx >0 && blockIdx.x == 1 && global_conf_idx == 36) {
+                //     printf("Error: Rob non-leaf, obs leaf, rob_obb_par_idx is positive (%d) for rob_obb_idx %d and block %d on iteration %d of conf %d. FATAL\n", rob_obb_par_idx, rob_obb_idx, blockIdx.x, delete_me_num_iter, i);
+                //     // return;
+                // }
             }
         } // end while true over single configuration
+
+
         __syncthreads();
+        if (collision_found) {
+            continue;
+        }
+//         if (areTrianglesDisjoint ( num_bad_leaves, bad_rob_leaves, bad_obs_leaves,
+//                                 R_conf, T_conf,
+//                                 pRob_verts,   pRob_tris, 
+//                                 pObs_verts,   pObs_tris)) {
+//             pdisjoint[global_conf_idx] = true;
+//         }
+//         __syncthreads();
+
+// {
         if (num_bad_leaves == 0){
             if (threadIdx.x == 0) {
                 pdisjoint[global_conf_idx] = true;
@@ -728,6 +873,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vect
                 pdisjoint[global_conf_idx] = true;
             }
         }
+        __syncthreads();
     }
     return;
 }
@@ -832,6 +978,7 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     cudaEventElapsedTime(&duration, start, stop);
     std::cout << "Copying configurations to GPU took " << duration << " ms." << std::endl;
 
+    std::cout << "obs_BVH.size: " << obs_BVH.size << ", rob_BVH.size: " << rob_BVH.size << std::endl;
     auto launch_bvh_naive = [&]() {
         d_bvh_naive<<<gridSize, blockSize, (obs_BVH.size + rob_BVH.size) * sizeof(int16_t)>>>(
                                                 d_R_obs, d_T_obs,
@@ -868,8 +1015,13 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     std::cout << "BVH Naive GPU kernel took " << duration << " ms for " << num_confs << " configurations." << std::endl;
 
     // Copy result back to host (num_confs * sizeof(bool))
+    //TODO deleteme
+    for (int i = 0; i < 10000000; ++i) {
+        i++;
+    }
     cudaEventRecord(start, 0);
     checkCudaMem(cudaGetLastError());
+
     checkCudaMem(cudaMemcpy(disjoint.get(), pdisjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
     cudaDeviceSynchronize();
     cudaEventRecord(stop, 0);
