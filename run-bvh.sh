@@ -9,7 +9,41 @@ ITERATIONS=3
 
 # Output CSV file
 CSV_FILE="bvh_results.csv"
-echo "model,difficulty,size,iteration,time_init_ms,time_copy_config_ms,time_bvh_ms,time_copy_back_ms,time_cpu_ms,false_positives,false_negatives" > "$CSV_FILE"
+echo "model,difficulty,size,iteration,time_init_ms,time_copy_config_ms,time_bvh_ms,time_copy_back_ms,time_cpu_ms,total_gpu_ms,speedup_pct,false_positives,false_negatives" > "$CSV_FILE"
+
+# ---- Lock GPU clocks for reproducible timings ----
+# Lock to 90% of the max boost clock: high enough to be representative,
+# low enough that sustained load is unlikely to crash or overheat-throttle.
+CLOCK_LOCKED=0
+if command -v nvidia-smi >/dev/null 2>&1; then
+    MAX_SM=$(nvidia-smi --query-gpu=clocks.max.sm --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+    MAX_MEM=$(nvidia-smi --query-gpu=clocks.max.mem --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -d ' ')
+    if [[ -n "$MAX_SM" && "$MAX_SM" =~ ^[0-9]+$ ]]; then
+        LOCK_SM=$(( MAX_SM * 90 / 100 ))
+        if nvidia-smi -lgc "$LOCK_SM,$LOCK_SM" >/dev/null 2>&1; then
+            echo "Locked SM clock to $LOCK_SM MHz (max boost: $MAX_SM MHz)"
+            CLOCK_LOCKED=1
+        else
+            echo "WARNING: failed to lock SM clock (permissions? unsupported GPU?); running unlocked" >&2
+        fi
+    fi
+    if [[ "$CLOCK_LOCKED" == 1 && -n "$MAX_MEM" && "$MAX_MEM" =~ ^[0-9]+$ ]]; then
+        LOCK_MEM=$(( MAX_MEM * 90 / 100 ))
+        if nvidia-smi -lmc "$LOCK_MEM,$LOCK_MEM" >/dev/null 2>&1; then
+            echo "Locked memory clock to $LOCK_MEM MHz (max: $MAX_MEM MHz)"
+        else
+            echo "WARNING: failed to lock memory clock; running unlocked" >&2
+        fi
+    fi
+fi
+
+# Restore default clocks when the script exits
+cleanup_clocks() {
+    if [[ "$CLOCK_LOCKED" == 1 ]]; then
+        nvidia-smi -rgc >/dev/null 2>&1 || true
+    fi
+}
+trap cleanup_clocks EXIT
 
 # Loop over each model directory
 for model_dir in data/configurations/alpha data/configurations/octahedron data/configurations/sphere data/configurations/tetrahedron; do
@@ -22,6 +56,7 @@ for model_dir in data/configurations/alpha data/configurations/octahedron data/c
         [ -f "$conf_file" ] || continue
 
         difficulty_size=$(basename "$conf_file" .conf)
+        [[ "$difficulty_size" == *"10M" ]] && continue  # skip 10M runs
         # [[ "$difficulty_size" == *"10" ]] || continue  # TEMP: only run size-10 tests
         # Parse difficulty and size from filename: e.g., free10, easy1k, hard100k, impossible1M
         # We need to extract difficulty and size parts
@@ -89,8 +124,18 @@ for model_dir in data/configurations/alpha data/configurations/octahedron data/c
             false_positives=${false_positives:-0}
             false_negatives=${false_negatives:-0}
 
+            # Any false positive or negative is a hard failure
+            if (( false_positives > 0 || false_negatives > 0 )); then
+                echo "ERROR: model=$model_name diff=$diff size=$size_spec FP=$false_positives FN=$false_negatives" >&2
+                exit 1
+            fi
+
+            # Compute total GPU time and speedup over CPU (percentage change from CPU)
+            total_gpu=$(awk "BEGIN{print $time_init+$time_copy_config+$time_bvh+$time_copy_back}")
+            speedup_pct=$(awk "BEGIN{ cpu=$time_cpu; gpu=$time_init+$time_copy_config+$time_bvh+$time_copy_back; if(cpu>0) printf \"%.2f\", (cpu-gpu)/cpu*100; else printf \"0\" }")
+
             # Append to CSV
-            echo "${model_name},${diff},${total},${iter},${time_init},${time_copy_config},${time_bvh},${time_copy_back},${time_cpu},${false_positives},${false_negatives}" >> "$CSV_FILE"
+            echo "${model_name},${diff},${total},${iter},${time_init},${time_copy_config},${time_bvh},${time_copy_back},${time_cpu},${total_gpu},${speedup_pct},${false_positives},${false_negatives}" >> "$CSV_FILE"
 
             # Small delay to avoid overwhelming the CPU
             sleep 0.1

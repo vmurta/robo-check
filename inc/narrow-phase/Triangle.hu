@@ -61,11 +61,6 @@ __host__ __device__ double project_vertex(const Eigen::Vector3d &V, const Eigen:
 
 __host__ __device__ float compute_parametric_variable_sep(const float v0_x, const float v0_y, const float v0_z, const float v1_x, const float v1_y, const float v1_z, const float d0, const float d1, const float Dx, const float Dy, const float Dz, const float Ox, const float Oy, const float Oz);
 
-extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
-
 
 
 __host__ __device__ bool is_coplanar(const Eigen::Vector3f N1, const float d1, const Eigen::Vector3f N2, const float d2); 
@@ -93,6 +88,9 @@ void generateTriAABBs(const std::vector<Triangle> &triangles, const std::vector<
 __host__ __device__ float compute_parametric_variable(const Eigen::Vector3f v0, const Eigen::Vector3f v1,
         const float d0, const float d1, const Eigen::Vector3f D, const Eigen::Vector3f O);
 
+__host__ __device__ double compute_parametric_variable(const Eigen::Vector3d v0, const Eigen::Vector3d v1,
+        const double d0, const double d1, const Eigen::Vector3d D, const Eigen::Vector3d O);
+
 __host__ __device__ void compute_plane(const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const Eigen::Vector3f &v3, Eigen::Vector3f *N, float *d);
 
 __host__ __device__ Eigen::Vector3f compute_signed_dists(const Eigen::Vector3f N, const float d, const Eigen::Vector3f &v1, const Eigen::Vector3f &v2, const Eigen::Vector3f &v3);
@@ -106,3 +104,8 @@ __host__ __device__ void compute_intersect_line(const Eigen::Vector3f N1, const 
 //                                     Eigen::Vector3d obs_v1, Eigen::Vector3d obs_v2, Eigen::Vector3d obs_v3, bool delete_me) {
 __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_rob_v2,  Eigen::Vector3f f_rob_v3,
                                     Eigen::Vector3f f_obs_v1, Eigen::Vector3f f_obs_v2, Eigen::Vector3f f_obs_v3);
+
+// Float version of triangles_valid: same algorithm as the double version, but
+// in single precision (consumer GPUs execute FP64 at 1/64 the FP32 rate).
+__device__ bool triangles_valid_f(const Eigen::Vector3f& rob_v1, const Eigen::Vector3f& rob_v2, const Eigen::Vector3f& rob_v3,
+                                  const Eigen::Vector3f& obs_v1, const Eigen::Vector3f& obs_v2, const Eigen::Vector3f& obs_v3);

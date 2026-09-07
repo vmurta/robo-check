@@ -1,24 +1,23 @@
 #include "broad-phase-fused.hu"
 #include "narrow-phase.hu"
-#include "MegaKernel.hu"
 
 #include <fcl/fcl.h>
 #include "Utils.h"
 
 #ifdef COALESCE
 
-__constant__ float base_rob_x[NUM_ROB_VERTICES];
-__constant__ float base_rob_y[NUM_ROB_VERTICES];
-__constant__ float base_rob_z[NUM_ROB_VERTICES];
-__constant__ int base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ int base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ int base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ float base_obs_x[NUM_ROB_VERTICES];
-__constant__ float base_obs_y[NUM_ROB_VERTICES];
-__constant__ float base_obs_z[NUM_ROB_VERTICES];
-__constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-__constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+__constant__ float base_rob_x[792];
+__constant__ float base_rob_y[792];
+__constant__ float base_rob_z[792];
+__constant__ int base_rob_tri_v1[1008];
+__constant__ int base_rob_tri_v2[1008];
+__constant__ int base_rob_tri_v3[1008];
+__constant__ float base_obs_x[792];
+__constant__ float base_obs_y[792];
+__constant__ float base_obs_z[792];
+__constant__ int base_obs_tri_v1[1008];
+__constant__ int base_obs_tri_v2[1008];
+__constant__ int base_obs_tri_v3[1008];
 
 #endif
 
@@ -179,7 +178,7 @@ void transformCPU(AABB* bot_bounds, std::vector<Configuration> &confs, const cha
     rob_mesh->endModel();
     std::cout << "loaded robot" <<std::endl;
 
-    fcl::Vector3f* vertices = new fcl::Vector3f[confs.size() * NUM_ROB_VERTICES];
+    fcl::Vector3f* vertices = new fcl::Vector3f[confs.size() * 792];
 
     for (int i = 0; i < confs.size(); i++){
         fcl::Transform3f transform = configurationToTransform(confs[i]);
@@ -207,7 +206,6 @@ int main(int argc, char *argv[])
             std::cout << "Options:" << std::endl;
             std::cout << "  --algo <name>   Algorithm to run (default: fused-sep)" << std::endl;
             std::cout << "    fused-sep     Broad phase SOA + narrow phase coarse (default)" << std::endl;
-            std::cout << "    mega          Fused 3-stage mega kernel" << std::endl;
             std::cout << "  -h, --help      Show this help message" << std::endl;
             return 0;
         } else if (confFile.empty()) {
@@ -245,11 +243,9 @@ int main(int argc, char *argv[])
 
         if (algo == "fused-sep") {
         broadPhaseFused_sep(confs, valid_conf);
-    } else if (algo == "mega") {
-        CallMegaKernel(confs, valid_conf);
     } else {
         std::cerr << "Unknown algorithm: " << algo << std::endl;
-        std::cerr << "Available algorithms: fused-sep, mega" << std::endl;
+        std::cerr << "Available algorithms: fused-sep" << std::endl;
         delete[] valid_conf;
         delete[] cpu_valid_conf;
         return 1;

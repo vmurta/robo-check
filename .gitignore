@@ -24,6 +24,6 @@ python/env/*
 python/__pycache__/*
 
 build/
-
+results/
 
 .vscode/*

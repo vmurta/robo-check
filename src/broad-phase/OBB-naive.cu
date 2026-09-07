@@ -299,7 +299,8 @@ double broad_naive_1() {
     double cpu_duration = std::chrono::duration<double, std::milli>(cpu_end - cpu_start).count();
     std::vector<ConfigurationTagged> cpuCollisions(num_confs);
     // TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs);)
-    checkConfsCPU(cpuCollisions, confs);
+    checkConfsCPU(cpuCollisions, confs, "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj",
+        "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj");
 
     //TODO: make the checker a function inside Utils
     // // Check result

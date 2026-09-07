@@ -383,7 +383,8 @@ double broad_coarsened_shared_mem_2S() {
 
     std::vector<ConfigurationTagged> cpuCollisions(num_confs);
     // TIMEIT("Running Collision check on CPU", checkConfsCPU(cpuCollisions, confs);)
-    checkConfsCPU(cpuCollisions, confs);
+    checkConfsCPU(cpuCollisions, confs, "/home/victor/Projects/robo-check/data/models/alpha1.0/robot.obj",
+        "/home/victor/Projects/robo-check/data/models/alpha1.0/obstacle.obj");
     // Check result
     size_t true_positives = 0; // num disjoint that are valid
     size_t false_positives = 0; // num disjoint that are not valid (should be 0)

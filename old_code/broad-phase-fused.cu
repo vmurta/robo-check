@@ -3,24 +3,24 @@
 #define TRANSFORM_BLOCK_SIZE 32
 
 #ifndef COALESCE
-extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ Eigen::Vector3f base_robot_vertices[792];
+extern __constant__ Triangle base_robot_triangles[1008];
+extern __constant__ Eigen::Vector3f base_obs_vertices[792];
+extern __constant__ Triangle base_obs_triangles[1008];
 
 #else
-extern __constant__ float base_rob_x[NUM_ROB_VERTICES];
-extern __constant__ float base_rob_y[NUM_ROB_VERTICES];
-extern __constant__ float base_rob_z[NUM_ROB_VERTICES];
-extern __constant__ int base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ float base_obs_x[NUM_ROB_VERTICES];
-extern __constant__ float base_obs_y[NUM_ROB_VERTICES]; 
-extern __constant__ float base_obs_z[NUM_ROB_VERTICES];
-extern __constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
+extern __constant__ float base_rob_x[792];
+extern __constant__ float base_rob_y[792];
+extern __constant__ float base_rob_z[792];
+extern __constant__ int base_rob_tri_v1[1008];
+extern __constant__ int base_rob_tri_v2[1008];
+extern __constant__ int base_rob_tri_v3[1008];
+extern __constant__ float base_obs_x[792];
+extern __constant__ float base_obs_y[792]; 
+extern __constant__ float base_obs_z[792];
+extern __constant__ int base_obs_tri_v1[1008];
+extern __constant__ int base_obs_tri_v2[1008];
+extern __constant__ int base_obs_tri_v3[1008];
 #endif
 
 __device__ Eigen::Matrix4f createTransformationMatrix(const Configuration config) {
@@ -343,7 +343,7 @@ void broadPhaseFused_sep(std::vector<Configuration> &configs, bool *valid_conf, 
     dim3 thread(COARSEN_SZ, CONFS_PER_BLOCK, 1);
 
     narrowPhaseKernel_coarse<<<(configs.size() - 1) / CONFS_PER_BLOCK + 1, thread>>>(
-        configs.size(), MAX_NUM_ROBOT_TRIANGLES, NUM_ROB_VERTICES, MAX_NUM_ROBOT_TRIANGLES, NUM_ROB_VERTICES, 
+        configs.size(), 1008, 792, 1008, 792, 
         d_rob_transformed_points_x, d_rob_transformed_points_y, d_rob_transformed_points_z,
         d_valid_conf);
 

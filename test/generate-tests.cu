@@ -25,7 +25,7 @@ int main(int argc, char* argv[]){
     createAlphaBotConfigurations(model_path, confs, num_confs_in_collision, total_num_confs);
 
     std::vector<ConfigurationTagged> tagged(total_num_confs);
-    checkConfsCPU(tagged, confs);
+    checkConfsCPU(tagged, confs, model_path, "./data/models/alpha1.0/obstacle.obj");
     writeConfigurationToFileTagged(tagged, output_file);
 
     int valid = 0, invalid = 0;

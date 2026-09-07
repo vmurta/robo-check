@@ -1,23 +1,133 @@
+#pragma once
 #include "Utils.h"
 #include "Triangle.hu"
 #include <vector>
 
 BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 5);
 
-// Bundles the triangle-level data needed by the narrow phase alongside the BVH
-struct MeshData {
-    std::vector<Eigen::Vector3f> vertices;
-    std::vector<Triangle> triangles;
-};
+// Runs the 15 OBB separating-axis tests. Returns true when the two boxes
+// overlap, false when a separating axis proves them disjoint.
+__device__ __forceinline__ bool obbOverlap(const Eigen::Vector3f& a, const Eigen::Vector3f& b,
+                                           const Eigen::Matrix3f& B, const Eigen::Matrix3f& Bf,
+                                           const Eigen::Vector3f& T) {
+    float t;
 
-__global__ void d_bvh_naive   ( const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
-                                const Eigen::Matrix3f* pR_rob, const Eigen::Vector3f* pT_rob,
-                                const Eigen::Vector3f* pObs_dim, const Eigen::Vector3f* pRob_dim,
-                                const Eigen::Matrix3f* pRob_conf_rot, const Eigen::Vector3f* pRob_conf_trans,
-                                const int16_t* pObs_first_child, const int16_t* pRob_first_child,
-                                const Eigen::Vector3f *pRob_verts, const Triangle *pRob_tris, size_t num_rob_nodes,
-                                const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris, size_t num_obs_nodes,
-                                bool* pdisjoint);
+    t = fabsf(T[0]);
+    if (t > (a[0] + Bf.row(0).dot(b))) return false;
+
+    t = fabsf(B.col(0).dot(T));
+    if (t > (b[0] + Bf.col(0).dot(a))) return false;
+
+    t = fabsf(T[1]);
+    if (t > (a[1] + Bf.row(1).dot(b))) return false;
+
+    t = fabsf(T[2]);
+    if (t > (a[2] + Bf.row(2).dot(b))) return false;
+
+    t = fabsf(B.col(1).dot(T));
+    if (t > (b[1] + Bf.col(1).dot(a))) return false;
+
+    t = fabsf(B.col(2).dot(T));
+    if (t > (b[2] + Bf.col(2).dot(a))) return false;
+
+    t = fabsf(T[2] * B(1, 0) - T[1] * B(2, 0));
+    if (t > (a[1] * Bf(2, 0) + a[2] * Bf(1, 0) +
+             b[1] * Bf(0, 2) + b[2] * Bf(0, 1))) return false;
+
+    t = fabsf(T[2] * B(1, 1) - T[1] * B(2, 1));
+    if (t > (a[1] * Bf(2, 1) + a[2] * Bf(1, 1) +
+             b[0] * Bf(0, 2) + b[2] * Bf(0, 0))) return false;
+
+    t = fabsf(T[2] * B(1, 2) - T[1] * B(2, 2));
+    if (t > (a[1] * Bf(2, 2) + a[2] * Bf(1, 2) +
+             b[0] * Bf(0, 1) + b[1] * Bf(0, 0))) return false;
+
+    t = fabsf(T[0] * B(2, 0) - T[2] * B(0, 0));
+    if (t > (a[0] * Bf(2, 0) + a[2] * Bf(0, 0) +
+             b[1] * Bf(1, 2) + b[2] * Bf(1, 1))) return false;
+
+    t = fabsf(T[0] * B(2, 1) - T[2] * B(0, 1));
+    if (t > (a[0] * Bf(2, 1) + a[2] * Bf(0, 1) +
+             b[0] * Bf(1, 2) + b[2] * Bf(1, 0))) return false;
+
+    t = fabsf(T[0] * B(2, 2) - T[2] * B(0, 2));
+    if (t > (a[0] * Bf(2, 2) + a[2] * Bf(0, 2) +
+             b[0] * Bf(1, 1) + b[1] * Bf(1, 0))) return false;
+
+    t = fabsf(T[1] * B(0, 0) - T[0] * B(1, 0));
+    if (t > (a[0] * Bf(1, 0) + a[1] * Bf(0, 0) +
+             b[1] * Bf(2, 2) + b[2] * Bf(2, 1))) return false;
+
+    t = fabsf(T[1] * B(0, 1) - T[0] * B(1, 1));
+    if (t > (a[0] * Bf(1, 1) + a[1] * Bf(0, 1) +
+             b[0] * Bf(2, 2) + b[2] * Bf(2, 0))) return false;
+
+    t = fabsf(T[1] * B(0, 2) - T[0] * B(1, 2));
+    if (t > (a[0] * Bf(1, 2) + a[1] * Bf(0, 2) +
+             b[0] * Bf(2, 1) + b[1] * Bf(2, 0))) return false;
+
+    return true;
+}
+
+// Computes the relative transform of the robot OBB (A) with respect to the
+// obstacle OBB (B) for one robot configuration, as plain scalar math fused
+// with the |R|+epsilon pre-pass. Avoids the temporaries of the equivalent
+// Eigen expression tree in the per-node hot path.
+__device__ __forceinline__ void computeRelTransform(const Eigen::Matrix3f& R_obs, const Eigen::Vector3f& T_obs,
+                                                    const Eigen::Matrix3f& R_rob, const Eigen::Vector3f& T_rob,
+                                                    const Eigen::Matrix3f& R_conf, const Eigen::Vector3f& T_conf,
+                                                    const float epsilon,
+                                                    Eigen::Matrix3f& B, Eigen::Matrix3f& Bf, Eigen::Vector3f& T) {
+    // C = R_conf * R_rob
+    const float c00 = R_conf(0,0)*R_rob(0,0) + R_conf(0,1)*R_rob(1,0) + R_conf(0,2)*R_rob(2,0);
+    const float c01 = R_conf(0,0)*R_rob(0,1) + R_conf(0,1)*R_rob(1,1) + R_conf(0,2)*R_rob(2,1);
+    const float c02 = R_conf(0,0)*R_rob(0,2) + R_conf(0,1)*R_rob(1,2) + R_conf(0,2)*R_rob(2,2);
+    const float c10 = R_conf(1,0)*R_rob(0,0) + R_conf(1,1)*R_rob(1,0) + R_conf(1,2)*R_rob(2,0);
+    const float c11 = R_conf(1,0)*R_rob(0,1) + R_conf(1,1)*R_rob(1,1) + R_conf(1,2)*R_rob(2,1);
+    const float c12 = R_conf(1,0)*R_rob(0,2) + R_conf(1,1)*R_rob(1,2) + R_conf(1,2)*R_rob(2,2);
+    const float c20 = R_conf(2,0)*R_rob(0,0) + R_conf(2,1)*R_rob(1,0) + R_conf(2,2)*R_rob(2,0);
+    const float c21 = R_conf(2,0)*R_rob(0,1) + R_conf(2,1)*R_rob(1,1) + R_conf(2,2)*R_rob(2,1);
+    const float c22 = R_conf(2,0)*R_rob(0,2) + R_conf(2,1)*R_rob(1,2) + R_conf(2,2)*R_rob(2,2);
+
+    // B = R_obs^T * C
+    const float b00 = R_obs(0,0)*c00 + R_obs(1,0)*c10 + R_obs(2,0)*c20;
+    const float b01 = R_obs(0,0)*c01 + R_obs(1,0)*c11 + R_obs(2,0)*c21;
+    const float b02 = R_obs(0,0)*c02 + R_obs(1,0)*c12 + R_obs(2,0)*c22;
+    const float b10 = R_obs(0,1)*c00 + R_obs(1,1)*c10 + R_obs(2,1)*c20;
+    const float b11 = R_obs(0,1)*c01 + R_obs(1,1)*c11 + R_obs(2,1)*c21;
+    const float b12 = R_obs(0,1)*c02 + R_obs(1,1)*c12 + R_obs(2,1)*c22;
+    const float b20 = R_obs(0,2)*c00 + R_obs(1,2)*c10 + R_obs(2,2)*c20;
+    const float b21 = R_obs(0,2)*c01 + R_obs(1,2)*c11 + R_obs(2,2)*c21;
+    const float b22 = R_obs(0,2)*c02 + R_obs(1,2)*c12 + R_obs(2,2)*c22;
+
+    B(0,0) = b00; B(0,1) = b01; B(0,2) = b02;
+    B(1,0) = b10; B(1,1) = b11; B(1,2) = b12;
+    B(2,0) = b20; B(2,1) = b21; B(2,2) = b22;
+
+    Bf(0,0) = fabsf(b00) + epsilon; Bf(0,1) = fabsf(b01) + epsilon; Bf(0,2) = fabsf(b02) + epsilon;
+    Bf(1,0) = fabsf(b10) + epsilon; Bf(1,1) = fabsf(b11) + epsilon; Bf(1,2) = fabsf(b12) + epsilon;
+    Bf(2,0) = fabsf(b20) + epsilon; Bf(2,1) = fabsf(b21) + epsilon; Bf(2,2) = fabsf(b22) + epsilon;
+
+    // T_world = T_conf + R_conf * T_rob - T_obs
+    const float tw0 = T_conf(0) + R_conf(0,0)*T_rob(0) + R_conf(0,1)*T_rob(1) + R_conf(0,2)*T_rob(2) - T_obs(0);
+    const float tw1 = T_conf(1) + R_conf(1,0)*T_rob(0) + R_conf(1,1)*T_rob(1) + R_conf(1,2)*T_rob(2) - T_obs(1);
+    const float tw2 = T_conf(2) + R_conf(2,0)*T_rob(0) + R_conf(2,1)*T_rob(1) + R_conf(2,2)*T_rob(2) - T_obs(2);
+
+    // T = T_world^T * R_obs
+    T(0) = tw0*R_obs(0,0) + tw1*R_obs(1,0) + tw2*R_obs(2,0);
+    T(1) = tw0*R_obs(0,1) + tw1*R_obs(1,1) + tw2*R_obs(2,1);
+    T(2) = tw0*R_obs(0,2) + tw1*R_obs(1,2) + tw2*R_obs(2,2);
+}
+
+__global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, const Eigen::Vector3f* __restrict__ pT_obs,
+                                const Eigen::Matrix3f* __restrict__ pR_rob, const Eigen::Vector3f* __restrict__ pT_rob,
+                                const Eigen::Vector3f* __restrict__ pObs_dim, const Eigen::Vector3f* __restrict__ pRob_dim,
+                                const Eigen::Matrix3f* __restrict__ pRob_conf_rot, const Eigen::Vector3f* __restrict__ pRob_conf_trans,
+                                const int16_t* __restrict__ pObs_first_child, const int16_t* __restrict__ pRob_first_child,
+                                const Eigen::Vector3f * __restrict__ pRob_verts, const Triangle * __restrict__ pRob_tris, size_t num_rob_nodes,
+                                const Eigen::Vector3f * __restrict__ pObs_verts, const Triangle * __restrict__ pObs_tris, size_t num_obs_nodes,
+                                bool* __restrict__ pdisjoint, size_t num_confs, uint32_t* __restrict__ g_next_conf,
+                                unsigned long long* __restrict__ d_phase);
 
 // Checks the given configurations for collisions against the obstacle.
 // Returns one entry per configuration: true if the configuration is valid (no collision).

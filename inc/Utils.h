@@ -100,6 +100,11 @@ struct AABB
     float z_max;
 };
 
+struct MeshData {
+    std::vector<Eigen::Vector3f> vertices;
+    std::vector<Triangle> triangles;
+};
+
 struct OBB_soa {
     Eigen::Matrix3f *pR; // rotation matrix
     Eigen::Vector3f *pT; // translation vector
@@ -198,26 +203,6 @@ struct BVNode_soa : OBB_soa {
     }
 
 };
-
-//TODO: move these somewhere outside of Utils.h
-#define NUM_ROB_VERTICES 792
-#define MAX_NUM_ROBOT_TRIANGLES 1008
-extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ float base_rob_x[NUM_ROB_VERTICES];
-extern __constant__ float base_rob_y[NUM_ROB_VERTICES];
-extern __constant__ float base_rob_z[NUM_ROB_VERTICES];
-extern __constant__ int base_rob_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_rob_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_rob_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ float base_obs_x[NUM_ROB_VERTICES];
-extern __constant__ float base_obs_y[NUM_ROB_VERTICES]; 
-extern __constant__ float base_obs_z[NUM_ROB_VERTICES];
-extern __constant__ int base_obs_tri_v1[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_obs_tri_v2[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ int base_obs_tri_v3[MAX_NUM_ROBOT_TRIANGLES];
 
 void writeConfigurationToFileTagged(const std::vector<ConfigurationTagged> &confs, const std::string& filename);
 

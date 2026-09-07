@@ -302,15 +302,6 @@ __host__ __device__ float compute_parametric_variable_sep(const float v0_x, cons
 }
 
 
-// #ifndef COALESCE
-/***************************************************************************************************************************************/
-
-extern __constant__ Eigen::Vector3f base_robot_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_robot_triangles[MAX_NUM_ROBOT_TRIANGLES];
-extern __constant__ Eigen::Vector3f base_obs_vertices[NUM_ROB_VERTICES];
-extern __constant__ Triangle base_obs_triangles[MAX_NUM_ROBOT_TRIANGLES];
-
-
 
 __host__ __device__ bool is_coplanar(const Eigen::Vector3f N1, const float d1, const Eigen::Vector3f N2, const float d2) {
     float ratio;
@@ -565,7 +556,6 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
 
     Eigen::Vector3d distO = compute_signed_dists(Nr, dr, obs_v1, obs_v2, obs_v3);
 
-    // Eigen::Vector3f distO = compute_signed_dists(Nr, dr, base_obs_vertices[obs_tri.v1], base_obs_vertices[obs_tri.v2], base_obs_vertices[obs_tri.v3]);
     if (no_overlap(distO)) {
         return true;
     }
@@ -618,4 +608,189 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
         req_coplanar = false;
         return false;
     }
+}
+
+// Float version of triangles_valid: same algorithm as the double version, but
+// in single precision (consumer GPUs execute FP64 at 1/64 the FP32 rate).
+//
+// Algebraic rearrangements to cut float noise:
+//  - plane dists are computed as N.(p_i - plane_origin) with the origin being
+//    the vertex the plane was built from (d = 0 by construction), avoiding the
+//    classic N.p_i + d cancellation of two ~|N||p| terms. d is only formed for
+//    the coplanarity test and the intersection line, where its relative
+//    precision is fine.
+//  - D is normalized (the t-interval test is invariant to a common scaling of
+//    D): t = D.(V-O) then scales with |V-O| instead of |N1||N2||p| (~1e8 in
+//    observed tangencies), collapsing absolute float noise by ~9 orders.
+//  - dot products use fused multiply-adds.
+//
+// Near-tangency verdicts (double's 1e-7 margin on huge t values, ~1e-16
+// relative) are still below float resolution, so decisions made within an
+// error-aware band of the boundary fall back to the double implementation.
+// The band grows with the conditioning K = dscale/|d0-d1| of the
+// d0/(d0-d1) divisions, so ill-conditioned pairs are double-checked while the
+// common case keeps a tight band.
+__device__ bool triangles_valid_f(const Eigen::Vector3f& rob_v1, const Eigen::Vector3f& rob_v2, const Eigen::Vector3f& rob_v3,
+                                  const Eigen::Vector3f& obs_v1, const Eigen::Vector3f& obs_v2, const Eigen::Vector3f& obs_v3) {
+    bool borderline = false;
+
+    // ---- robot plane: origin at rob_v1, N = (v2-v1) x (v3-v1), d = 0 by construction ----
+    const float e1x = rob_v2(0) - rob_v1(0), e1y = rob_v2(1) - rob_v1(1), e1z = rob_v2(2) - rob_v1(2);
+    const float e2x = rob_v3(0) - rob_v1(0), e2y = rob_v3(1) - rob_v1(1), e2z = rob_v3(2) - rob_v1(2);
+    const float Nr_x = e1y*e2z - e1z*e2y;
+    const float Nr_y = e1z*e2x - e1x*e2z;
+    const float Nr_z = e1x*e2y - e1y*e2x;
+
+    // dists of obs verts to the robot plane: Nr . (obs_i - rob_v1), no big-term cancellation
+    const float q1x = obs_v1(0) - rob_v1(0), q1y = obs_v1(1) - rob_v1(1), q1z = obs_v1(2) - rob_v1(2);
+    const float q2x = obs_v2(0) - rob_v1(0), q2y = obs_v2(1) - rob_v1(1), q2z = obs_v2(2) - rob_v1(2);
+    const float q3x = obs_v3(0) - rob_v1(0), q3y = obs_v3(1) - rob_v1(1), q3z = obs_v3(2) - rob_v1(2);
+    const float distO_x = fmaf(Nr_x, q1x, fmaf(Nr_y, q1y, Nr_z * q1z));
+    const float distO_y = fmaf(Nr_x, q2x, fmaf(Nr_y, q2y, Nr_z * q2z));
+    const float distO_z = fmaf(Nr_x, q3x, fmaf(Nr_y, q3y, Nr_z * q3z));
+    const float qmax = fmaxf(fmaxf(fabsf(q1x), fmaxf(fabsf(q1y), fabsf(q1z))),
+                    fmaxf(fmaxf(fabsf(q2x), fmaxf(fabsf(q2y), fabsf(q2z))),
+                          fmaxf(fabsf(q3x), fmaxf(fabsf(q3y), fabsf(q3z)))));
+    {
+        const float m  = fmaxf(fabsf(distO_x), fmaxf(fabsf(distO_y), fabsf(distO_z)));
+        const float mn = fminf(fabsf(distO_x), fminf(fabsf(distO_y), fabsf(distO_z)));
+        const float noise = sqrtf(fmaf(Nr_x, Nr_x, fmaf(Nr_y, Nr_y, Nr_z * Nr_z))) * qmax;
+        if (mn < 1e-5f * m || mn < 1e-5f * noise) {
+            borderline = true;
+        }
+    }
+
+    if (no_overlap_sep(distO_x, distO_y, distO_z)) {
+        return borderline ? triangles_valid(rob_v1, rob_v2, rob_v3, obs_v1, obs_v2, obs_v3) : true;
+    }
+
+    // ---- obstacle plane: origin at obs_v1 ----
+    const float f1x = obs_v2(0) - obs_v1(0), f1y = obs_v2(1) - obs_v1(1), f1z = obs_v2(2) - obs_v1(2);
+    const float f2x = obs_v3(0) - obs_v1(0), f2y = obs_v3(1) - obs_v1(1), f2z = obs_v3(2) - obs_v1(2);
+    const float No_x = f1y*f2z - f1z*f2y;
+    const float No_y = f1z*f2x - f1x*f2z;
+    const float No_z = f1x*f2y - f1y*f2x;
+
+    const float r1x = rob_v1(0) - obs_v1(0), r1y = rob_v1(1) - obs_v1(1), r1z = rob_v1(2) - obs_v1(2);
+    const float r2x = rob_v2(0) - obs_v1(0), r2y = rob_v2(1) - obs_v1(1), r2z = rob_v2(2) - obs_v1(2);
+    const float r3x = rob_v3(0) - obs_v1(0), r3y = rob_v3(1) - obs_v1(1), r3z = rob_v3(2) - obs_v1(2);
+    const float distR_x = fmaf(No_x, r1x, fmaf(No_y, r1y, No_z * r1z));
+    const float distR_y = fmaf(No_x, r2x, fmaf(No_y, r2y, No_z * r2z));
+    const float distR_z = fmaf(No_x, r3x, fmaf(No_y, r3y, No_z * r3z));
+    const float rmax = fmaxf(fmaxf(fabsf(r1x), fmaxf(fabsf(r1y), fabsf(r1z))),
+                    fmaxf(fmaxf(fabsf(r2x), fmaxf(fabsf(r2y), fabsf(r2z))),
+                          fmaxf(fabsf(r3x), fmaxf(fabsf(r3y), fabsf(r3z)))));
+    {
+        const float m  = fmaxf(fabsf(distR_x), fmaxf(fabsf(distR_y), fabsf(distR_z)));
+        const float mn = fminf(fabsf(distR_x), fminf(fabsf(distR_y), fabsf(distR_z)));
+        const float noise = sqrtf(fmaf(No_x, No_x, fmaf(No_y, No_y, No_z * No_z))) * rmax;
+        if (mn < 1e-5f * m || mn < 1e-5f * noise) {
+            borderline = true;
+        }
+    }
+
+    if (no_overlap_sep(distR_x, distR_y, distR_z)) {
+        return borderline ? triangles_valid(rob_v1, rob_v2, rob_v3, obs_v1, obs_v2, obs_v3) : true;
+    }
+
+    // Plane constants, formed only for the coplanarity test and intersection line.
+    const float d_r = -fmaf(Nr_x, rob_v1(0), fmaf(Nr_y, rob_v1(1), Nr_z * rob_v1(2)));
+    const float d_o = -fmaf(No_x, obs_v1(0), fmaf(No_y, obs_v1(1), No_z * obs_v1(2)));
+
+    // coplanar triangles are rare and cheap to double-check
+    if (is_coplanar_sep(Nr_x, Nr_y, Nr_z, d_r, No_x, No_y, No_z, d_o)) {
+        // double version conservatively reports a collision
+        return triangles_valid(rob_v1, rob_v2, rob_v3, obs_v1, obs_v2, obs_v3);
+    }
+
+    float Dx, Dy, Dz, Ox, Oy, Oz;
+    compute_intersect_line_sep(Nr_x, Nr_y, Nr_z, d_r, No_x, No_y, No_z, d_o,
+                               &Dx, &Dy, &Dz, &Ox, &Oy, &Oz);
+
+    // Normalize D: the interval test is invariant to a common scaling of D.
+    const float Dlen = sqrtf(fmaf(Dx, Dx, fmaf(Dy, Dy, Dz * Dz)));
+    if (!(Dlen > 1e-12f)) {
+        // (nearly) parallel planes: degenerate, defer to the reference
+        return triangles_valid(rob_v1, rob_v2, rob_v3, obs_v1, obs_v2, obs_v3);
+    }
+    const float invD = 1.0f / Dlen;
+    Dx *= invD; Dy *= invD; Dz *= invD;
+
+    int rv1i, rv2i, rv3i;
+    canonicalize_triangle_sep(distR_x, distR_y, distR_z, &rv1i, &rv2i, &rv3i);
+    int ov1i, ov2i, ov3i;
+    canonicalize_triangle_sep(distO_x, distO_y, distO_z, &ov1i, &ov2i, &ov3i);
+
+    // Apply the canonical ordering to robot vertices and signed dists
+    const Eigen::Vector3f* ra; const Eigen::Vector3f* rb; const Eigen::Vector3f* rc;
+    float rda, rdb, rdc;
+    if (rv1i == 1) {                    // (1,0,2): swap v1/v2
+        ra = &rob_v2; rb = &rob_v1; rc = &rob_v3;
+        rda = distR_y; rdb = distR_x; rdc = distR_z;
+    } else if (rv2i == 2) {             // (0,2,1): swap v2/v3
+        ra = &rob_v1; rb = &rob_v3; rc = &rob_v2;
+        rda = distR_x; rdb = distR_z; rdc = distR_y;
+    } else {                            // (0,1,2): identity
+        ra = &rob_v1; rb = &rob_v2; rc = &rob_v3;
+        rda = distR_x; rdb = distR_y; rdc = distR_z;
+    }
+
+    // Apply the canonical ordering to obstacle vertices and signed dists
+    const Eigen::Vector3f* oa; const Eigen::Vector3f* ob; const Eigen::Vector3f* oc;
+    float oda, odb, odc;
+    if (ov1i == 1) {
+        oa = &obs_v2; ob = &obs_v1; oc = &obs_v3;
+        oda = distO_y; odb = distO_x; odc = distO_z;
+    } else if (ov2i == 2) {
+        oa = &obs_v1; ob = &obs_v3; oc = &obs_v2;
+        oda = distO_x; odb = distO_z; odc = distO_y;
+    } else {
+        oa = &obs_v1; ob = &obs_v2; oc = &obs_v3;
+        oda = distO_x; odb = distO_y; odc = distO_z;
+    }
+
+    float t_r01 = compute_parametric_variable_sep((*ra)(0), (*ra)(1), (*ra)(2),
+                                                  (*rb)(0), (*rb)(1), (*rb)(2),
+                                                  rda, rdb, Dx, Dy, Dz, Ox, Oy, Oz);
+    float t_r12 = compute_parametric_variable_sep((*rb)(0), (*rb)(1), (*rb)(2),
+                                                  (*rc)(0), (*rc)(1), (*rc)(2),
+                                                  rdb, rdc, Dx, Dy, Dz, Ox, Oy, Oz);
+    float t_o01 = compute_parametric_variable_sep((*oa)(0), (*oa)(1), (*oa)(2),
+                                                  (*ob)(0), (*ob)(1), (*ob)(2),
+                                                  oda, odb, Dx, Dy, Dz, Ox, Oy, Oz);
+    float t_o12 = compute_parametric_variable_sep((*ob)(0), (*ob)(1), (*ob)(2),
+                                                  (*oc)(0), (*oc)(1), (*oc)(2),
+                                                  odb, odc, Dx, Dy, Dz, Ox, Oy, Oz);
+
+    bool f_verdict;
+    const float gap1 = fminf(t_r01, t_r12) - fmaxf(t_o01, t_o12);
+    const float gap2 = fminf(t_o01, t_o12) - fmaxf(t_r01, t_r12);
+    // There is no overlap
+    if (gap1 > 1e-7f) {
+        f_verdict = true;
+    // Also no overlap
+    } else if (gap2 > 1e-7f) {
+        f_verdict = true;
+    // There is overlap
+    } else {
+        f_verdict = false;
+    }
+
+    {
+        // Error-aware borderline band: grows with the conditioning of the
+        // d0/(d0-d1) divisions (K = dscale/|d0-d1|), so ill-conditioned pairs
+        // are double-checked while the common case keeps a tight band.
+        const float dscale_r = fmaxf(fabsf(rda), fmaxf(fabsf(rdb), fabsf(rdc)));
+        const float dscale_o = fmaxf(fabsf(oda), fmaxf(fabsf(odb), fabsf(odc)));
+        const float Kr = dscale_r / fmaxf(fminf(fabsf(rda - rdb), fabsf(rdb - rdc)), 1e-30f);
+        const float Ko = dscale_o / fmaxf(fminf(fabsf(oda - odb), fabsf(odb - odc)), 1e-30f);
+        const float K  = fmaxf(Kr, Ko);
+        const float t_max = fmaxf(fmaxf(fabsf(t_r01), fabsf(t_r12)), fmaxf(fabsf(t_o01), fabsf(t_o12)));
+        const float band = fmaf(1e-6f * K + 1e-5f, t_max, 1e-5f * fmaxf(qmax, rmax));
+        if (fabsf(gap1) < band || fabsf(gap2) < band) {
+            borderline = true;
+        }
+    }
+
+    return borderline ? triangles_valid(rob_v1, rob_v2, rob_v3, obs_v1, obs_v2, obs_v3) : f_verdict;
 }

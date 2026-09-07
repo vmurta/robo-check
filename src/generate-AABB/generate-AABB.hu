@@ -1,17 +1,10 @@
 /*
-Function signatures and support for the AABB generation kernels
+Function signatures and support for the AABB generation helpers
 */
 
 #pragma once
 
 #include "../Utils.h"
-
-#define AABB_BLOCK_SIZE 128
-#define AABB_BLOCK_SIZE_X 792
-#define AABB_BLOCK_SIZE_Y 16
-
-// generateAABB- Generate AABBs for all configurations parallelly
-void generateAABB(Eigen::Vector3f* vertices, unsigned int numVertices, unsigned int numConfigs, AABB* botBounds);
 
 //helper function to generate a single aabb for a single configuration
 void generateAABBBaseline(std::vector<float> &x, std::vector<float> &y, std::vector<float> &z, AABB* botBounds);
@@ -19,9 +12,3 @@ void generateAABBBaseline(std::vector<float> &x, std::vector<float> &y, std::vec
 
 // generateAABBBaseline- Generate AABBs for all configurations serially
 void generateAABBBaseline(Eigen::Vector3f* vertices, unsigned int numVertices, unsigned int numConfigs, AABB* botBounds);
-
-__global__ void generateAABBPrimitiveKernel(Eigen::Vector3f* vertices, unsigned int numVertices, 
-                    unsigned int numConfigs, AABB* botBounds);
-
-__global__ void generateAABBKernel(Eigen::Vector3f* vertices, unsigned int numVertices, 
-                    unsigned int numConfigs, AABB* botBounds);
