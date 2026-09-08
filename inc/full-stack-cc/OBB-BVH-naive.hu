@@ -3,7 +3,10 @@
 #include "Triangle.hu"
 #include <vector>
 
-BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 5);
+BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 2);
+
+// Legacy FCL-based builder (eigen-fitted leaf OBBs), kept for comparison.
+BVNode_soa BVH_fcl_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 2);
 
 // Runs the 15 OBB separating-axis tests. Returns true when the two boxes
 // overlap, false when a separating axis proves them disjoint.
@@ -124,9 +127,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
                                 const Eigen::Vector3f* __restrict__ pObs_dim, const Eigen::Vector3f* __restrict__ pRob_dim,
                                 const Eigen::Matrix3f* __restrict__ pRob_conf_rot, const Eigen::Vector3f* __restrict__ pRob_conf_trans,
                                 const int16_t* __restrict__ pObs_first_child, const int16_t* __restrict__ pRob_first_child,
+                                const float* __restrict__ pObs_a, const float* __restrict__ pRob_a,
                                 const Eigen::Vector3f * __restrict__ pRob_verts, const Triangle * __restrict__ pRob_tris, size_t num_rob_nodes,
                                 const Eigen::Vector3f * __restrict__ pObs_verts, const Triangle * __restrict__ pObs_tris, size_t num_obs_nodes,
-                                bool* __restrict__ pdisjoint, size_t num_confs, uint32_t* __restrict__ g_next_conf,
+                                uint32_t* __restrict__ pdisjoint, size_t num_confs, uint32_t* __restrict__ g_next_conf,
                                 unsigned long long* __restrict__ d_phase);
 
 // Checks the given configurations for collisions against the obstacle.

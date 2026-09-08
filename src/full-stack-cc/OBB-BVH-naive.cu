@@ -1,7 +1,7 @@
 #include "OBB-BVH-naive.hu"
 
 //TODO: Make a custom data type for this struct
-BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2){
+BVNode_soa BVH_fcl_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2){
     // Load Robot
     std::vector<fcl::Vector3f> rob_vertices;
     std::vector<fcl::Triangle> rob_triangles;
@@ -160,49 +160,415 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
     return result;
 }
 
+// ===========================================================================
+// Hand-rolled OBB BVH builder.
+//
+// Leaves are the minimum bounding rectangles of single triangles in the style
+// of Chang & Kim 2009 ("Efficient triangle-triangle intersection test for
+// OBB-based collision detection"): the rectangle shares the triangle's longest
+// edge, the rectangle plane is the triangle plane, and the triangle's third
+// vertex sits at local coordinate (a, dy, 0) with the shared edge at y = -dy.
+// That makes the paper's cheap triangle test applicable later, with the
+// relative OBB transform from the traversal reused instead of recomputed.
+//
+// Internal nodes are tight OBBs fitted by PCA over their children's corners
+// (conservative by construction: extents are the min/max projections of all
+// corner points). The hierarchy is a balanced binary tree (median split on
+// the longest axis of the triangle centroid AABB); every two binary levels
+// become one n-ary level, so each internal n-ary node has exactly 4 child
+// slots and leaves only sit at the deepest level (a shallow binary leaf
+// expands into [leaf, dummy], matching the kernel's traversal).
+//
+// Node encoding matches fcl::BVNodeBase and the kernel's expectations:
+//   first_child > 0 : index of the first child (children consecutive)
+//   first_child < 0 : -(triangle index + 1)
+//   first_child = 0 : dummy (padding)
+// ===========================================================================
+namespace {
 
-__device__ __forceinline__ bool areTrianglesDisjoint (    uint32_t &num_bad_leaves, uint16_t *bad_rob_leaves, uint16_t *bad_obs_leaves, 
-                                        const Eigen::Matrix3f &R_conf, const Eigen::Vector3f &T_conf,
-                                        const Eigen::Vector3f *pRob_verts, const Triangle *pRob_tris,
-                                        const Eigen::Vector3f *pObs_verts, const Triangle *pObs_tris)
+struct LeafRect {
+    Eigen::Matrix3f R;
+    Eigen::Vector3f T;
+    Eigen::Vector3f dim;
+    float a;
+    Eigen::Vector3f centroid;
+    Eigen::Vector3f p1, p2, p3; // world-space triangle vertices
+};
 
-{
-    __shared__ bool all_disjoint;
-
-    if (threadIdx.x == 0) {
-        all_disjoint = true;
+// Chang & Kim minimum rectangle for one triangle. The longest edge is chosen
+// as the shared edge (valid for any triangle; minimum-area for obtuse ones).
+LeafRect makeLeafRect(const Eigen::Vector3f& p1, const Eigen::Vector3f& p2, const Eigen::Vector3f& p3) {
+    Eigen::Vector3f va = p1, vb = p2, vc = p3;
+    const float l12 = (p2 - p1).squaredNorm();
+    const float l23 = (p3 - p2).squaredNorm();
+    const float l31 = (p1 - p3).squaredNorm();
+    if (l23 > l12 && l23 >= l31) {
+        va = p2; vb = p3; vc = p1;
+    } else if (l31 > l12) {
+        va = p3; vb = p1; vc = p2;
     }
-    __syncthreads();
 
-    size_t leaf_idx = threadIdx.x;
-    while(leaf_idx < num_bad_leaves){
-        int rob_tri_idx = bad_rob_leaves[leaf_idx];
-        int obs_tri_idx = bad_obs_leaves[leaf_idx];
+    const Eigen::Vector3f edge = vb - va;
+    const float edge_len = edge.norm();
+    const Eigen::Vector3f rx = edge / edge_len;
 
-        Triangle rob_tri = pRob_tris[rob_tri_idx];
-        Triangle obs_tri = pObs_tris[obs_tri_idx];
-        Eigen::Vector3f rob_v0 = pRob_verts[rob_tri.v1];
-        Eigen::Vector3f rob_v1 = pRob_verts[rob_tri.v2];
-        Eigen::Vector3f rob_v2 = pRob_verts[rob_tri.v3];
-        Eigen::Vector3f obs_v0 = pObs_verts[obs_tri.v1];
-        Eigen::Vector3f obs_v1 = pObs_verts[obs_tri.v2];
-        Eigen::Vector3f obs_v2 = pObs_verts[obs_tri.v3];
-
-        // transform robot triangle vertices to world frame
-        rob_v0 = R_conf * rob_v0 + T_conf;
-        rob_v1 = R_conf * rob_v1 + T_conf;
-        rob_v2 = R_conf * rob_v2 + T_conf;
-
-        bool valid = triangles_valid_f(rob_v0, rob_v1, rob_v2, obs_v0, obs_v1, obs_v2);
-
-        if (!valid) {
-            all_disjoint = false;
-        }
-        leaf_idx += blockDim.x;
+    Eigen::Vector3f rz = (vb - va).cross(vc - va);
+    const float nlen = rz.norm();
+    if (nlen > 1e-12f) {
+        rz /= nlen;
+    } else {
+        // Degenerate (zero-area) triangle: build an arbitrary right-handed
+        // frame from rx so the pipeline still gets a valid (flat) rectangle.
+        Eigen::Vector3f aux = (fabsf(rx(2)) < 0.9f) ? Eigen::Vector3f(0, 0, 1) : Eigen::Vector3f(1, 0, 0);
+        rz = rx.cross(aux).normalized();
     }
-    __syncthreads();
-    return all_disjoint;
+    Eigen::Vector3f ry = rz.cross(rx);
+
+    const Eigen::Vector3f center = (va + vb) * 0.5f;
+    float h = (vc - center).dot(ry);
+    if (h < 0.0f) {
+        ry = -ry;
+        h = -h;
+    }
+
+    LeafRect r;
+    r.R.col(0) = rx;
+    r.R.col(1) = ry;
+    r.R.col(2) = rz;
+    r.T = center;
+    r.dim = Eigen::Vector3f(edge_len * 0.5f, h, 0.0f);
+    r.a = (vc - center).dot(rx);
+    r.centroid = (p1 + p2 + p3) / 3.0f;
+    r.p1 = p1;
+    r.p2 = p2;
+    r.p3 = p3;
+    return r;
 }
+
+struct BinNode {
+    Eigen::Matrix3f R;
+    Eigen::Vector3f T;
+    Eigen::Vector3f dim;
+    float a = 0.0f;
+    int left = -1;
+    int right = -1;
+    int tri = -1;
+};
+
+int buildBinary(const std::vector<LeafRect>& rects, std::vector<int>& order,
+                int begin, int end, std::vector<BinNode>& nodes) {
+    const int idx = (int)nodes.size();
+    nodes.emplace_back();
+    BinNode& n = nodes[idx];
+
+    if (end - begin == 1) {
+        const LeafRect& r = rects[order[begin]];
+        n.R = r.R;
+        n.T = r.T;
+        n.dim = r.dim;
+        n.a = r.a;
+        n.tri = order[begin];
+        return idx;
+    }
+
+    // Binned SAH split along the fitted OBB's longest local axis: the OBB is
+    // fitted first (same vertex-PCA scheme as FCL), triangles are binned by
+    // their centroids projected onto that axis, and the split minimizes
+    // SA(left bins) * nL + SA(right bins) * nR with per-bin world AABBs.
+    // Falls back to a median split for tiny or degenerate nodes.
+    const int count = end - begin;
+
+    // Fit the internal OBB from the subtree's triangle vertices (same scheme
+    // as FCL's eigen fit): tighter than corner-PCA of the two child boxes.
+    const int npts = count * 3;
+    Eigen::Vector3f mean = Eigen::Vector3f::Zero();
+    for (int i = begin; i < end; ++i) {
+        const LeafRect& r = rects[order[i]];
+        mean += r.p1 + r.p2 + r.p3;
+    }
+    mean /= (float)npts;
+
+    Eigen::Matrix3f cov = Eigen::Matrix3f::Zero();
+    for (int i = begin; i < end; ++i) {
+        const LeafRect& r = rects[order[i]];
+        const Eigen::Vector3f* v[3] = {&r.p1, &r.p2, &r.p3};
+        for (int k = 0; k < 3; ++k) {
+            const Eigen::Vector3f d = *v[k] - mean;
+            for (int rr = 0; rr < 3; ++rr)
+                for (int cc = 0; cc < 3; ++cc)
+                    cov(rr, cc) += d(rr) * d(cc);
+        }
+    }
+
+    Eigen::SelfAdjointEigenSolver<Eigen::Matrix3f> es(cov);
+    n.R = es.eigenvectors();
+    if (n.R.determinant() < 0.0f) n.R.col(2) *= -1.0f;
+
+    Eigen::Vector3f plo(FLT_MAX, FLT_MAX, FLT_MAX), phi(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+    for (int i = begin; i < end; ++i) {
+        const LeafRect& r = rects[order[i]];
+        const Eigen::Vector3f* v[3] = {&r.p1, &r.p2, &r.p3};
+        for (int k = 0; k < 3; ++k) {
+            const Eigen::Vector3f local = n.R.transpose() * (*v[k] - mean);
+            plo = plo.cwiseMin(local);
+            phi = phi.cwiseMax(local);
+        }
+    }
+    n.dim = (phi - plo) * 0.5f;
+    n.T = mean + n.R * ((plo + phi) * 0.5f);
+
+    // Split axis: the OBB local axis with the largest extent.
+    int axis = 0;
+    if (n.dim(1) > n.dim(axis)) axis = 1;
+    if (n.dim(2) > n.dim(axis)) axis = 2;
+    const Eigen::Vector3f split_dir = n.R.col(axis);
+
+    std::sort(order.begin() + begin, order.begin() + end, [&](int x, int y) {
+        return rects[x].centroid.dot(split_dir) < rects[y].centroid.dot(split_dir);
+    });
+
+    int mid = (begin + end) / 2;
+    if (count > 8) {
+        float lo = FLT_MAX, hi = -FLT_MAX;
+        for (int i = begin; i < end; ++i) {
+            const float p = rects[order[i]].centroid.dot(split_dir);
+            lo = fminf(lo, p);
+            hi = fmaxf(hi, p);
+        }
+        const float span = hi - lo;
+
+        if (span > 0.0f) {
+            constexpr int NBINS = 12;
+            struct Bin {
+                int cnt = 0;
+                Eigen::Vector3f lo{FLT_MAX, FLT_MAX, FLT_MAX}, hi{-FLT_MAX, -FLT_MAX, -FLT_MAX};
+            };
+            Bin bins[NBINS];
+            const float inv_span = (float)NBINS / span;
+            for (int i = begin; i < end; ++i) {
+                const LeafRect& r = rects[order[i]];
+                int b = (int)((r.centroid.dot(split_dir) - lo) * inv_span);
+                if (b < 0) b = 0;
+                if (b >= NBINS) b = NBINS - 1;
+                bins[b].cnt++;
+                bins[b].lo = bins[b].lo.cwiseMin(r.p1).cwiseMin(r.p2).cwiseMin(r.p3);
+                bins[b].hi = bins[b].hi.cwiseMax(r.p1).cwiseMax(r.p2).cwiseMax(r.p3);
+            }
+
+            float best_cost = FLT_MAX;
+            int best_split = -1;
+            for (int s = 0; s < NBINS - 1; ++s) {
+                Eigen::Vector3f llo(FLT_MAX, FLT_MAX, FLT_MAX), lhi(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+                Eigen::Vector3f rlo(FLT_MAX, FLT_MAX, FLT_MAX), rhi(-FLT_MAX, -FLT_MAX, -FLT_MAX);
+                int nl = 0, nr = 0;
+                for (int b = 0; b <= s; ++b) {
+                    if (!bins[b].cnt) continue;
+                    llo = llo.cwiseMin(bins[b].lo); lhi = lhi.cwiseMax(bins[b].hi); nl += bins[b].cnt;
+                }
+                for (int b = s + 1; b < NBINS; ++b) {
+                    if (!bins[b].cnt) continue;
+                    rlo = rlo.cwiseMin(bins[b].lo); rhi = rhi.cwiseMax(bins[b].hi); nr += bins[b].cnt;
+                }
+                if (nl == 0 || nr == 0) continue;
+                const Eigen::Vector3f le = lhi - llo, re = rhi - rlo;
+                const float saL = 2.0f * (le(0) * le(1) + le(1) * le(2) + le(2) * le(0));
+                const float saR = 2.0f * (re(0) * re(1) + re(1) * re(2) + re(2) * re(0));
+                const float cost = saL * (float)nl + saR * (float)nr;
+                if (cost < best_cost) {
+                    best_cost = cost;
+                    best_split = s;
+                }
+            }
+
+            if (best_split >= 0) {
+                const float split_val = lo + span * (float)(best_split + 1) / (float)NBINS;
+                mid = begin;
+                while (mid < end && rects[order[mid]].centroid.dot(split_dir) < split_val) ++mid;
+                if (mid <= begin) mid = begin + 1;
+                if (mid >= end) mid = end - 1;
+            }
+        }
+    }
+
+    n.left = buildBinary(rects, order, begin, mid, nodes);
+    n.right = buildBinary(rects, order, mid, end, nodes);
+    return idx;
+}
+
+struct NarySlot {
+    Eigen::Matrix3f R;
+    Eigen::Vector3f T;
+    Eigen::Vector3f dim;
+    float a = 0.0f;
+    int16_t first_child = 0;
+    bool internal = false;
+};
+
+} // namespace
+
+BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2) {
+    if (power_of_2 != 2) {
+        std::cerr << "BVH_n_ary_hierarchy_from_mesh: only power_of_2 == 2 (4-ary) is supported by the kernel" << std::endl;
+        exit(1);
+    }
+
+    std::vector<Eigen::Vector3f> vertices;
+    std::vector<Triangle> triangles;
+    loadOBJFile(mesh_path, vertices, triangles);
+    const int num_tris = (int)triangles.size();
+    if (num_tris == 0) {
+        return BVNode_soa(0);
+    }
+
+    // One paper rectangle per triangle, in mesh triangle order (triangle
+    // indices must match the kernel's mesh arrays).
+    std::vector<LeafRect> rects(num_tris);
+    for (int t = 0; t < num_tris; ++t) {
+        rects[t] = makeLeafRect(vertices[triangles[t].v1],
+                                vertices[triangles[t].v2],
+                                vertices[triangles[t].v3]);
+    }
+
+    // Balanced binary tree (median split, OBBs fitted bottom-up).
+    std::vector<int> order(num_tris);
+    for (int i = 0; i < num_tris; ++i) order[i] = i;
+    std::vector<BinNode> bnodes;
+    bnodes.reserve(2 * num_tris);
+    const int broot = buildBinary(rects, order, 0, num_tris, bnodes);
+
+    // Flatten to 4-ary: n-ary level k = binary depth 2k. Each internal binary
+    // node at level k contributes 4 slots: for each binary child c, either
+    // [c.left slot, c.right slot] (c internal) or [leaf slot, dummy] (c leaf).
+    std::vector<std::vector<NarySlot>> levels(1);
+    std::vector<std::vector<int>> bin_of(1); // binary node index of each slot
+
+    NarySlot root;
+    root.R = bnodes[broot].R;
+    root.T = bnodes[broot].T;
+    root.dim = bnodes[broot].dim;
+    root.a = bnodes[broot].a;
+    if (bnodes[broot].tri >= 0) {
+        root.first_child = (int16_t)(-(bnodes[broot].tri + 1));
+        root.internal = false;
+    } else {
+        root.internal = true;
+    }
+    levels[0].push_back(root);
+    bin_of[0].push_back(broot);
+
+    for (size_t k = 0; k < levels.size(); ++k) {
+        bool any_internal = false;
+        for (const NarySlot& s : levels[k]) {
+            if (s.internal) { any_internal = true; break; }
+        }
+        if (!any_internal) break;
+
+        std::vector<NarySlot>& next = levels.emplace_back();
+        std::vector<int>& next_bin = bin_of.emplace_back();
+        int internal_count = 0;
+        for (NarySlot& s : levels[k]) {
+            if (!s.internal) continue;
+            s.first_child = (int16_t)(next.size() + internal_count * 4);
+            ++internal_count;
+        }
+        for (size_t i = 0; i < levels[k].size(); ++i) {
+            const NarySlot& s = levels[k][i];
+            if (!s.internal) continue;
+            const BinNode& b = bnodes[bin_of[k][i]];
+            const int bchildren[2] = {b.left, b.right};
+            for (int c = 0; c < 2; ++c) {
+                const int16_t bc = bchildren[c];
+                if (bc < 0) {
+                    next.emplace_back();
+                    next_bin.push_back(-1);
+                    next.emplace_back();
+                    next_bin.push_back(-1);
+                    continue;
+                }
+                const BinNode& child = bnodes[bc];
+                if (child.tri >= 0) {
+                    NarySlot leaf;
+                    leaf.R = child.R;
+                    leaf.T = child.T;
+                    leaf.dim = child.dim;
+                    leaf.a = child.a;
+                    leaf.first_child = (int16_t)(-(child.tri + 1));
+                    leaf.internal = false;
+                    next.push_back(leaf);
+                    next_bin.push_back(bc);
+                    next.emplace_back();
+                    next_bin.push_back(-1);
+                } else {
+                    const int gc[2] = {child.left, child.right};
+                    for (int g = 0; g < 2; ++g) {
+                        const BinNode& gchild = bnodes[gc[g]];
+                        NarySlot slot;
+                        slot.R = gchild.R;
+                        slot.T = gchild.T;
+                        slot.dim = gchild.dim;
+                        slot.a = gchild.a;
+                        if (gchild.tri >= 0) {
+                            slot.first_child = (int16_t)(-(gchild.tri + 1));
+                            slot.internal = false;
+                        } else {
+                            slot.internal = true;
+                        }
+                        next.push_back(slot);
+                        next_bin.push_back(gc[g]);
+                    }
+                }
+            }
+        }
+    }
+
+    // Serialize level order into the SoA layout. Internal nodes reindex their
+    // level-local first_child (which may be 0; 0 is the kernel's dummy
+    // sentinel, so it cannot be used as an internal pointer); leaves (< 0)
+    // and dummies (0) pass through unchanged.
+    size_t total = 0;
+    for (const auto& lv : levels) total += lv.size();
+    if (total > 32767) {
+        std::cerr << "BVH_n_ary_hierarchy_from_mesh: " << total
+                  << " nodes exceeds int16_t first_child capacity (32767)" << std::endl;
+        exit(1);
+    }
+
+    BVNode_soa result(total);
+    std::vector<size_t> level_base(levels.size());
+    size_t out = 0;
+    for (size_t k = 0; k < levels.size(); ++k) {
+        level_base[k] = out;
+        out += levels[k].size();
+    }
+    for (size_t k = 0; k < levels.size(); ++k) {
+        for (size_t i = 0; i < levels[k].size(); ++i) {
+            const NarySlot& n = levels[k][i];
+            int16_t fc = n.internal ? (int16_t)(n.first_child + level_base[k + 1]) : n.first_child;
+            result.set(level_base[k] + i, n.R, n.T, n.dim, fc, n.a);
+        }
+    }
+
+    // Validate the flattened tree structure (host-side, cheap).
+    for (size_t i = 0; i < total; ++i) {
+        const int16_t fc = result.first_child[i];
+        if (fc > 0) {
+            if (fc + 4 > (int16_t)total) {
+                std::cerr << "BVH validate: node " << i << " first_child " << fc
+                          << " + 4 exceeds " << total << std::endl;
+                exit(1);
+            }
+        } else if (fc < 0) {
+            const int tri = -fc - 1;
+            if (tri < 0 || tri >= num_tris) {
+                std::cerr << "BVH validate: node " << i << " leaf tri " << tri << " out of range" << std::endl;
+                exit(1);
+            }
+        }
+    }
+
+    return result;
+}
+
 
 constexpr int BLOCK_SIZE = 32;
 
@@ -212,12 +578,127 @@ __device__ __forceinline__ unsigned long long globaltimer() {
     asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t));
     return t;
 }
-//assumes BVH of both trees have same depth // <-- does it?? I think currently it detects when something is a leaf appropriately
+
+// Chang & Kim 2009 triangle-triangle test in rectangle-local coordinates.
+// Rect 1 = obstacle leaf (its z-axis is the triangle plane normal), rect 2 =
+// robot leaf at relative rotation B and translation T, both taken straight
+// from the OBB overlap test computed just before this leaf pair was found.
+//
+// Returns  1: triangles intersect
+//          0: disjoint
+//         -1: unreliable (near-plane/tangent/coplanar): caller must fall back
+//             to the full world-frame test.
+__device__ __forceinline__ int paperTriTri(
+    const float dx1, const float dy1, const float a1,
+    const float dx2, const float dy2, const float a2,
+    const Eigen::Matrix3f& B, const Eigen::Vector3f& T) {
+
+    const float rz0 = B(0, 2), rz1 = B(1, 2), rz2 = B(2, 2);
+
+    // Signed distances of the obs (rect 1) vertices from the rob plane.
+    // Vertex layout in the rectangle frame (center at the shared edge
+    // midpoint): p1 = (-dx1, 0, 0), p2 = (dx1, 0, 0), p3 = (a1, dy1, 0).
+    const float d = T(0) * rz0 + T(1) * rz1 + T(2) * rz2;
+    const float dp1 = -dx1 * rz0 - d;
+    const float dp2 =  dx1 * rz0 - d;
+    const float dp3 =  a1  * rz0 + dy1 * rz1 - d;
+
+    // Signed distances of the rob (rect 2) vertices from the obs plane
+    // (z = 0 in the obs rectangle frame); same vertex layout for rect 2.
+    // These are the z-components of the rob vertices in obs coordinates:
+    // B(2,0) and B(2,1) are the z-components of the rob rectangle's rx/ry.
+    const float dq1 = T(2) - dx2 * B(2, 0);
+    const float dq2 = T(2) + dx2 * B(2, 0);
+    const float dq3 = T(2) + a2  * B(2, 0) + dy2 * B(2, 1);
+
+    // Near-plane (and coplanar) configurations are delegated to the full test.
+    const float m1 = fmaxf(fmaxf(fabsf(dp1), fabsf(dp2)), fabsf(dp3));
+    const float mn1 = fminf(fminf(fabsf(dp1), fabsf(dp2)), fabsf(dp3));
+    if (m1 == 0.0f || mn1 < 1e-5f * m1) return -1;
+
+    const float m2 = fmaxf(fmaxf(fabsf(dq1), fabsf(dq2)), fabsf(dq3));
+    const float mn2 = fminf(fminf(fabsf(dq1), fabsf(dq2)), fabsf(dq3));
+    if (m2 == 0.0f || mn2 < 1e-5f * m2) return -1;
+
+    // Reject when either triangle lies entirely on one side of the other's
+    // plane.
+    if (dp1 > 0.0f && dp2 > 0.0f && dp3 > 0.0f) return 0;
+    if (dp1 < 0.0f && dp2 < 0.0f && dp3 < 0.0f) return 0;
+    if (dq1 > 0.0f && dq2 > 0.0f && dq3 > 0.0f) return 0;
+    if (dq1 < 0.0f && dq2 < 0.0f && dq3 < 0.0f) return 0;
+
+    // Both triangles cross both planes: compare the two intersection segments
+    // on the common line L = P x Q. The direction of L is z x rz =
+    // (-rz1, rz0, 0), so project onto the axis with the larger component.
+    const bool useX = fabsf(rz1) > fabsf(rz0);
+
+    float px1, px2, px3; // obs vertex coordinates on the projection axis
+    float qx1, qx2, qx3; // rob vertex coordinates on the projection axis
+    if (useX) {
+        px1 = -dx1; px2 = dx1; px3 = a1;
+        qx1 = T(0) - dx2 * B(0, 0);
+        qx2 = T(0) + dx2 * B(0, 0);
+        qx3 = T(0) + a2  * B(0, 0) + dy2 * B(0, 1);
+    } else {
+        px1 = 0.0f; px2 = 0.0f; px3 = dy1;
+        qx1 = T(1) - dx2 * B(1, 0);
+        qx2 = T(1) + dx2 * B(1, 0);
+        qx3 = T(1) + a2  * B(1, 0) + dy2 * B(1, 1);
+    }
+
+    // For each triangle, the vertex whose signed distance has the unique sign
+    // is the isolated vertex; the segment endpoints lie on its two incident
+    // edges. Endpoint = (d_i x_j - d_j x_i) / (d_i - d_j). The denominators
+    // are nonzero here (opposite signs, |d| >= mn > 0), and d1*d2 > 0,
+    // d3*d4 > 0, so all four endpoints can be scaled by the common positive
+    // factor d1*d2*d3*d4 to remove every division.
+    const float dp[3] = {dp1, dp2, dp3};
+    const float dq[3] = {dq1, dq2, dq3};
+    const float px[3] = {px1, px2, px3};
+    const float qx[3] = {qx1, qx2, qx3};
+
+    int pIso;
+    if ((dp[0] > 0.0f) == (dp[1] > 0.0f)) pIso = 2;
+    else if ((dp[0] > 0.0f) == (dp[2] > 0.0f)) pIso = 1;
+    else pIso = 0;
+    int qIso;
+    if ((dq[0] > 0.0f) == (dq[1] > 0.0f)) qIso = 2;
+    else if ((dq[0] > 0.0f) == (dq[2] > 0.0f)) qIso = 1;
+    else qIso = 0;
+
+    const int pO1 = (pIso + 1) % 3, pO2 = (pIso + 2) % 3;
+    const int qO1 = (qIso + 1) % 3, qO2 = (qIso + 2) % 3;
+
+    const float d1 = dp[pIso] - dp[pO1];
+    const float d2 = dp[pIso] - dp[pO2];
+    const float d3 = dq[qIso] - dq[qO1];
+    const float d4 = dq[qIso] - dq[qO2];
+
+    const float n1 = dp[pIso] * px[pO1] - dp[pO1] * px[pIso];
+    const float n2 = dp[pIso] * px[pO2] - dp[pO2] * px[pIso];
+    const float n3 = dq[qIso] * qx[qO1] - dq[qO1] * qx[qIso];
+    const float n4 = dq[qIso] * qx[qO2] - dq[qO2] * qx[qIso];
+
+    const float e1 = n1 * d2 * d3 * d4;
+    const float e2 = n2 * d1 * d3 * d4;
+    const float e3 = n3 * d1 * d2 * d4;
+    const float e4 = n4 * d1 * d2 * d3;
+
+    const float lo1 = fminf(e1, e2), hi1 = fmaxf(e1, e2);
+    const float lo2 = fminf(e3, e4), hi2 = fmaxf(e3, e4);
+
+    const float gap  = fminf(hi1, hi2) - fmaxf(lo1, lo2);
+    const float span = fmaxf(hi1 - lo1, hi2 - lo2);
+    if (fabsf(gap) < 1e-5f * span + 1e-30f) return -1; // tangency: defer
+    return (gap >= 0.0f) ? 1 : 0;
+}
+
 __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, const Eigen::Vector3f* __restrict__ pT_obs,
                                 const Eigen::Matrix3f* __restrict__ pR_rob, const Eigen::Vector3f* __restrict__ pT_rob,
                                 const Eigen::Vector3f* __restrict__ pObs_dim, const Eigen::Vector3f* __restrict__ pRob_dim,
                                 const Eigen::Matrix3f* __restrict__ pRob_conf_rot, const Eigen::Vector3f* __restrict__ pRob_conf_trans,
                                 const int16_t* __restrict__ pObs_first_child, const int16_t* __restrict__ pRob_first_child,
+                                const float* __restrict__ pObs_a, const float* __restrict__ pRob_a,
                                 const Eigen::Vector3f * __restrict__ pRob_verts, const Triangle * __restrict__ pRob_tris, size_t num_rob_nodes,
                                 const Eigen::Vector3f * __restrict__ pObs_verts, const Triangle * __restrict__ pObs_tris, size_t num_obs_nodes,
                                 uint32_t* __restrict__ pdisjoint, size_t num_confs, uint32_t* __restrict__ g_next_conf,
@@ -275,11 +756,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
     __shared__ uint16_t obs_obb_pend[MAX_BUFFER];
     __shared__ int num_obb_pend;
 
-    // intent: for each i in rob_obb_pend, need to check triangle of bad_rob_leaves[i] against triangle of bad_obs_leaves[j]
-    __shared__ uint16_t bad_rob_leaves[MAX_BUFFER];
-    __shared__ uint16_t bad_obs_leaves[MAX_BUFFER];
-    __shared__ uint32_t num_bad_leaves;
-    // no obstacles need further testing
+    // Set (from any thread, all writers set true) when the paper triangle
+    // test (or its fallback) finds an intersecting leaf pair for the current
+    // configuration; the block-serial traversal breaks early on it.
+    __shared__ bool s_collision;
 
     //TODO: need failsafe if this overflows
 
@@ -307,7 +787,9 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
     //
     // Phase timers (profiling): thread 0 accumulates %globaltimer deltas for the
     // block-serial phases into d_phase[0..2] (pull+initial check, OBB
-    // traversal, triangle tests).
+    // traversal, triangle tests). Each block adds its own totals once at
+    // termination, so these are SUMS ACROSS BLOCKS (not wall-clock); the host
+    // divides by the contributing block count in d_phase[3].
     unsigned long long acc_init = 0, acc_trav = 0, acc_tri = 0;
     while (true) {
         __syncthreads();
@@ -324,6 +806,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
                 atomicAdd(&d_phase[0], acc_init);
                 atomicAdd(&d_phase[1], acc_trav);
                 atomicAdd(&d_phase[2], acc_tri);
+                atomicAdd(&d_phase[3], 1);
             }
             return;
         }
@@ -377,7 +860,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
             //reset pending OBB lists
             if (threadIdx.x == 0){
                 num_obb_pend = 1;
-                num_bad_leaves = 0;
+                s_collision = false;
                 rob_obb_pend[0] = 0; // root
                 obs_obb_pend[0] = 0; // root
             }
@@ -387,9 +870,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
             // intent: for each i in rob_obb_pend, need to check all children of rob_obb_pend[i] against all children of obs_obb_pend[j]
             // these should be 4-ary trees, meaning we grab up to two pending boxes at a time so that we have 16 threads doing the children 
             // of each pair of boxes. 
-            bool collision_found = false;
             while(true){
                 __syncthreads();
+                if (s_collision) {
+                    break;
+                }
                 if (num_obb_pend == 0){
                     break;
                 }
@@ -406,18 +891,6 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
                                 T_conf[0], T_conf[1], T_conf[2], blockIdx.x);
                     }
                     break;
-                }
-                if (num_bad_leaves >= MAX_BUFFER - 32){
-                    if (!areTrianglesDisjoint ( num_bad_leaves, bad_rob_leaves, bad_obs_leaves,
-                                    R_conf, T_conf,
-                                    pRob_verts,   pRob_tris, 
-                                    pObs_verts,   pObs_tris)) {
-                        collision_found = true;
-                        break;
-                    }
-                    else if (threadIdx.x == 0) {
-                        num_bad_leaves = 0;
-                    }  
                 }
 
                 __syncthreads();
@@ -471,21 +944,37 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
                     rob_obb_pend[pos] = rob_obb_idx;
                 } 
 
-                //TODO: this is causing duplicates to be added to the bad leaves list, causing extra work down the line, as the duplicates grow exponentially.
-                // this is caused by the fact that when one box is a leaf and the other is not, we add the parent of the leaf box back into the pending list, which can cause the same parent to be added multiple times for the same non-leaf box if multiple children of the non-leaf box overlap with the any of the leaf boxes of the parent
-
+                //TODO: when one box is a leaf and the other is not, the leaf's
+                // parent is pushed back into the pending list, so the same
+                // parent can be pushed multiple times for the same non-leaf
+                // box (duplicate work, but harmless for correctness).
                 else if (rob_first_child_idx < 0) {
                     // both are leaves
                     if (obs_first_child_idx < 0) {
-
-                        // add leaves to bad leaves list
-                        int pos = atomicAdd(&num_bad_leaves, 1);
-
-                        int rob_tri_idx = -1 * (rob_first_child_idx + 1); 
-                        int obs_tri_idx = -1 * (obs_first_child_idx + 1); //TODO: maybe consider having a leaf step instead of doing redundant checks
-                        
-                        bad_rob_leaves[pos] = rob_tri_idx; 
-                        bad_obs_leaves[pos] = obs_tri_idx; //TODO: maybe consider having a leaf step instead of doing redundant checks
+                        // Chang & Kim triangle test in rectangle-local
+                        // coordinates, reusing this thread's B/T from the OBB
+                        // overlap test above.
+                        const int rob_tri = -(rob_first_child_idx + 1);
+                        const int obs_tri = -(obs_first_child_idx + 1);
+                        const Eigen::Vector3f& dimObs = pObs_dim[obs_obb_idx];
+                        const Eigen::Vector3f& dimRob = pRob_dim[rob_obb_idx];
+                        const int verdict = paperTriTri(dimObs(0), dimObs(1), pObs_a[obs_obb_idx],
+                                                        dimRob(0), dimRob(1), pRob_a[rob_obb_idx],
+                                                        B, T);
+                        if (verdict > 0) {
+                            s_collision = true;
+                        } else if (verdict < 0) {
+                            // borderline/coplanar: full world-frame test
+                            const Triangle& rt = pRob_tris[rob_tri];
+                            const Triangle& ot = pObs_tris[obs_tri];
+                            const Eigen::Vector3f rv0 = R_conf * pRob_verts[rt.v1] + T_conf;
+                            const Eigen::Vector3f rv1 = R_conf * pRob_verts[rt.v2] + T_conf;
+                            const Eigen::Vector3f rv2 = R_conf * pRob_verts[rt.v3] + T_conf;
+                            if (!triangles_valid_f(rv0, rv1, rv2,
+                                                   pObs_verts[ot.v1], pObs_verts[ot.v2], pObs_verts[ot.v3])) {
+                                s_collision = true;
+                            }
+                        }
                     }
                     // robot is leaf, obstacle is not
                     else {
@@ -508,16 +997,11 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
             if (threadIdx.x == 0) {
                 acc_trav += t_tri - t_cfg;
             }
-            if (collision_found) {
+            if (s_collision) {
                 continue;
             }
-            if (areTrianglesDisjoint ( num_bad_leaves, bad_rob_leaves, bad_obs_leaves,
-                                    R_conf, T_conf,
-                                    pRob_verts,   pRob_tris, 
-                                    pObs_verts,   pObs_tris)) {
-                if (threadIdx.x == 0) {
-                    s_disjoint_word |= 1u << (index & 31);
-                }
+            if (threadIdx.x == 0) {
+                s_disjoint_word |= 1u << (index & 31);
             }
             __syncthreads();
             if (threadIdx.x == 0) {
@@ -596,6 +1080,8 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     Triangle * d_Obs_triangles;
     int16_t* d_Obs_first_child;
     int16_t* d_Rob_first_child;
+    float* d_Obs_a;
+    float* d_Rob_a;
     uint32_t* pdisjoint;
     uint32_t* d_next_conf;
     uint64_t* d_phase;
@@ -612,6 +1098,8 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     cudaMalloc((void**)&d_Rob_conf_trans, num_confs * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_first_child, obs_BVH.size * sizeof(int16_t));
     cudaMalloc((void**)&d_Rob_first_child, rob_BVH.size * sizeof(int16_t));
+    cudaMalloc((void**)&d_Obs_a, obs_BVH.size * sizeof(float));
+    cudaMalloc((void**)&d_Rob_a, rob_BVH.size * sizeof(float));
     cudaMalloc((void**)&d_Rob_vertices, rob_mesh.vertices.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_vertices, obs_mesh.vertices.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_triangles, rob_mesh.triangles.size() * sizeof(Triangle));
@@ -619,8 +1107,8 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     cudaMalloc((void**)&pdisjoint, num_words * sizeof(uint32_t));
     cudaMalloc((void**)&d_next_conf, sizeof(uint32_t));
     checkCudaMem(cudaMemset(d_next_conf, 0, sizeof(uint32_t)));
-    cudaMalloc((void**)&d_phase, 3 * sizeof(uint64_t));
-    checkCudaMem(cudaMemset(d_phase, 0, 3 * sizeof(uint64_t)));
+    cudaMalloc((void**)&d_phase, 4 * sizeof(uint64_t));
+    checkCudaMem(cudaMemset(d_phase, 0, 4 * sizeof(uint64_t)));
 
     cudaDeviceSynchronize();
     checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
@@ -631,6 +1119,8 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_first_child, rob_BVH.first_child, rob_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_first_child, obs_BVH.first_child, obs_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Obs_a, obs_BVH.pA, obs_BVH.size * sizeof(float), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_a, rob_BVH.pA, rob_BVH.size * sizeof(float), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_vertices, rob_mesh.vertices.data(), rob_mesh.vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_vertices, obs_mesh.vertices.data(), obs_mesh.vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_triangles, rob_mesh.triangles.data(), rob_mesh.triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
@@ -662,6 +1152,7 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
                                                 d_Obs_dim, d_Rob_dim,
                                                 d_Rob_conf_rot, d_Rob_conf_trans,
                                                 d_Obs_first_child, d_Rob_first_child,
+                                                d_Obs_a, d_Rob_a,
                                                 d_Rob_vertices, d_Rob_triangles, rob_BVH.size,
                                                 d_Obs_vertices, d_Obs_triangles, obs_BVH.size,
                                                 pdisjoint, static_cast<size_t>(num_confs), d_next_conf, (unsigned long long*)d_phase);
@@ -678,6 +1169,7 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
                                                 d_Obs_dim, d_Rob_dim,
                                                 d_Rob_conf_rot, d_Rob_conf_trans,
                                                 d_Obs_first_child, d_Rob_first_child,
+                                                d_Obs_a, d_Rob_a,
                                                 d_Rob_vertices, d_Rob_triangles, rob_BVH.size,
                                                 d_Obs_vertices, d_Obs_triangles, obs_BVH.size,
                                                 pdisjoint, dry_confs, d_next_conf, (unsigned long long*)d_phase);
@@ -686,7 +1178,7 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
         std::cout << "BVH Naive dry run completed successfully." << std::endl;
         // Reset the work queue so the timed launch starts from configuration 0
         checkCudaMem(cudaMemset(d_next_conf, 0, sizeof(uint32_t)));
-        checkCudaMem(cudaMemset(d_phase, 0, 3 * sizeof(uint64_t)));
+        checkCudaMem(cudaMemset(d_phase, 0, 4 * sizeof(uint64_t)));
         checkCudaMem(cudaMemset(pdisjoint, 0, num_words * sizeof(uint32_t)));
     }
 
@@ -697,13 +1189,17 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     cudaEventElapsedTime(&duration, start, stop);
     std::cout << "BVH Naive GPU kernel took " << duration << " ms for " << num_confs << " configurations." << std::endl;
 
-    // Profiling: aggregate block-serial phase times (nanoseconds)
-    uint64_t h_phase[3];
-    checkCudaMem(cudaMemcpy(h_phase, d_phase, 3 * sizeof(uint64_t), cudaMemcpyDeviceToHost));
+    // Profiling: phase totals are summed across blocks (each block reports
+    // once at termination); report the per-block average, which is a
+    // block-serial view and NOT comparable to the wall-clock kernel time.
+    uint64_t h_phase[4];
+    checkCudaMem(cudaMemcpy(h_phase, d_phase, 4 * sizeof(uint64_t), cudaMemcpyDeviceToHost));
     const double ns_per_ms = 1e6;
-    std::cout << "PHASES ms: init=" << (double)h_phase[0] / ns_per_ms
-              << " traversal=" << (double)h_phase[1] / ns_per_ms
-              << " triangles=" << (double)h_phase[2] / ns_per_ms << std::endl;
+    const double nblocks = (h_phase[3] > 0) ? (double)h_phase[3] : 1.0;
+    std::cout << "PHASES ms (avg per block, " << h_phase[3] << " blocks, block-serial, not wall-clock): init="
+              << (double)h_phase[0] / ns_per_ms / nblocks
+              << " traversal=" << (double)h_phase[1] / ns_per_ms / nblocks
+              << " triangles=" << (double)h_phase[2] / ns_per_ms / nblocks << std::endl;
 
     // Copy result back to host (num_confs * sizeof(bool))
     //TODO deleteme
@@ -735,6 +1231,8 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
     cudaFree(d_Rob_conf_trans);
     cudaFree(d_Obs_first_child);
     cudaFree(d_Rob_first_child);
+    cudaFree(d_Obs_a);
+    cudaFree(d_Rob_a);
     cudaFree(d_Rob_vertices);
     cudaFree(d_Obs_vertices);
     cudaFree(d_Rob_triangles);

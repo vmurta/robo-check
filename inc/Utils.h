@@ -117,6 +117,34 @@ struct OBB_soa {
         pDim = new Eigen::Vector3f[size];
     }
 
+    // Owns raw arrays: movable but not copyable (copying would double-free).
+    OBB_soa(OBB_soa&& o) noexcept : pR(o.pR), pT(o.pT), pDim(o.pDim), size(o.size) {
+        o.pR = nullptr;
+        o.pT = nullptr;
+        o.pDim = nullptr;
+        o.size = 0;
+    }
+
+    OBB_soa& operator=(OBB_soa&& o) noexcept {
+        if (this != &o) {
+            delete[] pR;
+            delete[] pT;
+            delete[] pDim;
+            pR = o.pR;
+            pT = o.pT;
+            pDim = o.pDim;
+            size = o.size;
+            o.pR = nullptr;
+            o.pT = nullptr;
+            o.pDim = nullptr;
+            o.size = 0;
+        }
+        return *this;
+    }
+
+    OBB_soa(const OBB_soa&) = delete;
+    OBB_soa& operator=(const OBB_soa&) = delete;
+
     virtual ~OBB_soa() {
         delete[] pR;
         delete[] pT;
@@ -189,17 +217,53 @@ struct BVNode_soa : OBB_soa {
     /// Zero implies this node has no BVNode_soachildren and no primitives, used only for padding
     int16_t *first_child;
 
+    // Chang & Kim 2009 leaf parameter: x-coordinate of the triangle's third
+    // vertex in the leaf rectangle frame (rect = [rx ry rz], shared edge at
+    // y = -dim.y, third vertex at (a, dim.y, 0)). Meaningless for internal and
+    // dummy nodes.
+    float *pA;
+
     BVNode_soa(size_t size) : OBB_soa(size) {
         first_child = new int16_t[size];
+        pA = new float[size];
     }
+
+    BVNode_soa(BVNode_soa&& o) noexcept : OBB_soa(std::move(o)), first_child(o.first_child), pA(o.pA) {
+        o.first_child = nullptr;
+        o.pA = nullptr;
+    }
+
+    BVNode_soa& operator=(BVNode_soa&& o) noexcept {
+        if (this != &o) {
+            OBB_soa::operator=(std::move(o));
+            delete[] first_child;
+            delete[] pA;
+            first_child = o.first_child;
+            pA = o.pA;
+            o.first_child = nullptr;
+            o.pA = nullptr;
+        }
+        return *this;
+    }
+
+    BVNode_soa(const BVNode_soa&) = delete;
+    BVNode_soa& operator=(const BVNode_soa&) = delete;
 
     ~BVNode_soa() {
         delete[] first_child;
+        delete[] pA;
     }
 
     void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim, int16_t child) {
         OBB_soa::set(index, R, T, dim);
         first_child[index] = child;
+        pA[index] = 0.0f;
+    }
+
+    void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim, int16_t child, float a) {
+        OBB_soa::set(index, R, T, dim);
+        first_child[index] = child;
+        pA[index] = a;
     }
 
 };

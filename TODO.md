@@ -2,11 +2,7 @@
 
 > Status: results are **not** publication-ready yet. This file tracks the
 > comparison against related work and the gaps that need to be closed first.
-> implement obb-informed triangle collision 
-> add separate buffer size for bad leaves so triangles are checked once there's at least one warpful (32) to check, possibly allowing early exits
-> compact bools
 > remove profiling code
-> cuda memset the bools instead of copying
 
 
 ## Comparison with related work

@@ -79,8 +79,15 @@ int main(int argc, char** argv) {
 
     if (algo == "bvh") {
         // Build BVH hierarchies and load mesh data
-        BVNode_soa rob_BVH = BVH_n_ary_hierarchy_from_mesh(rob_file.c_str(), 2);
-        BVNode_soa obs_BVH = BVH_n_ary_hierarchy_from_mesh(obs_file.c_str(), 2);
+        // DEBUG: builder selection via env ROB_BUILDER / OBS_BUILDER (fcl|paper)
+        const char* rob_builder = getenv("ROB_BUILDER");
+        const char* obs_builder = getenv("OBS_BUILDER");
+        BVNode_soa rob_BVH = (rob_builder && strcmp(rob_builder, "fcl") == 0)
+            ? BVH_fcl_hierarchy_from_mesh(rob_file.c_str(), 2)
+            : BVH_n_ary_hierarchy_from_mesh(rob_file.c_str(), 2);
+        BVNode_soa obs_BVH = (obs_builder && strcmp(obs_builder, "fcl") == 0)
+            ? BVH_fcl_hierarchy_from_mesh(obs_file.c_str(), 2)
+            : BVH_n_ary_hierarchy_from_mesh(obs_file.c_str(), 2);
 
         MeshData rob_mesh;
         loadOBJFile(rob_file, rob_mesh.vertices, rob_mesh.triangles);
