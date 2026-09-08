@@ -1,0 +1,107 @@
+#pragma once
+#include "Utils.h"
+#include "Triangle.hu"
+#include "OBB-BVH-naive.hu"
+#include <vector>
+
+// A configuration for an articulated robot with N revolute joints.
+// Mirrors the ROS2 convention where each entry is a single joint angle
+// (radians), one per joint in the serial chain.
+template <size_t N>
+struct articulated_conf {
+    float joints[N];
+
+    __host__ __device__ articulated_conf() {
+        for (size_t i = 0; i < N; ++i) {
+            joints[i] = 0.0f;
+        }
+    }
+
+    __host__ __device__ float& operator[](size_t i) { return joints[i]; }
+    __host__ __device__ const float& operator[](size_t i) const { return joints[i]; }
+};
+
+// Fixed (non-angle) data for a single revolute joint in a serial chain.
+// Joint i connects parent link i to child link i + 1.
+struct JointParams {
+    Eigen::Matrix3f origin_R; // fixed rotation from parent frame to child frame (URDF <origin> rpy)
+    Eigen::Vector3f origin_T; // fixed translation from parent frame to child frame (URDF <origin> xyz)
+    Eigen::Vector3f axis;     // rotation axis expressed in the child frame (URDF <axis> xyz)
+};
+
+// Host-side description of an articulated robot parsed from a URDF file.
+struct ArticulatedRobot {
+    size_t num_joints = 0;
+    std::vector<JointParams> joints;        // size num_joints
+    std::vector<std::string> link_names;    // size num_joints + 1
+    std::vector<std::string> link_meshes;   // size num_joints + 1 (empty if no collision mesh)
+};
+
+// Parses a ROS2 URDF file assuming a serial chain of revolute joints.
+// Returns false and prints an error if the file cannot be parsed or the
+// joint structure is not a linear chain.
+bool parseSerialChainURDF(const std::string& urdf_path, ArticulatedRobot& robot);
+
+// Reads an articulated configuration file: one configuration per line,
+// each line containing N whitespace-separated joint angles in radians.
+template <size_t N>
+void readArticulatedConfigurationFromFile(const std::string& filename, std::vector<articulated_conf<N>>& confs);
+
+// Forward kinematics for a serial chain: computes the world rotation and
+// translation of every link (link_R/link_T have num_joints + 1 entries).
+// The base link is fixed at the world origin.
+template <size_t N>
+__host__ __device__ void forwardKinematics(const articulated_conf<N>& conf,
+                                           const JointParams* joints,
+                                           Eigen::Matrix3f* link_R,
+                                           Eigen::Vector3f* link_T);
+
+// Rotation matrix from an axis and an angle (Rodrigues formula).
+__host__ __device__ inline Eigen::Matrix3f axisAngleToRotation(const Eigen::Vector3f& axis, float angle) {
+    float n = sqrtf(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+    float ax = axis[0] / n;
+    float ay = axis[1] / n;
+    float az = axis[2] / n;
+
+    float c = cosf(angle);
+    float s = sinf(angle);
+    float t = 1.0f - c;
+
+    Eigen::Matrix3f R;
+    R(0, 0) = c + ax * ax * t;
+    R(0, 1) = ax * ay * t - az * s;
+    R(0, 2) = ax * az * t + ay * s;
+    R(1, 0) = ay * ax * t + az * s;
+    R(1, 1) = c + ay * ay * t;
+    R(1, 2) = ay * az * t - ax * s;
+    R(2, 0) = az * ax * t - ay * s;
+    R(2, 1) = az * ay * t + ax * s;
+    R(2, 2) = c + az * az * t;
+    return R;
+}
+
+// d_bvh_articulated: articulated version of d_bvh_naive. Each thread checks one
+// configuration by running forward kinematics and colliding every link's BVH
+// against the obstacle BVH. pdisjoint[i] is true when configuration i is valid.
+template <size_t N>
+__global__ void d_bvh_articulated(const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
+                                  const Eigen::Vector3f* pObs_dim, const int16_t* pObs_first_child,
+                                  size_t num_obs_nodes,
+                                  const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
+                                  const Eigen::Matrix3f* pRob_R, const Eigen::Vector3f* pRob_T,
+                                  const Eigen::Vector3f* pRob_dim, const int16_t* pRob_first_child,
+                                  const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
+                                  const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
+                                  const JointParams* pJoints,
+                                  const articulated_conf<N>* pConf, size_t num_confs,
+                                  bool* pdisjoint);
+
+// Host wrapper mirroring bvh_naive. Builds per-link BVHs from the URDF,
+// allocates device memory, launches d_bvh_articulated<N>, and copies results.
+template <size_t N>
+double bvh_articulated(const std::string& robot_urdf_path,
+                       const BVNode_soa& obs_BVH, const MeshData& obs_mesh,
+                       const std::vector<articulated_conf<N>>& confs,
+                       std::vector<bool>& valid, bool dry_run = false);
+
+#include "ArticulatedRobot.tcc"
