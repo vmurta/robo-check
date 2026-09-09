@@ -1,7 +1,7 @@
 #include "OBB-BVH-naive.hu"
 
 //TODO: Make a custom data type for this struct
-BVNode_soa BVH_fcl_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2){
+BVNode_soa<> BVH_fcl_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2){
     // Load Robot
     std::vector<fcl::Vector3f> rob_vertices;
     std::vector<fcl::Triangle> rob_triangles;
@@ -144,7 +144,7 @@ BVNode_soa BVH_fcl_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2)
     Eigen::Matrix3f rotation;
     Eigen::Vector3f translation;
     Eigen::Vector3f half_dimensions;
-    BVNode_soa result(flattened_n_ary.size());
+    BVNode_soa<> result(flattened_n_ary.size());
     for (int i = 0; i < result.size; ++i) {
         fcl::OBB<float> obb = flattened_n_ary[i];
         rotation = obb.axis;
@@ -395,18 +395,20 @@ int buildBinary(const std::vector<LeafRect>& rects, std::vector<int>& order,
     return idx;
 }
 
+template <typename ChildT>
 struct NarySlot {
     Eigen::Matrix3f R;
     Eigen::Vector3f T;
     Eigen::Vector3f dim;
     float a = 0.0f;
-    int16_t first_child = 0;
+    ChildT first_child = 0;
     bool internal = false;
 };
 
 } // namespace
 
-BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2) {
+template <typename ChildT>
+BVNode_soa<ChildT> BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2) {
     if (power_of_2 != 2) {
         std::cerr << "BVH_n_ary_hierarchy_from_mesh: only power_of_2 == 2 (4-ary) is supported by the kernel" << std::endl;
         exit(1);
@@ -417,7 +419,7 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
     loadOBJFile(mesh_path, vertices, triangles);
     const int num_tris = (int)triangles.size();
     if (num_tris == 0) {
-        return BVNode_soa(0);
+        return BVNode_soa<ChildT>(0);
     }
 
     // One paper rectangle per triangle, in mesh triangle order (triangle
@@ -439,16 +441,16 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
     // Flatten to 4-ary: n-ary level k = binary depth 2k. Each internal binary
     // node at level k contributes 4 slots: for each binary child c, either
     // [c.left slot, c.right slot] (c internal) or [leaf slot, dummy] (c leaf).
-    std::vector<std::vector<NarySlot>> levels(1);
+    std::vector<std::vector<NarySlot<ChildT>>> levels(1);
     std::vector<std::vector<int>> bin_of(1); // binary node index of each slot
 
-    NarySlot root;
+    NarySlot<ChildT> root;
     root.R = bnodes[broot].R;
     root.T = bnodes[broot].T;
     root.dim = bnodes[broot].dim;
     root.a = bnodes[broot].a;
     if (bnodes[broot].tri >= 0) {
-        root.first_child = (int16_t)(-(bnodes[broot].tri + 1));
+        root.first_child = (ChildT)(-(bnodes[broot].tri + 1));
         root.internal = false;
     } else {
         root.internal = true;
@@ -458,26 +460,26 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
 
     for (size_t k = 0; k < levels.size(); ++k) {
         bool any_internal = false;
-        for (const NarySlot& s : levels[k]) {
+        for (const NarySlot<ChildT>& s : levels[k]) {
             if (s.internal) { any_internal = true; break; }
         }
         if (!any_internal) break;
 
-        std::vector<NarySlot>& next = levels.emplace_back();
+        std::vector<NarySlot<ChildT>>& next = levels.emplace_back();
         std::vector<int>& next_bin = bin_of.emplace_back();
         int internal_count = 0;
-        for (NarySlot& s : levels[k]) {
+        for (NarySlot<ChildT>& s : levels[k]) {
             if (!s.internal) continue;
-            s.first_child = (int16_t)(next.size() + internal_count * 4);
+            s.first_child = (ChildT)(next.size() + internal_count * 4);
             ++internal_count;
         }
         for (size_t i = 0; i < levels[k].size(); ++i) {
-            const NarySlot& s = levels[k][i];
+            const NarySlot<ChildT>& s = levels[k][i];
             if (!s.internal) continue;
             const BinNode& b = bnodes[bin_of[k][i]];
             const int bchildren[2] = {b.left, b.right};
             for (int c = 0; c < 2; ++c) {
-                const int16_t bc = bchildren[c];
+                const int bc = bchildren[c];
                 if (bc < 0) {
                     next.emplace_back();
                     next_bin.push_back(-1);
@@ -487,12 +489,12 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
                 }
                 const BinNode& child = bnodes[bc];
                 if (child.tri >= 0) {
-                    NarySlot leaf;
+                    NarySlot<ChildT> leaf;
                     leaf.R = child.R;
                     leaf.T = child.T;
                     leaf.dim = child.dim;
                     leaf.a = child.a;
-                    leaf.first_child = (int16_t)(-(child.tri + 1));
+                    leaf.first_child = (ChildT)(-(child.tri + 1));
                     leaf.internal = false;
                     next.push_back(leaf);
                     next_bin.push_back(bc);
@@ -502,13 +504,13 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
                     const int gc[2] = {child.left, child.right};
                     for (int g = 0; g < 2; ++g) {
                         const BinNode& gchild = bnodes[gc[g]];
-                        NarySlot slot;
+                        NarySlot<ChildT> slot;
                         slot.R = gchild.R;
                         slot.T = gchild.T;
                         slot.dim = gchild.dim;
                         slot.a = gchild.a;
                         if (gchild.tri >= 0) {
-                            slot.first_child = (int16_t)(-(gchild.tri + 1));
+                            slot.first_child = (ChildT)(-(gchild.tri + 1));
                             slot.internal = false;
                         } else {
                             slot.internal = true;
@@ -527,13 +529,21 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
     // and dummies (0) pass through unchanged.
     size_t total = 0;
     for (const auto& lv : levels) total += lv.size();
-    if (total > 32767) {
+    if (total > (size_t)INT32_MAX) {
         std::cerr << "BVH_n_ary_hierarchy_from_mesh: " << total
-                  << " nodes exceeds int16_t first_child capacity (32767)" << std::endl;
+                  << " nodes exceeds int32_t first_child capacity" << std::endl;
         exit(1);
     }
+    if constexpr (sizeof(ChildT) <= 2) {
+        if (total > 32767) {
+            std::cerr << "BVH_n_ary_hierarchy_from_mesh: " << total
+                      << " nodes exceeds int16_t first_child capacity (32767);"
+                      << " instantiate with ChildT = int32_t" << std::endl;
+            exit(1);
+        }
+    }
 
-    BVNode_soa result(total);
+    BVNode_soa<ChildT> result(total);
     std::vector<size_t> level_base(levels.size());
     size_t out = 0;
     for (size_t k = 0; k < levels.size(); ++k) {
@@ -542,17 +552,17 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
     }
     for (size_t k = 0; k < levels.size(); ++k) {
         for (size_t i = 0; i < levels[k].size(); ++i) {
-            const NarySlot& n = levels[k][i];
-            int16_t fc = n.internal ? (int16_t)(n.first_child + level_base[k + 1]) : n.first_child;
+            const NarySlot<ChildT>& n = levels[k][i];
+            const ChildT fc = n.internal ? (ChildT)(n.first_child + level_base[k + 1]) : (ChildT)n.first_child;
             result.set(level_base[k] + i, n.R, n.T, n.dim, fc, n.a);
         }
     }
 
     // Validate the flattened tree structure (host-side, cheap).
     for (size_t i = 0; i < total; ++i) {
-        const int16_t fc = result.first_child[i];
+        const int64_t fc = result.first_child[i];
         if (fc > 0) {
-            if (fc + 4 > (int16_t)total) {
+            if (fc + 4 > (int64_t)total) {
                 std::cerr << "BVH validate: node " << i << " first_child " << fc
                           << " + 4 exceeds " << total << std::endl;
                 exit(1);
@@ -571,127 +581,6 @@ BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_
 
 
 constexpr int BLOCK_SIZE = 32;
-
-// Nanosecond wall-clock timer (%globaltimer), immune to SM clock throttling.
-__device__ __forceinline__ unsigned long long globaltimer() {
-    unsigned long long t;
-    asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t));
-    return t;
-}
-
-// Chang & Kim 2009 triangle-triangle test in rectangle-local coordinates.
-// Rect 1 = obstacle leaf (its z-axis is the triangle plane normal), rect 2 =
-// robot leaf at relative rotation B and translation T, both taken straight
-// from the OBB overlap test computed just before this leaf pair was found.
-//
-// Returns  1: triangles intersect
-//          0: disjoint
-//         -1: unreliable (near-plane/tangent/coplanar): caller must fall back
-//             to the full world-frame test.
-__device__ __forceinline__ int paperTriTri(
-    const float dx1, const float dy1, const float a1,
-    const float dx2, const float dy2, const float a2,
-    const Eigen::Matrix3f& B, const Eigen::Vector3f& T) {
-
-    const float rz0 = B(0, 2), rz1 = B(1, 2), rz2 = B(2, 2);
-
-    // Signed distances of the obs (rect 1) vertices from the rob plane.
-    // Vertex layout in the rectangle frame (center at the shared edge
-    // midpoint): p1 = (-dx1, 0, 0), p2 = (dx1, 0, 0), p3 = (a1, dy1, 0).
-    const float d = T(0) * rz0 + T(1) * rz1 + T(2) * rz2;
-    const float dp1 = -dx1 * rz0 - d;
-    const float dp2 =  dx1 * rz0 - d;
-    const float dp3 =  a1  * rz0 + dy1 * rz1 - d;
-
-    // Signed distances of the rob (rect 2) vertices from the obs plane
-    // (z = 0 in the obs rectangle frame); same vertex layout for rect 2.
-    // These are the z-components of the rob vertices in obs coordinates:
-    // B(2,0) and B(2,1) are the z-components of the rob rectangle's rx/ry.
-    const float dq1 = T(2) - dx2 * B(2, 0);
-    const float dq2 = T(2) + dx2 * B(2, 0);
-    const float dq3 = T(2) + a2  * B(2, 0) + dy2 * B(2, 1);
-
-    // Near-plane (and coplanar) configurations are delegated to the full test.
-    const float m1 = fmaxf(fmaxf(fabsf(dp1), fabsf(dp2)), fabsf(dp3));
-    const float mn1 = fminf(fminf(fabsf(dp1), fabsf(dp2)), fabsf(dp3));
-    if (m1 == 0.0f || mn1 < 1e-5f * m1) return -1;
-
-    const float m2 = fmaxf(fmaxf(fabsf(dq1), fabsf(dq2)), fabsf(dq3));
-    const float mn2 = fminf(fminf(fabsf(dq1), fabsf(dq2)), fabsf(dq3));
-    if (m2 == 0.0f || mn2 < 1e-5f * m2) return -1;
-
-    // Reject when either triangle lies entirely on one side of the other's
-    // plane.
-    if (dp1 > 0.0f && dp2 > 0.0f && dp3 > 0.0f) return 0;
-    if (dp1 < 0.0f && dp2 < 0.0f && dp3 < 0.0f) return 0;
-    if (dq1 > 0.0f && dq2 > 0.0f && dq3 > 0.0f) return 0;
-    if (dq1 < 0.0f && dq2 < 0.0f && dq3 < 0.0f) return 0;
-
-    // Both triangles cross both planes: compare the two intersection segments
-    // on the common line L = P x Q. The direction of L is z x rz =
-    // (-rz1, rz0, 0), so project onto the axis with the larger component.
-    const bool useX = fabsf(rz1) > fabsf(rz0);
-
-    float px1, px2, px3; // obs vertex coordinates on the projection axis
-    float qx1, qx2, qx3; // rob vertex coordinates on the projection axis
-    if (useX) {
-        px1 = -dx1; px2 = dx1; px3 = a1;
-        qx1 = T(0) - dx2 * B(0, 0);
-        qx2 = T(0) + dx2 * B(0, 0);
-        qx3 = T(0) + a2  * B(0, 0) + dy2 * B(0, 1);
-    } else {
-        px1 = 0.0f; px2 = 0.0f; px3 = dy1;
-        qx1 = T(1) - dx2 * B(1, 0);
-        qx2 = T(1) + dx2 * B(1, 0);
-        qx3 = T(1) + a2  * B(1, 0) + dy2 * B(1, 1);
-    }
-
-    // For each triangle, the vertex whose signed distance has the unique sign
-    // is the isolated vertex; the segment endpoints lie on its two incident
-    // edges. Endpoint = (d_i x_j - d_j x_i) / (d_i - d_j). The denominators
-    // are nonzero here (opposite signs, |d| >= mn > 0), and d1*d2 > 0,
-    // d3*d4 > 0, so all four endpoints can be scaled by the common positive
-    // factor d1*d2*d3*d4 to remove every division.
-    const float dp[3] = {dp1, dp2, dp3};
-    const float dq[3] = {dq1, dq2, dq3};
-    const float px[3] = {px1, px2, px3};
-    const float qx[3] = {qx1, qx2, qx3};
-
-    int pIso;
-    if ((dp[0] > 0.0f) == (dp[1] > 0.0f)) pIso = 2;
-    else if ((dp[0] > 0.0f) == (dp[2] > 0.0f)) pIso = 1;
-    else pIso = 0;
-    int qIso;
-    if ((dq[0] > 0.0f) == (dq[1] > 0.0f)) qIso = 2;
-    else if ((dq[0] > 0.0f) == (dq[2] > 0.0f)) qIso = 1;
-    else qIso = 0;
-
-    const int pO1 = (pIso + 1) % 3, pO2 = (pIso + 2) % 3;
-    const int qO1 = (qIso + 1) % 3, qO2 = (qIso + 2) % 3;
-
-    const float d1 = dp[pIso] - dp[pO1];
-    const float d2 = dp[pIso] - dp[pO2];
-    const float d3 = dq[qIso] - dq[qO1];
-    const float d4 = dq[qIso] - dq[qO2];
-
-    const float n1 = dp[pIso] * px[pO1] - dp[pO1] * px[pIso];
-    const float n2 = dp[pIso] * px[pO2] - dp[pO2] * px[pIso];
-    const float n3 = dq[qIso] * qx[qO1] - dq[qO1] * qx[qIso];
-    const float n4 = dq[qIso] * qx[qO2] - dq[qO2] * qx[qIso];
-
-    const float e1 = n1 * d2 * d3 * d4;
-    const float e2 = n2 * d1 * d3 * d4;
-    const float e3 = n3 * d1 * d2 * d4;
-    const float e4 = n4 * d1 * d2 * d3;
-
-    const float lo1 = fminf(e1, e2), hi1 = fmaxf(e1, e2);
-    const float lo2 = fminf(e3, e4), hi2 = fmaxf(e3, e4);
-
-    const float gap  = fminf(hi1, hi2) - fmaxf(lo1, lo2);
-    const float span = fmaxf(hi1 - lo1, hi2 - lo2);
-    if (fabsf(gap) < 1e-5f * span + 1e-30f) return -1; // tangency: defer
-    return (gap >= 0.0f) ? 1 : 0;
-}
 
 __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, const Eigen::Vector3f* __restrict__ pT_obs,
                                 const Eigen::Matrix3f* __restrict__ pR_rob, const Eigen::Vector3f* __restrict__ pT_rob,
@@ -1018,7 +907,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
     return;
 }
 
-double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
+double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
                  const MeshData& rob_mesh, const MeshData& obs_mesh,
                  const std::vector<Configuration>& confs,
                  std::vector<bool>& valid, bool dry_run) {
@@ -1038,7 +927,6 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
 
     // Bitpacked results: bit i of disjoint[i >> 5] is the result of config i.
     std::unique_ptr<uint32_t[]> disjoint(new uint32_t[num_words]());
-
 
     std::vector<Eigen::Matrix3f> rob_conf_r(num_confs);
     std::vector<Eigen::Vector3f> rob_conf_t(num_confs);
@@ -1158,6 +1046,26 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
                                                 pdisjoint, static_cast<size_t>(num_confs), d_next_conf, (unsigned long long*)d_phase);
     };
 
+    // Dynamic shared memory above 48KB requires opting in once per kernel.
+    // The opt-in limit is the total (static + dynamic) shared memory per
+    // block, so the static usage of this kernel must be subtracted.
+    if (smem_size > 48 * 1024) {
+        cudaFuncAttributes attr;
+        checkCudaMem(cudaFuncGetAttributes(&attr, d_bvh_naive));
+        int optin = 0;
+        checkCudaMem(cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0));
+        const int maxDyn = optin - (int)attr.sharedSizeBytes;
+        if (smem_size > (size_t)maxDyn) {
+            std::cerr << "d_bvh_naive: need " << smem_size << " B dynamic shared memory, but "
+                      << maxDyn << " B is available after static usage ("
+                      << attr.sharedSizeBytes << " B)." << std::endl;
+            exit(1);
+        }
+        checkCudaMem(cudaFuncSetAttribute(d_bvh_naive, cudaFuncAttributeMaxDynamicSharedMemorySize, maxDyn));
+        std::cout << "Opted d_bvh_naive into " << maxDyn << " B dynamic shared memory (needs "
+                  << smem_size << " B)." << std::endl;
+    }
+
     // Dry run: single-block launch over one batch, untimed, purely to get the
     // kernel loaded onto the device (the work queue would otherwise drain the
     // entire workload in this block).
@@ -1243,3 +1151,8 @@ double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
 
     return duration;
 }
+
+// Explicit instantiations: int16_t for the rigid path (default), int32_t for
+// the articulated path (large scenes).
+template BVNode_soa<int16_t> BVH_n_ary_hierarchy_from_mesh<int16_t>(const char*, size_t);
+template BVNode_soa<int32_t> BVH_n_ary_hierarchy_from_mesh<int32_t>(const char*, size_t);

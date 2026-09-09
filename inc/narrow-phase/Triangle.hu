@@ -1,5 +1,135 @@
 #pragma once
 #include "./Utils.h"
+// Chang & Kim 2009 triangle-triangle test in rectangle-local coordinates.
+// Rect 1 = obstacle leaf (its z-axis is the triangle plane normal), rect 2 =
+// robot leaf at relative rotation B and translation T, both taken straight
+// from the OBB overlap test computed just before this leaf pair was found.
+//
+// Used as the fast common-case narrow-phase test by d_bvh_naive and
+// d_bvh_articulated: called only for leaf pairs whose OBBs already overlap,
+// with the rectangle half-extents (dx, dy), third-vertex offset (a), and the
+// relative transform B/T from the leaf OBB test.
+//
+// Returns  1: triangles intersect
+//          0: disjoint
+//         -1: unreliable (near-plane/tangent/coplanar): caller must fall back
+//             to the full world-frame test (triangles_valid_f).
+// Chang & Kim 2009 triangle-triangle test in rectangle-local coordinates.
+// Rect 1 = obstacle leaf (its z-axis is the triangle plane normal), rect 2 =
+// robot leaf at relative rotation B and translation T, both taken straight
+// from the OBB overlap test computed just before this leaf pair was found.
+//
+// Returns  1: triangles intersect
+//          0: disjoint
+//         -1: unreliable (near-plane/tangent/coplanar): caller must fall back
+//             to the full world-frame test.
+__device__ __forceinline__ int paperTriTri(
+    const float dx1, const float dy1, const float a1,
+    const float dx2, const float dy2, const float a2,
+    const Eigen::Matrix3f& B, const Eigen::Vector3f& T) {
+
+    const float rz0 = B(0, 2), rz1 = B(1, 2), rz2 = B(2, 2);
+
+    // Signed distances of the obs (rect 1) vertices from the rob plane.
+    // Vertex layout in the rectangle frame (center at the shared edge
+    // midpoint): p1 = (-dx1, 0, 0), p2 = (dx1, 0, 0), p3 = (a1, dy1, 0).
+    const float d = T(0) * rz0 + T(1) * rz1 + T(2) * rz2;
+    const float dp1 = -dx1 * rz0 - d;
+    const float dp2 =  dx1 * rz0 - d;
+    const float dp3 =  a1  * rz0 + dy1 * rz1 - d;
+
+    // Signed distances of the rob (rect 2) vertices from the obs plane
+    // (z = 0 in the obs rectangle frame); same vertex layout for rect 2.
+    // These are the z-components of the rob vertices in obs coordinates:
+    // B(2,0) and B(2,1) are the z-components of the rob rectangle's rx/ry.
+    const float dq1 = T(2) - dx2 * B(2, 0);
+    const float dq2 = T(2) + dx2 * B(2, 0);
+    const float dq3 = T(2) + a2  * B(2, 0) + dy2 * B(2, 1);
+
+    // Near-plane (and coplanar) configurations are delegated to the full test.
+    const float m1 = fmaxf(fmaxf(fabsf(dp1), fabsf(dp2)), fabsf(dp3));
+    const float mn1 = fminf(fminf(fabsf(dp1), fabsf(dp2)), fabsf(dp3));
+    if (m1 == 0.0f || mn1 < 1e-5f * m1) return -1;
+
+    const float m2 = fmaxf(fmaxf(fabsf(dq1), fabsf(dq2)), fabsf(dq3));
+    const float mn2 = fminf(fminf(fabsf(dq1), fabsf(dq2)), fabsf(dq3));
+    if (m2 == 0.0f || mn2 < 1e-5f * m2) return -1;
+
+    // Reject when either triangle lies entirely on one side of the other's
+    // plane.
+    if (dp1 > 0.0f && dp2 > 0.0f && dp3 > 0.0f) return 0;
+    if (dp1 < 0.0f && dp2 < 0.0f && dp3 < 0.0f) return 0;
+    if (dq1 > 0.0f && dq2 > 0.0f && dq3 > 0.0f) return 0;
+    if (dq1 < 0.0f && dq2 < 0.0f && dq3 < 0.0f) return 0;
+
+    // Both triangles cross both planes: compare the two intersection segments
+    // on the common line L = P x Q. The direction of L is z x rz =
+    // (-rz1, rz0, 0), so project onto the axis with the larger component.
+    const bool useX = fabsf(rz1) > fabsf(rz0);
+
+    float px1, px2, px3; // obs vertex coordinates on the projection axis
+    float qx1, qx2, qx3; // rob vertex coordinates on the projection axis
+    if (useX) {
+        px1 = -dx1; px2 = dx1; px3 = a1;
+        qx1 = T(0) - dx2 * B(0, 0);
+        qx2 = T(0) + dx2 * B(0, 0);
+        qx3 = T(0) + a2  * B(0, 0) + dy2 * B(0, 1);
+    } else {
+        px1 = 0.0f; px2 = 0.0f; px3 = dy1;
+        qx1 = T(1) - dx2 * B(1, 0);
+        qx2 = T(1) + dx2 * B(1, 0);
+        qx3 = T(1) + a2  * B(1, 0) + dy2 * B(1, 1);
+    }
+
+    // For each triangle, the vertex whose signed distance has the unique sign
+    // is the isolated vertex; the segment endpoints lie on its two incident
+    // edges. Endpoint = (d_i x_j - d_j x_i) / (d_i - d_j). The denominators
+    // are nonzero here (opposite signs, |d| >= mn > 0), and d1*d2 > 0,
+    // d3*d4 > 0, so all four endpoints can be scaled by the common positive
+    // factor d1*d2*d3*d4 to remove every division.
+    const float dp[3] = {dp1, dp2, dp3};
+    const float dq[3] = {dq1, dq2, dq3};
+    const float px[3] = {px1, px2, px3};
+    const float qx[3] = {qx1, qx2, qx3};
+
+    int pIso;
+    if ((dp[0] > 0.0f) == (dp[1] > 0.0f)) pIso = 2;
+    else if ((dp[0] > 0.0f) == (dp[2] > 0.0f)) pIso = 1;
+    else pIso = 0;
+    int qIso;
+    if ((dq[0] > 0.0f) == (dq[1] > 0.0f)) qIso = 2;
+    else if ((dq[0] > 0.0f) == (dq[2] > 0.0f)) qIso = 1;
+    else qIso = 0;
+
+    const int pO1 = (pIso + 1) % 3, pO2 = (pIso + 2) % 3;
+    const int qO1 = (qIso + 1) % 3, qO2 = (qIso + 2) % 3;
+
+    const float d1 = dp[pIso] - dp[pO1];
+    const float d2 = dp[pIso] - dp[pO2];
+    const float d3 = dq[qIso] - dq[qO1];
+    const float d4 = dq[qIso] - dq[qO2];
+
+    const float n1 = dp[pIso] * px[pO1] - dp[pO1] * px[pIso];
+    const float n2 = dp[pIso] * px[pO2] - dp[pO2] * px[pIso];
+    const float n3 = dq[qIso] * qx[qO1] - dq[qO1] * qx[qIso];
+    const float n4 = dq[qIso] * qx[qO2] - dq[qO2] * qx[qIso];
+
+    const float e1 = n1 * d2 * d3 * d4;
+    const float e2 = n2 * d1 * d3 * d4;
+    const float e3 = n3 * d1 * d2 * d4;
+    const float e4 = n4 * d1 * d2 * d3;
+
+    const float lo1 = fminf(e1, e2), hi1 = fmaxf(e1, e2);
+    const float lo2 = fminf(e3, e4), hi2 = fmaxf(e3, e4);
+
+    const float gap  = fminf(hi1, hi2) - fmaxf(lo1, lo2);
+    const float span = fmaxf(hi1 - lo1, hi2 - lo2);
+    if (fabsf(gap) < 1e-5f * span + 1e-30f) return -1; // tangency: defer
+    return (gap >= 0.0f) ? 1 : 0;
+}
+
+
+
 // NOTE: everything below between the stars had the following headers in the initial version of this file, need to reevaluate which ones are actually needed
 // #define NUM_CONFS_PER_BLOCK 32
 // #define MEGA_BLOCK_SIZE 32

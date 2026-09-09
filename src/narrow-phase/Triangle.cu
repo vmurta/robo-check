@@ -190,25 +190,37 @@ __host__ __device__ void compute_intersect_line(const Eigen::Vector3d N1, const 
     (*D)(1) = N1(2) * N2(0) - N1(0) * N2(2);
     (*D)(2) = N1(0) * N2(1) - N1(1) * N2(0);
 
-    // Set t = 1
+    // Set the coordinate corresponding to the LARGEST |D| component to zero:
+    // the remaining 2x2 system has determinant +-|D_largest|, the best
+    // conditioning available. (Selecting by isclose-to-zero fails when D is
+    // tiny but non-degenerate, e.g. unnormalized normals of small triangles,
+    // and picks a singular solve.)
+    const double ax = fabs((*D)(0)), ay = fabs((*D)(1)), az = fabs((*D)(2));
     double x1, x2;
-    if (!isclose((*D)(2), 0)) {
-        la_solve(N1(0), N1(1), N2(0), N2(1), -d1, -d2, &x1, &x2);
-        (*O)(0) = x1;
-        (*O)(1) = x2;
-        (*O)(2) = 0;
-
-    } else if (!isclose((*D)(1), 0)) {
-        la_solve(N1(0), N1(2), N2(0), N2(2), -d1, -d2, &x1, &x2);
-        (*O)(0) = x1;
-        (*O)(1) = 0;
-        (*O)(2) = x2;
-
-    } else {
+    if (ax >= ay && ax >= az) {
         la_solve(N1(1), N1(2), N2(1), N2(2), -d1, -d2, &x1, &x2);
         (*O)(0) = 0;
         (*O)(1) = x1;
         (*O)(2) = x2;
+    } else if (ay >= az) {
+        la_solve(N1(0), N1(2), N2(0), N2(2), -d1, -d2, &x1, &x2);
+        (*O)(0) = x1;
+        (*O)(1) = 0;
+        (*O)(2) = x2;
+    } else {
+        la_solve(N1(0), N1(1), N2(0), N2(1), -d1, -d2, &x1, &x2);
+        (*O)(0) = x1;
+        (*O)(1) = x2;
+        (*O)(2) = 0;
+    }
+
+    // Normalize D so that parametric variables t = D . (V - O) are in world
+    // units. The interval-overlap tolerance in triangles_valid (1e-7) assumes
+    // this normalization; without it, small or nearly parallel triangles
+    // produce tiny D and every pair reads as overlapping (false positives).
+    const double dlen = sqrt((*D)(0) * (*D)(0) + (*D)(1) * (*D)(1) + (*D)(2) * (*D)(2));
+    if (dlen > 1e-300) {
+        (*D) /= dlen;
     }
 }
 
@@ -218,25 +230,24 @@ __host__ __device__ void compute_intersect_line_sep(const float N1_x, const floa
     *Dy = N1_z * N2_x - N1_x * N2_z;
     *Dz = N1_x * N2_y - N1_y * N2_x;
 
-    // Set t = 1
+    // Largest-|D|-component selection (see compute_intersect_line).
+    const float ax = fabsf(*Dx), ay = fabsf(*Dy), az = fabsf(*Dz);
     float x1, x2;
-    if (!isclose(*Dz, 0)) {
-        la_solve(N1_x, N1_y, N2_x, N2_y, -d1, -d2, &x1, &x2);
-        *Ox = x1;
-        *Oy = x2;
-        *Oz = 0;
-
-    } else if (!isclose(*Dy, 0)) {
-        la_solve(N1_x, N1_z, N2_x, N2_z, -d1, -d2, &x1, &x2);
-        *Ox = x1;
-        *Oy = 0;
-        *Oz = x2;
-
-    } else {
+    if (ax >= ay && ax >= az) {
         la_solve(N1_y, N1_z, N2_y, N2_z, -d1, -d2, &x1, &x2);
         *Ox = 0;
         *Oy = x1;
         *Oz = x2;
+    } else if (ay >= az) {
+        la_solve(N1_x, N1_z, N2_x, N2_z, -d1, -d2, &x1, &x2);
+        *Ox = x1;
+        *Oy = 0;
+        *Oz = x2;
+    } else {
+        la_solve(N1_x, N1_y, N2_x, N2_y, -d1, -d2, &x1, &x2);
+        *Ox = x1;
+        *Oy = x2;
+        *Oz = 0;
     }
 
 }
@@ -456,6 +467,15 @@ __host__ __device__ void compute_plane(const Eigen::Vector3f &v1, const Eigen::V
     N[1] = v2_v1[2] * v3_v2[0] - v2_v1[0] * v3_v2[2];
     N[2] = v2_v1[0] * v3_v2[1] - v2_v1[1] * v3_v2[0];
 
+    // Normalize: signed distances and plane offsets must be in world units
+    // for the TOL-based no_overlap test to be meaningful (unnormalized
+    // normals of small triangles collapse all dists below TOL -> false
+    // negatives).
+    const double nlen = sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]);
+    if (nlen > 1e-30) {
+        N /= nlen;
+    }
+
     d = -1 * (N[0] * v1[0] + N[1] * v1[1] + N[2] * v1[2]);
 }
 
@@ -467,6 +487,12 @@ __host__ __device__ void compute_plane(const Eigen::Vector3d &v1, const Eigen::V
     N[0] = v2_v1[1] * v3_v2[2] - v2_v1[2] * v3_v2[1];
     N[1] = v2_v1[2] * v3_v2[0] - v2_v1[0] * v3_v2[2];
     N[2] = v2_v1[0] * v3_v2[1] - v2_v1[1] * v3_v2[0];
+
+    // Normalize (see float-vertex overload).
+    const double nlen = sqrt(N[0] * N[0] + N[1] * N[1] + N[2] * N[2]);
+    if (nlen > 1e-30) {
+        N /= nlen;
+    }
 
     d = -1 * (N[0] * v1[0] + N[1] * v1[1] + N[2] * v1[2]);
 }
@@ -494,6 +520,12 @@ __host__ __device__ void compute_plane(const Eigen::Vector3f &v1, const Eigen::V
     (*N)[1] = v2_v1[2] * v3_v2[0] - v2_v1[0] * v3_v2[2];
     (*N)[2] = v2_v1[0] * v3_v2[1] - v2_v1[1] * v3_v2[0];
 
+    // Normalize (see double overloads).
+    const float nlen = sqrtf((*N)[0] * (*N)[0] + (*N)[1] * (*N)[1] + (*N)[2] * (*N)[2]);
+    if (nlen > 1e-30f) {
+        *N /= nlen;
+    }
+
     *d = -1 * ((*N)[0] * v1[0] + (*N)[1] * v1[1] + (*N)[2] * v1[2]);
 }
 
@@ -516,6 +548,12 @@ __host__ __device__ void compute_intersect_line(const Eigen::Vector3f N1, const 
     (*O)(0) = (d2 * N1(0) - d1 * N2(0)) / den;
     (*O)(1) = (d2 * N1(1) - d1 * N2(1)) / den;
     (*O)(2) = (d2 * N1(2) - d1 * N2(2)) / den;
+
+    // Normalize D (see compute_intersect_line).
+    const float dlen = sqrtf(den);
+    if (dlen > 1e-30f) {
+        (*D) /= dlen;
+    }
 }
 
 
@@ -578,6 +616,12 @@ __device__ bool triangles_valid(    Eigen::Vector3f f_rob_v1, Eigen::Vector3f f_
 
     Eigen::Vector3d D, O;
     compute_intersect_line(Nr, dr, No, do_, &D, &O);
+    // The interval test only needs the projections of the six vertices onto
+    // the (normalized) intersection line; the reference point cancels out
+    // exactly. Using a triangle vertex (instead of the far-away line point O)
+    // keeps the parametric variables well conditioned for tiny/nearly
+    // parallel triangles, where O can be very large.
+    O = obs_v1;
 
     //TODO: can we pre-canonicalize triangles in the mesh?
     canonicalize_triangle(rob_v1, rob_v2, rob_v3, distR);
@@ -637,9 +681,17 @@ __device__ bool triangles_valid_f(const Eigen::Vector3f& rob_v1, const Eigen::Ve
     // ---- robot plane: origin at rob_v1, N = (v2-v1) x (v3-v1), d = 0 by construction ----
     const float e1x = rob_v2(0) - rob_v1(0), e1y = rob_v2(1) - rob_v1(1), e1z = rob_v2(2) - rob_v1(2);
     const float e2x = rob_v3(0) - rob_v1(0), e2y = rob_v3(1) - rob_v1(1), e2z = rob_v3(2) - rob_v1(2);
-    const float Nr_x = e1y*e2z - e1z*e2y;
-    const float Nr_y = e1z*e2x - e1x*e2z;
-    const float Nr_z = e1x*e2y - e1y*e2x;
+    float Nr_x = e1y*e2z - e1z*e2y;
+    float Nr_y = e1z*e2x - e1x*e2z;
+    float Nr_z = e1x*e2y - e1y*e2x;
+    // Normalize: signed distances must be in world units for the TOL-based
+    // no_overlap test (see compute_plane).
+    const float Nr_len = sqrtf(fmaf(Nr_x, Nr_x, fmaf(Nr_y, Nr_y, Nr_z * Nr_z)));
+    if (Nr_len > 1e-30f) {
+        Nr_x /= Nr_len;
+        Nr_y /= Nr_len;
+        Nr_z /= Nr_len;
+    }
 
     // dists of obs verts to the robot plane: Nr . (obs_i - rob_v1), no big-term cancellation
     const float q1x = obs_v1(0) - rob_v1(0), q1y = obs_v1(1) - rob_v1(1), q1z = obs_v1(2) - rob_v1(2);
@@ -667,9 +719,16 @@ __device__ bool triangles_valid_f(const Eigen::Vector3f& rob_v1, const Eigen::Ve
     // ---- obstacle plane: origin at obs_v1 ----
     const float f1x = obs_v2(0) - obs_v1(0), f1y = obs_v2(1) - obs_v1(1), f1z = obs_v2(2) - obs_v1(2);
     const float f2x = obs_v3(0) - obs_v1(0), f2y = obs_v3(1) - obs_v1(1), f2z = obs_v3(2) - obs_v1(2);
-    const float No_x = f1y*f2z - f1z*f2y;
-    const float No_y = f1z*f2x - f1x*f2z;
-    const float No_z = f1x*f2y - f1y*f2x;
+    float No_x = f1y*f2z - f1z*f2y;
+    float No_y = f1z*f2x - f1x*f2z;
+    float No_z = f1x*f2y - f1y*f2x;
+    // Normalize (see robot plane above).
+    const float No_len = sqrtf(fmaf(No_x, No_x, fmaf(No_y, No_y, No_z * No_z)));
+    if (No_len > 1e-30f) {
+        No_x /= No_len;
+        No_y /= No_len;
+        No_z /= No_len;
+    }
 
     const float r1x = rob_v1(0) - obs_v1(0), r1y = rob_v1(1) - obs_v1(1), r1z = rob_v1(2) - obs_v1(2);
     const float r2x = rob_v2(0) - obs_v1(0), r2y = rob_v2(1) - obs_v1(1), r2z = rob_v2(2) - obs_v1(2);
@@ -706,6 +765,12 @@ __device__ bool triangles_valid_f(const Eigen::Vector3f& rob_v1, const Eigen::Ve
     float Dx, Dy, Dz, Ox, Oy, Oz;
     compute_intersect_line_sep(Nr_x, Nr_y, Nr_z, d_r, No_x, No_y, No_z, d_o,
                                &Dx, &Dy, &Dz, &Ox, &Oy, &Oz);
+    // Use a triangle vertex as the projection reference (see triangles_valid):
+    // the reference cancels in the interval comparison and avoids the far-away
+    // line point for tiny/nearly parallel triangles.
+    Ox = obs_v1(0);
+    Oy = obs_v1(1);
+    Oz = obs_v1(2);
 
     // Normalize D: the interval test is invariant to a common scaling of D.
     const float Dlen = sqrtf(fmaf(Dx, Dx, fmaf(Dy, Dy, Dz * Dz)));

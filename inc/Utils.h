@@ -67,6 +67,18 @@
 #define TIMEIT(msg, ...) __VA_ARGS__
 #endif
 
+// Nanosecond wall-clock timer (%globaltimer), immune to SM clock throttling.
+//
+// Used by the profiling paths of d_bvh_naive and d_bvh_articulated: each
+// block's thread 0 records deltas around the pull/outermost-check phase, the
+// block-serial traversal phase, and the triangle-test phase, and accumulates
+// them into the d_phase counters the host reports as per-block averages.
+__device__ __forceinline__ unsigned long long globaltimer() {
+    unsigned long long t;
+    asm volatile("mov.u64 %0, %%globaltimer;" : "=l"(t));
+    return t;
+}
+
 struct Configuration {
     float x;
     float y;
@@ -209,13 +221,19 @@ struct OBB_soa {
 
 // Extends OBB to include BVH tree information
 // each node either has 0 or 32 children //TODO: confirm this is still true
+//
+// Templated on the child-index type: int16_t is the default (smaller memory
+// footprint, shared-memory friendly) and is what the rigid d_bvh_naive
+// kernel uses; scenes with more than 32767 nodes need int32_t (the
+// articulated d_bvh_articulated path).
 
+template <typename ChildT = int16_t>
 struct BVNode_soa : OBB_soa {
     // using the same pattern as fcl::BVNodeBase 
     /// If the value is positive, it is the index of the first child bv node
     /// If the value is negative, it is -(primitive index + 1)
     /// Zero implies this node has no BVNode_soachildren and no primitives, used only for padding
-    int16_t *first_child;
+    ChildT *first_child;
 
     // Chang & Kim 2009 leaf parameter: x-coordinate of the triangle's third
     // vertex in the leaf rectangle frame (rect = [rx ry rz], shared edge at
@@ -224,7 +242,7 @@ struct BVNode_soa : OBB_soa {
     float *pA;
 
     BVNode_soa(size_t size) : OBB_soa(size) {
-        first_child = new int16_t[size];
+        first_child = new ChildT[size];
         pA = new float[size];
     }
 
@@ -254,13 +272,13 @@ struct BVNode_soa : OBB_soa {
         delete[] pA;
     }
 
-    void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim, int16_t child) {
+    void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim, ChildT child) {
         OBB_soa::set(index, R, T, dim);
         first_child[index] = child;
         pA[index] = 0.0f;
     }
 
-    void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim, int16_t child, float a) {
+    void set(size_t index, const Eigen::Matrix3f& R, const Eigen::Vector3f& T, const Eigen::Vector3f& dim, ChildT child, float a) {
         OBB_soa::set(index, R, T, dim);
         first_child[index] = child;
         pA[index] = a;

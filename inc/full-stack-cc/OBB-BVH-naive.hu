@@ -3,10 +3,14 @@
 #include "Triangle.hu"
 #include <vector>
 
-BVNode_soa BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 2);
+// Builds the 4-ary BVH. Templated on the child-index type: int16_t is the
+// default (used by the rigid d_bvh_naive path); use int32_t for scenes with
+// more than 32767 nodes (required by the articulated d_bvh_articulated path).
+template <typename ChildT = int16_t>
+BVNode_soa<ChildT> BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 2);
 
 // Legacy FCL-based builder (eigen-fitted leaf OBBs), kept for comparison.
-BVNode_soa BVH_fcl_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 2);
+BVNode_soa<> BVH_fcl_hierarchy_from_mesh(const char* mesh_path, size_t power_of_2 = 2);
 
 // Runs the 15 OBB separating-axis tests. Returns true when the two boxes
 // overlap, false when a separating axis proves them disjoint.
@@ -135,7 +139,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
 
 // Checks the given configurations for collisions against the obstacle.
 // Returns one entry per configuration: true if the configuration is valid (no collision).
-double bvh_naive(const BVNode_soa& rob_BVH, const BVNode_soa& obs_BVH,
+double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
                  const MeshData& rob_mesh, const MeshData& obs_mesh,
                  const std::vector<Configuration>& confs,
                  std::vector<bool>& valid, bool dry_run = false);
