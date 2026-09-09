@@ -34,11 +34,11 @@ __host__ __device__ void forwardKinematicsTree(const articulated_conf<N>& conf,
 
 template <size_t N>
 __global__ void d_bvh_urdf(const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
-                           const Eigen::Vector3f* pObs_dim, const int16_t* pObs_first_child,
+                           const Eigen::Vector3f* pObs_dim, const int32_t* pObs_first_child,
                            size_t num_obs_nodes,
                            const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
                            const Eigen::Matrix3f* pRob_R, const Eigen::Vector3f* pRob_T,
-                           const Eigen::Vector3f* pRob_dim, const int16_t* pRob_first_child,
+                           const Eigen::Vector3f* pRob_dim, const int32_t* pRob_first_child,
                            const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
                            const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
                            int num_links,
@@ -46,7 +46,8 @@ __global__ void d_bvh_urdf(const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f*
                            const JointParams* pJointOrigin, const Eigen::Vector3f* pJointAxis,
                            const int* pJointAngleIdx,
                            const articulated_conf<N>* pConf, size_t num_confs,
-                           bool* pdisjoint) {
+                           bool* pdisjoint,
+                           unsigned long long* overflowCounter) {
     size_t index = blockIdx.x * blockDim.x + threadIdx.x;
     if (index >= num_confs) {
         return;
@@ -72,7 +73,7 @@ __global__ void d_bvh_urdf(const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f*
                          pRob_R, pRob_T, pRob_dim, pRob_first_child,
                          pRob_verts, pRob_tris,
                          pR_obs, pT_obs, pObs_dim, pObs_first_child,
-                         pObs_verts, pObs_tris)) {
+                         pObs_verts, pObs_tris, overflowCounter)) {
             collision = true;
             break;
         }
@@ -83,7 +84,7 @@ __global__ void d_bvh_urdf(const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f*
 
 template <size_t N>
 double bvh_urdf(const std::string& robot_urdf_path,
-                const BVNode_soa& obs_BVH, const MeshData& obs_mesh,
+                const BVNode_soa<int32_t>& obs_BVH, const MeshData& obs_mesh,
                 const std::vector<articulated_conf<N>>& confs,
                 std::vector<bool>& valid, bool dry_run) {
     cudaEvent_t start, stop;
@@ -117,7 +118,7 @@ double bvh_urdf(const std::string& robot_urdf_path,
     std::vector<Eigen::Matrix3f> rob_R;
     std::vector<Eigen::Vector3f> rob_T;
     std::vector<Eigen::Vector3f> rob_dim;
-    std::vector<int16_t> rob_first_child;
+    std::vector<int32_t> rob_first_child;
     std::vector<Eigen::Vector3f> rob_verts;
     std::vector<Triangle> rob_tris;
 
@@ -131,12 +132,19 @@ double bvh_urdf(const std::string& robot_urdf_path,
         link_tri_offset[l] = static_cast<int>(rob_tris.size());
 
         if (!robot.link_meshes[l].empty()) {
-            BVNode_soa bvh = BVH_n_ary_hierarchy_from_mesh(robot.link_meshes[l].c_str(), 2);
+            BVNode_soa<int32_t> bvh = BVH_n_ary_hierarchy_from_mesh<int32_t>(robot.link_meshes[l].c_str(), 2);
+            const int base = static_cast<int>(rob_first_child.size());
             for (size_t i = 0; i < bvh.size; ++i) {
                 rob_R.push_back(bvh.pR[i]);
                 rob_T.push_back(bvh.pT[i]);
                 rob_dim.push_back(bvh.pDim[i]);
-                rob_first_child.push_back(bvh.first_child[i]);
+                // first_child pointers are indices relative to this link's own
+                // BVH; rebase internal pointers onto the concatenated array.
+                int32_t fc = (int32_t)bvh.first_child[i];
+                if (fc > 0) {
+                    fc += base;
+                }
+                rob_first_child.push_back(fc);
             }
 
             MeshData md;
@@ -155,14 +163,14 @@ double bvh_urdf(const std::string& robot_urdf_path,
     Eigen::Matrix3f* d_R_obs;
     Eigen::Vector3f* d_T_obs;
     Eigen::Vector3f* d_Obs_dim;
-    int16_t* d_Obs_first_child;
+    int32_t* d_Obs_first_child;
     Eigen::Vector3f* d_Obs_verts;
     Triangle* d_Obs_tris;
 
     Eigen::Matrix3f* d_Rob_R;
     Eigen::Vector3f* d_Rob_T;
     Eigen::Vector3f* d_Rob_dim;
-    int16_t* d_Rob_first_child;
+    int32_t* d_Rob_first_child;
     Eigen::Vector3f* d_Rob_verts;
     Triangle* d_Rob_tris;
 
@@ -176,20 +184,21 @@ double bvh_urdf(const std::string& robot_urdf_path,
     int* d_JointAngleIdx;
     articulated_conf<N>* d_Conf;
     bool* d_disjoint;
+    unsigned long long* d_overflow;
 
     cudaEventRecord(start, 0);
 
     cudaMalloc((void**)&d_R_obs, obs_BVH.size * sizeof(Eigen::Matrix3f));
     cudaMalloc((void**)&d_T_obs, obs_BVH.size * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_dim, obs_BVH.size * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Obs_first_child, obs_BVH.size * sizeof(int16_t));
+    cudaMalloc((void**)&d_Obs_first_child, obs_BVH.size * sizeof(int32_t));
     cudaMalloc((void**)&d_Obs_verts, obs_mesh.vertices.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_tris, obs_mesh.triangles.size() * sizeof(Triangle));
 
     cudaMalloc((void**)&d_Rob_R, rob_R.size() * sizeof(Eigen::Matrix3f));
     cudaMalloc((void**)&d_Rob_T, rob_T.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_dim, rob_dim.size() * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Rob_first_child, rob_first_child.size() * sizeof(int16_t));
+    cudaMalloc((void**)&d_Rob_first_child, rob_first_child.size() * sizeof(int32_t));
     cudaMalloc((void**)&d_Rob_verts, rob_verts.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_tris, rob_tris.size() * sizeof(Triangle));
 
@@ -203,18 +212,19 @@ double bvh_urdf(const std::string& robot_urdf_path,
     cudaMalloc((void**)&d_JointAngleIdx, num_links * sizeof(int));
     cudaMalloc((void**)&d_Conf, num_confs * sizeof(articulated_conf<N>));
     cudaMalloc((void**)&d_disjoint, gridSize * blockSize * sizeof(bool));
+    cudaMalloc((void**)&d_overflow, sizeof(unsigned long long));
 
     checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Obs_first_child, obs_BVH.first_child, obs_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Obs_first_child, obs_BVH.first_child, obs_BVH.size * sizeof(int32_t), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_verts, obs_mesh.vertices.data(), obs_mesh.vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_tris, obs_mesh.triangles.data(), obs_mesh.triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
 
     checkCudaMem(cudaMemcpy(d_Rob_R, rob_R.data(), rob_R.size() * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_T, rob_T.data(), rob_T.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_dim, rob_dim.data(), rob_dim.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_first_child, rob_first_child.data(), rob_first_child.size() * sizeof(int16_t), cudaMemcpyHostToDevice));
+    checkCudaMem(cudaMemcpy(d_Rob_first_child, rob_first_child.data(), rob_first_child.size() * sizeof(int32_t), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_verts, rob_verts.data(), rob_verts.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_tris, rob_tris.data(), rob_tris.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
 
@@ -246,16 +256,18 @@ double bvh_urdf(const std::string& robot_urdf_path,
             d_LinkParent, d_LinkOrder,
             d_JointOrigin, d_JointAxis, d_JointAngleIdx,
             d_Conf, num_confs,
-            d_disjoint);
+            d_disjoint, d_overflow);
     };
 
     if (dry_run) {
+        checkCudaMem(cudaMemset(d_overflow, 0, sizeof(unsigned long long)));
         launch();
         checkCudaMem(cudaGetLastError());
         checkCudaMem(cudaDeviceSynchronize());
         std::cout << "URDF BVH dry run completed successfully." << std::endl;
     }
 
+    checkCudaMem(cudaMemset(d_overflow, 0, sizeof(unsigned long long)));
     cudaEventRecord(start, 0);
     launch();
     cudaEventRecord(stop, 0);
@@ -263,6 +275,13 @@ double bvh_urdf(const std::string& robot_urdf_path,
     cudaEventElapsedTime(&duration, start, stop);
     std::cout << "URDF BVH GPU kernel took " << duration << " ms for "
               << num_confs << " configurations." << std::endl;
+    unsigned long long h_overflow = 0;
+    checkCudaMem(cudaMemcpy(&h_overflow, d_overflow, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
+    if (h_overflow != 0) {
+        std::cerr << "WARNING: " << h_overflow
+                  << " conservative stack-overflow early exits (potential false positives)"
+                  << std::endl;
+    }
 
     std::unique_ptr<bool[]> disjoint(new bool[num_confs]);
     checkCudaMem(cudaMemcpy(disjoint.get(), d_disjoint, num_confs * sizeof(bool), cudaMemcpyDeviceToHost));
@@ -294,6 +313,7 @@ double bvh_urdf(const std::string& robot_urdf_path,
     cudaFree(d_JointAngleIdx);
     cudaFree(d_Conf);
     cudaFree(d_disjoint);
+    cudaFree(d_overflow);
 
     return duration;
 }

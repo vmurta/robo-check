@@ -9,11 +9,16 @@ Eigen
 Full-Integration-Test
 Generate-Tests
 BVH
+rtcd-bench
 
 
 # Test files
 tmp/*
 data/configurations/*
+
+# Claude stuff
+SESSION_NOTES.md
+PickleAudit.md
 
 # Vim files
 *.swp
@@ -27,3 +32,4 @@ build/
 results/
 
 .vscode/*
+

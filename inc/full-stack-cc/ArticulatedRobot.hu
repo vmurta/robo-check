@@ -80,27 +80,32 @@ __host__ __device__ inline Eigen::Matrix3f axisAngleToRotation(const Eigen::Vect
     return R;
 }
 
-// d_bvh_articulated: articulated version of d_bvh_naive. Each thread checks one
-// configuration by running forward kinematics and colliding every link's BVH
-// against the obstacle BVH. pdisjoint[i] is true when configuration i is valid.
+// d_bvh_articulated: articulated version of d_bvh_naive with the same
+// persistent-block / block-serial traversal strategy. Results are bit-packed
+// in pdisjoint (1 = disjoint/free). overflowCounter counts conservative
+// pending-list overflows (must stay 0).
 template <size_t N>
 __global__ void d_bvh_articulated(const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
-                                  const Eigen::Vector3f* pObs_dim, const int16_t* pObs_first_child,
+                                  const Eigen::Vector3f* pObs_dim, const int32_t* pObs_first_child,
                                   size_t num_obs_nodes,
                                   const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
+                                  const float* pObs_a,
                                   const Eigen::Matrix3f* pRob_R, const Eigen::Vector3f* pRob_T,
-                                  const Eigen::Vector3f* pRob_dim, const int16_t* pRob_first_child,
+                                  const Eigen::Vector3f* pRob_dim, const int32_t* pRob_first_child,
+                                  const float* pRob_a,
                                   const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
                                   const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
+                                  int num_links,
                                   const JointParams* pJoints,
                                   const articulated_conf<N>* pConf, size_t num_confs,
-                                  bool* pdisjoint);
+                                  uint32_t* pdisjoint, uint32_t* g_next_conf,
+                                  unsigned long long* d_phase, unsigned long long* overflowCounter);
 
 // Host wrapper mirroring bvh_naive. Builds per-link BVHs from the URDF,
 // allocates device memory, launches d_bvh_articulated<N>, and copies results.
 template <size_t N>
 double bvh_articulated(const std::string& robot_urdf_path,
-                       const BVNode_soa& obs_BVH, const MeshData& obs_mesh,
+                       const BVNode_soa<int32_t>& obs_BVH, const MeshData& obs_mesh,
                        const std::vector<articulated_conf<N>>& confs,
                        std::vector<bool>& valid, bool dry_run = false);
 

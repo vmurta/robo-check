@@ -534,7 +534,7 @@ BVNode_soa<ChildT> BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t p
                   << " nodes exceeds int32_t first_child capacity" << std::endl;
         exit(1);
     }
-    if constexpr (sizeof(ChildT) <= 2) {
+    if constexpr (sizeof(ChildT) <= 2) { //int16_t case
         if (total > 32767) {
             std::cerr << "BVH_n_ary_hierarchy_from_mesh: " << total
                       << " nodes exceeds int16_t first_child capacity (32767);"
@@ -560,7 +560,7 @@ BVNode_soa<ChildT> BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t p
 
     // Validate the flattened tree structure (host-side, cheap).
     for (size_t i = 0; i < total; ++i) {
-        const int64_t fc = result.first_child[i];
+        const ChildT fc = result.first_child[i];
         if (fc > 0) {
             if (fc + 4 > (int64_t)total) {
                 std::cerr << "BVH validate: node " << i << " first_child " << fc
