@@ -33,6 +33,9 @@ all: Generate-Tests profiling
 
 profiling: BVH
 
+rtcd-bench: $(BUILD_DIR)/rtcd_bench.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/ArticulatedRobot.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/Triangle.o
+	$(NVCC) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
+
 # ---- Build rules ----
 
 Generate-Tests: $(BUILD_DIR)/generate-tests.o $(BUILD_DIR)/Utils.o
@@ -72,6 +75,9 @@ $(BUILD_DIR)/%.o: $(NAR_DIR)/%.cu | $(BUILD_DIR)
 
 # profiling/
 $(BUILD_DIR)/obb_test.o: $(PROF_DIR)/obb_test.cu | $(BUILD_DIR)
+	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $< -o $@
+
+$(BUILD_DIR)/rtcd_bench.o: $(PROF_DIR)/rtcd_bench.cu | $(BUILD_DIR)
 	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $< -o $@
 
 # ---- Explicit rules ----
