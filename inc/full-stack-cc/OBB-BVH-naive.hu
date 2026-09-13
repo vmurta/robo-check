@@ -84,8 +84,7 @@ __device__ __forceinline__ void computeRelTransform(const Eigen::Matrix3f& R_obs
                                                     const Eigen::Matrix3f& R_rob, const Eigen::Vector3f& T_rob,
                                                     const Eigen::Matrix3f& R_conf, const Eigen::Vector3f& T_conf,
                                                     const float epsilon,
-                                                    Eigen::Matrix3f& B, Eigen::Matrix3f& Bf, Eigen::Vector3f& T) {
-    // C = R_conf * R_rob
+                                                    Eigen::Matrix3f& B, Eigen::Matrix3f& Bf, Eigen::Vector3f& T) {    // C = R_conf * R_rob
     const float c00 = R_conf(0,0)*R_rob(0,0) + R_conf(0,1)*R_rob(1,0) + R_conf(0,2)*R_rob(2,0);
     const float c01 = R_conf(0,0)*R_rob(0,1) + R_conf(0,1)*R_rob(1,1) + R_conf(0,2)*R_rob(2,1);
     const float c02 = R_conf(0,0)*R_rob(0,2) + R_conf(0,1)*R_rob(1,2) + R_conf(0,2)*R_rob(2,2);
@@ -124,6 +123,138 @@ __device__ __forceinline__ void computeRelTransform(const Eigen::Matrix3f& R_obs
     T(0) = tw0*R_obs(0,0) + tw1*R_obs(1,0) + tw2*R_obs(2,0);
     T(1) = tw0*R_obs(0,1) + tw1*R_obs(1,1) + tw2*R_obs(2,1);
     T(2) = tw0*R_obs(0,2) + tw1*R_obs(1,2) + tw2*R_obs(2,2);
+}
+
+// ---------------------------------------------------------------------------
+// Register-pressure-optimized narrow phase for the articulated kernel:
+// the |B|+epsilon matrix is NOT materialized. Instead obbOverlapAbs folds
+// |B| into the FMA source operands (free |x| modifiers in SASS) and epsilon
+// into the right-hand-side sums, keeping 9 fewer floats live per node pair.
+// ---------------------------------------------------------------------------
+__device__ __forceinline__ void computeRelTransformNoBf(const Eigen::Matrix3f& R_obs, const Eigen::Vector3f& T_obs,
+                                                        const Eigen::Matrix3f& R_rob, const Eigen::Vector3f& T_rob,
+                                                        const Eigen::Matrix3f& R_conf, const Eigen::Vector3f& T_conf,
+                                                        Eigen::Matrix3f& B, Eigen::Vector3f& T) {
+    // C = R_conf * R_rob
+    const float c00 = R_conf(0,0)*R_rob(0,0) + R_conf(0,1)*R_rob(1,0) + R_conf(0,2)*R_rob(2,0);
+    const float c01 = R_conf(0,0)*R_rob(0,1) + R_conf(0,1)*R_rob(1,1) + R_conf(0,2)*R_rob(2,1);
+    const float c02 = R_conf(0,0)*R_rob(0,2) + R_conf(0,1)*R_rob(1,2) + R_conf(0,2)*R_rob(2,2);
+    const float c10 = R_conf(1,0)*R_rob(0,0) + R_conf(1,1)*R_rob(1,0) + R_conf(1,2)*R_rob(2,0);
+    const float c11 = R_conf(1,0)*R_rob(0,1) + R_conf(1,1)*R_rob(1,1) + R_conf(1,2)*R_rob(2,1);
+    const float c12 = R_conf(1,0)*R_rob(0,2) + R_conf(1,1)*R_rob(1,2) + R_conf(1,2)*R_rob(2,2);
+    const float c20 = R_conf(2,0)*R_rob(0,0) + R_conf(2,1)*R_rob(1,0) + R_conf(2,2)*R_rob(2,0);
+    const float c21 = R_conf(2,0)*R_rob(0,1) + R_conf(2,1)*R_rob(1,1) + R_conf(2,2)*R_rob(2,1);
+    const float c22 = R_conf(2,0)*R_rob(0,2) + R_conf(2,1)*R_rob(1,2) + R_conf(2,2)*R_rob(2,2);
+
+    // B = R_obs^T * C
+    const float b00 = R_obs(0,0)*c00 + R_obs(1,0)*c10 + R_obs(2,0)*c20;
+    const float b01 = R_obs(0,0)*c01 + R_obs(1,0)*c11 + R_obs(2,0)*c21;
+    const float b02 = R_obs(0,0)*c02 + R_obs(1,0)*c12 + R_obs(2,0)*c22;
+    const float b10 = R_obs(0,1)*c00 + R_obs(1,1)*c10 + R_obs(2,1)*c20;
+    const float b11 = R_obs(0,1)*c01 + R_obs(1,1)*c11 + R_obs(2,1)*c21;
+    const float b12 = R_obs(0,1)*c02 + R_obs(1,1)*c12 + R_obs(2,1)*c22;
+    const float b20 = R_obs(0,2)*c00 + R_obs(1,2)*c10 + R_obs(2,2)*c20;
+    const float b21 = R_obs(0,2)*c01 + R_obs(1,2)*c11 + R_obs(2,2)*c21;
+    const float b22 = R_obs(0,2)*c02 + R_obs(1,2)*c12 + R_obs(2,2)*c22;
+
+    B(0,0) = b00; B(0,1) = b01; B(0,2) = b02;
+    B(1,0) = b10; B(1,1) = b11; B(1,2) = b12;
+    B(2,0) = b20; B(2,1) = b21; B(2,2) = b22;
+
+    // T_world = T_conf + R_conf * T_rob - T_obs
+    const float tw0 = T_conf(0) + R_conf(0,0)*T_rob(0) + R_conf(0,1)*T_rob(1) + R_conf(0,2)*T_rob(2) - T_obs(0);
+    const float tw1 = T_conf(1) + R_conf(1,0)*T_rob(0) + R_conf(1,1)*T_rob(1) + R_conf(1,2)*T_rob(2) - T_obs(1);
+    const float tw2 = T_conf(2) + R_conf(2,0)*T_rob(0) + R_conf(2,1)*T_rob(1) + R_conf(2,2)*T_rob(2) - T_obs(2);
+
+    // T = T_world^T * R_obs
+    T(0) = tw0*R_obs(0,0) + tw1*R_obs(1,0) + tw2*R_obs(2,0);
+    T(1) = tw0*R_obs(0,1) + tw1*R_obs(1,1) + tw2*R_obs(2,1);
+    T(2) = tw0*R_obs(0,2) + tw1*R_obs(1,2) + tw2*R_obs(2,2);
+}
+
+// 15 OBB separating-axis tests, equivalent to obbOverlap(a, b, B, |B|+eps, T)
+// but with |B| folded into the FMA sources and eps folded into the sums.
+__device__ __forceinline__ bool obbOverlapAbs(const Eigen::Vector3f& a, const Eigen::Vector3f& b,
+                                              const Eigen::Matrix3f& B, const float eps,
+                                              const Eigen::Vector3f& T) {
+    const float aS = a[0] + a[1] + a[2];
+    const float bS = b[0] + b[1] + b[2];
+    const float ebs = eps * bS;
+    const float eas = eps * aS;
+    const float S = ebs + eas;
+    const float a0e = a[0] + ebs;
+    const float a1e = a[1] + ebs;
+    const float a2e = a[2] + ebs;
+    const float b0e = b[0] + eas;
+    const float b1e = b[1] + eas;
+    const float b2e = b[2] + eas;
+
+    float t;
+
+    t = fabsf(T[0]);
+    if (t > (fabsf(B(0,0))*b[0] + fabsf(B(0,1))*b[1] + fabsf(B(0,2))*b[2] + a0e)) return false;
+
+    t = fabsf(B(0,0)*T[0] + B(1,0)*T[1] + B(2,0)*T[2]);
+    if (t > (fabsf(B(0,0))*a[0] + fabsf(B(1,0))*a[1] + fabsf(B(2,0))*a[2] + b0e)) return false;
+
+    t = fabsf(T[1]);
+    if (t > (fabsf(B(1,0))*b[0] + fabsf(B(1,1))*b[1] + fabsf(B(1,2))*b[2] + a1e)) return false;
+
+    t = fabsf(T[2]);
+    if (t > (fabsf(B(2,0))*b[0] + fabsf(B(2,1))*b[1] + fabsf(B(2,2))*b[2] + a2e)) return false;
+
+    t = fabsf(B(0,1)*T[0] + B(1,1)*T[1] + B(2,1)*T[2]);
+    if (t > (fabsf(B(0,1))*a[0] + fabsf(B(1,1))*a[1] + fabsf(B(2,1))*a[2] + b1e)) return false;
+
+    t = fabsf(B(0,2)*T[0] + B(1,2)*T[1] + B(2,2)*T[2]);
+    if (t > (fabsf(B(0,2))*a[0] + fabsf(B(1,2))*a[1] + fabsf(B(2,2))*a[2] + b2e)) return false;
+
+    t = fabsf(T[2] * B(1, 0) - T[1] * B(2, 0));
+    if (t > (fabsf(B(2,0))*a[1] + fabsf(B(1,0))*a[2] +
+             fabsf(B(0,2))*b[1] + fabsf(B(0,1))*b[2] +
+             (S - eps*(a[0] + b[0])))) return false;
+
+    t = fabsf(T[2] * B(1, 1) - T[1] * B(2, 1));
+    if (t > (fabsf(B(2,1))*a[1] + fabsf(B(1,1))*a[2] +
+             fabsf(B(0,2))*b[0] + fabsf(B(0,0))*b[2] +
+             (S - eps*(a[0] + b[1])))) return false;
+
+    t = fabsf(T[2] * B(1, 2) - T[1] * B(2, 2));
+    if (t > (fabsf(B(2,2))*a[1] + fabsf(B(1,2))*a[2] +
+             fabsf(B(0,1))*b[0] + fabsf(B(0,0))*b[1] +
+             (S - eps*(a[0] + b[2])))) return false;
+
+    t = fabsf(T[0] * B(2, 0) - T[2] * B(0, 0));
+    if (t > (fabsf(B(2,0))*a[0] + fabsf(B(0,0))*a[2] +
+             fabsf(B(1,2))*b[1] + fabsf(B(1,1))*b[2] +
+             (S - eps*(a[1] + b[0])))) return false;
+
+    t = fabsf(T[0] * B(2, 1) - T[2] * B(0, 1));
+    if (t > (fabsf(B(2,1))*a[0] + fabsf(B(0,1))*a[2] +
+             fabsf(B(1,2))*b[0] + fabsf(B(1,0))*b[2] +
+             (S - eps*(a[1] + b[1])))) return false;
+
+    t = fabsf(T[0] * B(2, 2) - T[2] * B(0, 2));
+    if (t > (fabsf(B(2,2))*a[0] + fabsf(B(0,2))*a[2] +
+             fabsf(B(1,1))*b[0] + fabsf(B(1,0))*b[1] +
+             (S - eps*(a[1] + b[2])))) return false;
+
+    t = fabsf(T[1] * B(0, 0) - T[0] * B(1, 0));
+    if (t > (fabsf(B(1,0))*a[0] + fabsf(B(0,0))*a[1] +
+             fabsf(B(2,2))*b[1] + fabsf(B(2,1))*b[2] +
+             (S - eps*(a[2] + b[0])))) return false;
+
+    t = fabsf(T[1] * B(0, 1) - T[0] * B(1, 1));
+    if (t > (fabsf(B(1,1))*a[0] + fabsf(B(0,1))*a[1] +
+             fabsf(B(2,2))*b[0] + fabsf(B(2,0))*b[2] +
+             (S - eps*(a[2] + b[1])))) return false;
+
+    t = fabsf(T[1] * B(0, 2) - T[0] * B(1, 2));
+    if (t > (fabsf(B(1,2))*a[0] + fabsf(B(0,2))*a[1] +
+             fabsf(B(2,1))*b[0] + fabsf(B(2,0))*b[1] +
+             (S - eps*(a[2] + b[2])))) return false;
+
+    return true;
 }
 
 __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, const Eigen::Vector3f* __restrict__ pT_obs,

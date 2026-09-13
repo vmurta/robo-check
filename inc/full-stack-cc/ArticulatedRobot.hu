@@ -4,6 +4,36 @@
 #include "OBB-BVH-naive.hu"
 #include <vector>
 
+// Unit quaternion (x, y, z, w), used for the quaternion node-storage layout.
+struct Quat {
+    float x, y, z, w;
+};
+
+// Converts a unit quaternion to a 3x3 rotation matrix.
+__host__ __device__ __forceinline__ Eigen::Matrix3f quatToMatrix(const Quat& q) {
+    const float xx = q.x * q.x;
+    const float yy = q.y * q.y;
+    const float zz = q.z * q.z;
+    const float xy = q.x * q.y;
+    const float xz = q.x * q.z;
+    const float yz = q.y * q.z;
+    const float wx = q.w * q.x;
+    const float wy = q.w * q.y;
+    const float wz = q.w * q.z;
+
+    Eigen::Matrix3f R;
+    R(0, 0) = 1.0f - 2.0f * (yy + zz);
+    R(0, 1) = 2.0f * (xy - wz);
+    R(0, 2) = 2.0f * (xz + wy);
+    R(1, 0) = 2.0f * (xy + wz);
+    R(1, 1) = 1.0f - 2.0f * (xx + zz);
+    R(1, 2) = 2.0f * (yz - wx);
+    R(2, 0) = 2.0f * (xz - wy);
+    R(2, 1) = 2.0f * (yz + wx);
+    R(2, 2) = 1.0f - 2.0f * (xx + yy);
+    return R;
+}
+
 // A configuration for an articulated robot with N revolute joints.
 // Mirrors the ROS2 convention where each entry is a single joint angle
 // (radians), one per joint in the serial chain.
@@ -80,33 +110,161 @@ __host__ __device__ inline Eigen::Matrix3f axisAngleToRotation(const Eigen::Vect
     return R;
 }
 
+// ---------------------------------------------------------------------------
+// Kernel variants for the A/B/C/BC experiment:
+//   RESTRICT_PTRS = false -> plain pointers (baseline codegen)
+//   RESTRICT_PTRS = true  -> const __restrict__ pointers (lets ptxas emit
+//                            LDG.E.CONSTANT / vectorized loads)
+//   RobChildT/ObsChildT = int32_t (baseline) or int16_t (halves first_child
+//                            loads and the pend/tri queue element size per
+//                            side; usable per side only when that side's node
+//                            count fits in 15 bits)
+// ---------------------------------------------------------------------------
+template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS>
+struct ArticKernelPtrs;
+
+template <size_t N, typename RobChildT, typename ObsChildT>
+struct ArticKernelPtrs<N, RobChildT, ObsChildT, false> {
+    typedef const Eigen::Matrix3f* RM;
+    typedef const Eigen::Vector3f* V3;
+    typedef const ObsChildT* ObsChild;
+    typedef const RobChildT* RobChild;
+    typedef const float* FP;
+    typedef const Triangle* TP;
+    typedef const int* IP;
+    typedef const JointParams* JP;
+    typedef const articulated_conf<N>* CP;
+};
+
+template <size_t N, typename RobChildT, typename ObsChildT>
+struct ArticKernelPtrs<N, RobChildT, ObsChildT, true> {
+    typedef const Eigen::Matrix3f* __restrict__ RM;
+    typedef const Eigen::Vector3f* __restrict__ V3;
+    typedef const ObsChildT* __restrict__ ObsChild;
+    typedef const RobChildT* __restrict__ RobChild;
+    typedef const float* __restrict__ FP;
+    typedef const Triangle* __restrict__ TP;
+    typedef const int* __restrict__ IP;
+    typedef const JointParams* __restrict__ JP;
+    typedef const articulated_conf<N>* __restrict__ CP;
+};
+
+// Queue element type for the pending/tri buffers: uint16 when child indices
+// are int16 (halves the static shared-memory footprint on that side).
+template <typename ChildT>
+struct ArticQueueIdx;
+template <>
+struct ArticQueueIdx<int16_t> {
+    typedef uint16_t Q;
+};
+template <>
+struct ArticQueueIdx<int32_t> {
+    typedef uint32_t Q;
+};
+
+// ---------------------------------------------------------------------------
+// Node-data layouts (experiment): how each BVH node's R/T/dim/a is stored on
+// the device.
+//   0 = Eigen::Matrix3f/Vector3f SoA arrays (baseline, scalar LDG.E)
+//   1 = R as quaternion float4 (1x LDG.128 per node, quat->matrix in-kernel)
+//   2 = R as 3x float4 rows (16B-aligned, 3x LDG.128 per node)
+//   3 = R as quaternion + T/dim/a packed in 2x float4 (3x LDG.128 per node)
+// Only the pointers belonging to the kernel's LAYOUT are non-null.
+// ---------------------------------------------------------------------------
+struct NodePtrs {
+    const Eigen::Matrix3f* R; // layout 0
+    const float4* Rq;         // layouts 1, 3 (x,y,z,w)
+    const float4* Rp;         // layout 2 (3x float4 rows per node)
+    const float4* TD;         // layout 3: (T.xyz,dim.x),(dim.yz,a,pad)
+    const Eigen::Vector3f* T; // layouts 0-2
+    const Eigen::Vector3f* dim; // layouts 0-2
+    const float* a;           // layouts 0-2
+};
+
+// Loads one node's (R, T, dim, a) into registers. LAYOUT is a template
+// constant, so the dead branches fold away per instantiation.
+template <int LAYOUT>
+__device__ __forceinline__ void loadNode(const NodePtrs& p, int i,
+                                         Eigen::Matrix3f& R, Eigen::Vector3f& T,
+                                         Eigen::Vector3f& dim, float& a) {
+    if (LAYOUT == 0) {
+        R = p.R[i];
+        T = p.T[i];
+        dim = p.dim[i];
+        a = p.a[i];
+    } else if (LAYOUT == 1) {
+        const float4 q = p.Rq[i];
+        R = quatToMatrix(Quat{q.x, q.y, q.z, q.w});
+        T = p.T[i];
+        dim = p.dim[i];
+        a = p.a[i];
+    } else if (LAYOUT == 2) {
+        const float4 r0 = p.Rp[i * 3 + 0];
+        const float4 r1 = p.Rp[i * 3 + 1];
+        const float4 r2 = p.Rp[i * 3 + 2];
+        R(0, 0) = r0.x;
+        R(0, 1) = r0.y;
+        R(0, 2) = r0.z;
+        R(1, 0) = r1.x;
+        R(1, 1) = r1.y;
+        R(1, 2) = r1.z;
+        R(2, 0) = r2.x;
+        R(2, 1) = r2.y;
+        R(2, 2) = r2.z;
+        T = p.T[i];
+        dim = p.dim[i];
+        a = p.a[i];
+    } else {
+        const float4 q = p.Rq[i];
+        const float4 t0 = p.TD[i * 2 + 0];
+        const float4 t1 = p.TD[i * 2 + 1];
+        R = quatToMatrix(Quat{q.x, q.y, q.z, q.w});
+        T = Eigen::Vector3f(t0.x, t0.y, t0.z);
+        dim = Eigen::Vector3f(t0.w, t1.x, t1.y);
+        a = t1.z;
+    }
+}
+
 // d_bvh_articulated: articulated version of d_bvh_naive with the same
 // persistent-block / block-serial traversal strategy. Results are bit-packed
 // in pdisjoint (1 = disjoint/free). overflowCounter counts conservative
-// pending-list overflows (must stay 0).
-template <size_t N>
-__global__ void d_bvh_articulated(const Eigen::Matrix3f* pR_obs, const Eigen::Vector3f* pT_obs,
-                                  const Eigen::Vector3f* pObs_dim, const int32_t* pObs_first_child,
+// pending-list overflows (must stay 0). d_tri_stats counts the narrow-phase
+// verdicts ([pairs, hits, fallbacks]; see d_articulated_tri_phase).
+//
+// Variants:
+//   RobChildT/ObsChildT = int16_t shrinks child loads/queues per side
+//   RESTRICT_PTRS=true  adds __restrict__ pointers
+//   LAYOUT              selects the node-data storage layout (see NodePtrs)
+template <size_t N, typename RobChildT = int32_t, typename ObsChildT = int32_t,
+          bool RESTRICT_PTRS = false, int LAYOUT = 0>
+__global__ void d_bvh_articulated(const NodePtrs obsN,
+                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::ObsChild pObs_first_child,
                                   size_t num_obs_nodes,
                                   const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
-                                  const float* pObs_a,
-                                  const Eigen::Matrix3f* pRob_R, const Eigen::Vector3f* pRob_T,
-                                  const Eigen::Vector3f* pRob_dim, const int32_t* pRob_first_child,
-                                  const float* pRob_a,
+                                  const NodePtrs robN,
+                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::RobChild pRob_first_child,
                                   const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
                                   const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
                                   int num_links,
                                   const JointParams* pJoints,
                                   const articulated_conf<N>* pConf, size_t num_confs,
                                   uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* d_phase, unsigned long long* overflowCounter);
+                                  unsigned long long* d_phase, unsigned long long* overflowCounter,
+                                  unsigned long long* d_tri_stats);
 
 // Host wrapper mirroring bvh_naive. Builds per-link BVHs from the URDF,
 // allocates device memory, launches d_bvh_articulated<N>, and copies results.
+//
+// kernel_mode selects the variant:
+//   bit 0  = int16 child indices (where they fit)
+//   bit 1  = __restrict__ pointers
+//   bits 2-3 = node-data layout (0-3, see NodePtrs)
+// int16 silently falls back to int32 when any node index exceeds 15 bits.
 template <size_t N>
 double bvh_articulated(const std::string& robot_urdf_path,
                        const BVNode_soa<int32_t>& obs_BVH, const MeshData& obs_mesh,
                        const std::vector<articulated_conf<N>>& confs,
-                       std::vector<bool>& valid, bool dry_run = false);
+                       std::vector<bool>& valid, bool dry_run = false,
+                       int kernel_mode = 0);
 
 #include "ArticulatedRobot.tcc"

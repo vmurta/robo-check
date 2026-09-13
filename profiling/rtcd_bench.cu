@@ -24,6 +24,7 @@
 #include <memory>
 #include <cstring>
 #include <algorithm>
+#include <unistd.h>
 
 #include <Eigen/Dense>
 #include <fcl/fcl.h>
@@ -200,7 +201,16 @@ static SceneData buildScene(const std::string& sceneDir, const std::string& scen
     std::cout << "Scene '" << sceneName << "': " << sd.mesh.triangles.size() << " triangles total" << std::endl;
 
     // Write merged OBJ so the existing BVH builder path (file-based) is used.
-    const char* tmp = "/tmp/rtcd_scene_merged.obj";
+    // mkstemp: per-process unique path so concurrent benchmark/profiling runs
+    // cannot collide on a shared temp file.
+    char tmp_template[] = "/tmp/rtcd_scene_merged_XXXXXX";
+    const int tmpfd = mkstemp(tmp_template);
+    if (tmpfd < 0) {
+        std::cerr << "Cannot create merged-scene temp file" << std::endl;
+        exit(1);
+    }
+    close(tmpfd);
+    const char* tmp = tmp_template;
     FILE* f = fopen(tmp, "wb");
     if (!f) {
         std::cerr << "Cannot write " << tmp << std::endl;
@@ -755,10 +765,16 @@ int main(int argc, char** argv) {
         for (int j = 0; j < 7; ++j) confs[i][j] = traj[i][j];
     }
 
-    auto runGpu = [&](size_t n) -> double {
+    // A/B/C/BC kernel variants (node-layout experiment):
+    //   0 = base (matrix SoA)        4 = quat R
+    //   8 = vecR (padded float4 R)  12 = quat R + packed T/dim/a
+    static const int kVariantMode[4] = {0, 4, 8, 12};
+    static const char* kVariantName[4] = {"base", "quat", "vecR", "quat+TD"};
+
+    auto runGpu = [&](size_t n, int kmode, std::vector<bool>* outValid) -> double {
         std::vector<articulated_conf<7>> sub(confs.begin(), confs.begin() + n);
         std::vector<bool> valid;
-        const double kernelMs = bvh_articulated<7>(urdfPath, sd.bvh, sd.mesh, sub, valid, true);
+        const double kernelMs = bvh_articulated<7>(urdfPath, sd.bvh, sd.mesh, sub, valid, true, kmode);
 #ifdef RTCD_PROF
         articulatedProfDump();
         articulatedObbDump();
@@ -786,13 +802,16 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            std::cout << "FP/FN check (" << n << " poses): TP=" << tp << " TN=" << tn
-                      << " FP=" << fp << " FN=" << fn << std::endl;
-            std::cout << "GPU collision count: " << (tp + fp) << ", FCL: " << (tp + fn) << std::endl;
+            const char* kName = (kmode == 0) ? "base" : (kmode == 4) ? "quat" : (kmode == 8) ? "vecR" : (kmode == 12) ? "quat+TD" : (kmode == 32) ? "1bsm" : "mode?";
+        std::cout << "FP/FN check [" << kName << "] (" << n << " poses): TP=" << tp
+                      << " TN=" << tn << " FP=" << fp << " FN=" << fn << std::endl;
             if (fp != 0 || fn != 0) {
                 std::cerr << "MISMATCH vs FCL ground truth (FP=" << fp << " FN=" << fn << ")" << std::endl;
                 exit(1);
             }
+        }
+        if (outValid) {
+            *outValid = std::move(valid);
         }
         return kernelMs;
     };
@@ -818,22 +837,43 @@ int main(int argc, char** argv) {
     }
 
     for (size_t batch : batchSizes) {
-        double totalMs = 0.0;
-        double bestMs = 1e30;
+        double totalMs[4] = {0, 0, 0, 0};
+        double bestMs[4] = {1e30, 1e30, 1e30, 1e30};
+        bool agree = true;
         for (int r = 0; r < repeat; ++r) {
-            const double ms = runGpu(batch);
-            totalMs += ms;
-            bestMs = std::min(bestMs, ms);
-            best = std::min(best, ms);
+            std::vector<bool> validRef, vq;
+            // Alternate the run order per repeat so clock/thermal drift does
+            // not systematically favor one variant.
+            const bool rev = (r & 1) != 0;
+            for (int i = 0; i < 4; ++i) {
+                const int m = rev ? kVariantMode[3 - i] : kVariantMode[i];
+                std::vector<bool> v;
+                const double ms = runGpu(batch, m, &v);
+                totalMs[i] += ms;
+                bestMs[i] = std::min(bestMs[i], ms);
+                best = std::min(best, ms);
+                if (validRef.empty()) {
+                    validRef = v;
+                } else if (validRef != v) {
+                    agree = false;
+                }
+            }
         }
-        const double avgMs = totalMs / repeat;
-        const double usPerPose = avgMs * 1000.0 / (double)batch;
-        std::cout << "BATCH " << batch << ": avg kernel " << avgMs << " ms -> "
-                  << usPerPose << " us/pose (best " << bestMs * 1000.0 / batch << " us/pose)" << std::endl;
-        if (csv.is_open()) {
-            csv << scene << ",robo-check-bvh," << batch << "," << nPoses << ","
-                << avgMs << "," << usPerPose << "\n";
+        for (int i = 0; i < 4; ++i) {
+            const double avgMs = totalMs[i] / repeat;
+            const double usPerPose = avgMs * 1000.0 / (double)batch;
+            std::cout << "BATCH " << batch << " [" << kVariantName[i] << "]: avg kernel " << avgMs
+                      << " ms -> " << usPerPose << " us/pose (best " << bestMs[i] * 1000.0 / batch
+                      << " us/pose)" << std::endl;
+            if (csv.is_open()) {
+                csv << scene << ",robo-check-bvh-" << kVariantName[i] << "," << batch << "," << nPoses
+                    << "," << avgMs << "," << usPerPose << "\n";
+            }
         }
+        std::cout << "BATCH " << batch << " [AB/BC]: best-kernel speedup vs base: quat="
+                  << bestMs[0] / bestMs[1] << "x vecR=" << bestMs[0] / bestMs[2]
+                  << "x quat+TD=" << bestMs[0] / bestMs[3]
+                  << "x, results " << (agree ? "identical" : "DIFFER!") << std::endl;
     }
 
     std::cout << "=== done ===" << std::endl;

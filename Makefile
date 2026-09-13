@@ -73,6 +73,11 @@ $(BUILD_DIR)/%.o: $(NAR_DIR)/%.cpp | $(BUILD_DIR)
 $(BUILD_DIR)/%.o: $(NAR_DIR)/%.cu | $(BUILD_DIR)
 	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $< -o $@
 
+# triangles_valid_f is called from the 128-register (2 blocks/SM) articulated
+# kernels, so it must fit in 128 registers itself.
+$(BUILD_DIR)/Triangle.o: $(NAR_DIR)/Triangle.cu | $(BUILD_DIR)
+	$(NVCC) $(CUFLAGS) $(INCLUDES) -maxrregcount=128 -dc $< -o $@
+
 # profiling/
 $(BUILD_DIR)/obb_test.o: $(PROF_DIR)/obb_test.cu | $(BUILD_DIR)
 	$(NVCC) $(CUFLAGS) $(INCLUDES) -dc $< -o $@
