@@ -43,11 +43,15 @@ for s in scenes:
                  "kernel_ms": "", "us_per_pose": us, "fp": "-", "fn": "-"})
 
 with open(os.path.join(HERE, "results/comparison.csv"), "w", newline="") as f:
-    w = csv.DictWriter(f, fieldnames=["scene", "algorithm", "batch", "poses", "kernel_ms", "us_per_pose", "fp", "fn"])
+    w = csv.DictWriter(f, fieldnames=["scene", "algorithm", "batch", "poses", "kernel_ms",
+                                      "us_per_pose", "fp", "fn",
+                                      "fcl_verified", "fcl_false", "fcl_verify_ms",
+                                      "total_ms", "us_per_pose_total", "us_per_check"],
+                       extrasaction="ignore")
     w.writeheader()
     w.writerows(ROWS)
 
-print(f"{'scene':8} {'method':17} {'us/pose':>9} {'FP':>5} {'FN':>5}")
+print(f"{'scene':8} {'method':17} {'us/pose':>9} {'+verify':>9} {'FP':>5} {'FN':>5}")
 last = None
 for r in ROWS:
     s = r["scene"]
@@ -56,5 +60,10 @@ for r in ROWS:
             print()
         last = s
     us = f"{float(r['us_per_pose']):.2f}" if r["us_per_pose"] not in ("-", "") else "-"
-    print(f"{s:8} {r['algorithm']:17} {us:>9} {str(r['fp']):>5} {str(r['fn']):>5}")
-print("\nwrote results/comparison.csv")
+    tot = r.get("us_per_pose_total", "")
+    tot = f"{float(tot):.2f}" if tot not in ("-", "", None) else "-"
+    print(f"{s:8} {r['algorithm']:17} {us:>9} {tot:>9} {str(r['fp']):>5} {str(r['fn']):>5}")
+print("\nus/pose    = framework kernel time per pose")
+print("+verify    = total pipeline time per pose, including FCL double-checking of\n"
+      "             every collision the GPU checker reports (curobo rows)")
+print("wrote results/comparison.csv")

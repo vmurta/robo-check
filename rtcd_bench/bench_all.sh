@@ -39,8 +39,9 @@ echo "===== cuRobo (default model) ====="
 : > results/curobo.csv
 for s in $SCENES; do
     python3 bench_curobo.py --scene "$s" --nposes "$NPOSES" \
-        --labels "results/labels_${s}.bin" --repeat 3 --csv results/curobo.csv 2>&1 \
-      | grep BATCH || true
+        --labels "results/labels_${s}.bin" --repeat 3 --verify-fcl \
+        --csv results/curobo.csv 2>&1 \
+      | grep -E "BATCH|FCL VERIFY" || true
 done
 
 # ---- 3. cuRobo (links 1..7 only, matches RTCD SKIP_BASE) --------------------
@@ -49,8 +50,9 @@ echo "===== cuRobo (links 1-7) ====="
 for s in $SCENES; do
     python3 bench_curobo.py --scene "$s" --nposes "$NPOSES" \
         --robot-config franka_links17.yml \
-        --labels "results/labels_${s}.bin" --repeat 3 --csv results/curobo_links17.csv 2>&1 \
-      | grep BATCH || true
+        --labels "results/labels_${s}.bin" --repeat 3 --verify-fcl \
+        --csv results/curobo_links17.csv 2>&1 \
+      | grep -E "BATCH|FCL VERIFY" || true
 done
 
 python3 merge_results.py

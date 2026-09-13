@@ -414,6 +414,16 @@ install_curobo() {
     run "pip install cuda-core" python3 -m pip install 'cuda-core[cu13]' || {
         run "pip install cuda-core (cu12 fallback)" python3 -m pip install 'cuda-core[cu12]' || return 1
     }
+    # cuda-core can downgrade nvidia-nvvm to an older 13.x than nvidia-cuda-nvcc,
+    # which breaks nvcc (cicc rejects nvcc's --simt-only for sm_120+).
+    # Restore nvvm to the nvcc version so the pip CUDA toolchain stays consistent.
+    local nvcc_ver nvvm_ver
+    nvcc_ver="$(python3 -m pip show nvidia-cuda-nvcc 2>/dev/null | awk '/^Version:/{print $2}')"
+    nvvm_ver="$(python3 -m pip show nvidia-nvvm 2>/dev/null | awk '/^Version:/{print $2}')"
+    if [ -n "$nvcc_ver" ] && [ -n "$nvvm_ver" ] && [ "$nvcc_ver" != "$nvvm_ver" ]; then
+        run "restore nvidia-nvvm $nvcc_ver (matches nvidia-cuda-nvcc)" \
+            python3 -m pip install --force-reinstall --no-deps "nvidia-nvvm==$nvcc_ver"
+    fi
     bar_done
 
     cur=3; bar "$cur" "$tot" "cloning + building cuRobo"

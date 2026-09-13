@@ -51,24 +51,34 @@ python3 merge_results.py
 cuRobo is run with `collision_activation_distance=0.02` (2 cm sphere
 inflation), its intended safety margin, which makes it conservative (FN=0):
 
-| scene  | method          | us/pose | FP  | FN  |
-|--------|-----------------|--------:|----:|----:|
-| simple | robo-check-bvh  |   3.08  |  0  |  0  |
-| simple | curobo-default  |   0.78  | 569 |  0  |
-| simple | curobo-links17  |   0.52  | 359 |  0  |
-| simple | fcl-cpu         |  16.67  |  -  |  -  |
-| shelf  | robo-check-bvh  |   3.26  |  0  |  0  |
-| shelf  | curobo-default  |   1.59  | 534 |  0  |
-| shelf  | curobo-links17  |   1.07  | 345 |  0  |
-| shelf  | fcl-cpu         |  20.63  |  -  |  -  |
-| dense  | robo-check-bvh  |   6.20  |  0  |  0  |
-| dense  | curobo-default  |   1.80  | 533 |  0  |
-| dense  | curobo-links17  |   1.15  | 346 |  0  |
-| dense  | fcl-cpu         |  22.76  |  -  |  -  |
-| rtcc   | robo-check-bvh  |   4.77  |  0  |  0  |
-| rtcc   | curobo-default  |   1.72  | 533 |  0  |
-| rtcc   | curobo-links17  |   1.14  | 346 |  0  |
-| rtcc   | fcl-cpu         |  21.60  |  -  |  -  |
+| scene  | method          | us/pose | +verify | FP  | FN  |
+|--------|-----------------|--------:|--------:|----:|----:|
+| simple | robo-check-bvh  |   3.04  |    -    |  0  |  0  |
+| simple | curobo-default  |   0.73  |  14.62  | 569 |  0  |
+| simple | curobo-links17  |   0.55  |  16.54  | 359 |  0  |
+| simple | fcl-cpu         |  19.40  |    -    |  -  |  -  |
+| shelf  | robo-check-bvh  |   3.51  |    -    |  0  |  0  |
+| shelf  | curobo-default  |   1.58  |  17.68  | 534 |  0  |
+| shelf  | curobo-links17  |   1.03  |  16.68  | 345 |  0  |
+| shelf  | fcl-cpu         |  21.37  |    -    |  -  |  -  |
+| dense  | robo-check-bvh  |   6.17  |    -    |  0  |  0  |
+| dense  | curobo-default  |   1.72  |  20.58  | 533 |  0  |
+| dense  | curobo-links17  |   1.13  |  17.85  | 346 |  0  |
+| dense  | fcl-cpu         |  22.66  |    -    |  -  |  -  |
+| rtcc   | robo-check-bvh  |   4.80  |    -    |  0  |  0  |
+| rtcc   | curobo-default  |   1.64  |  21.77  | 533 |  0  |
+| rtcc   | curobo-links17  |   1.18  |  17.09  | 346 |  0  |
+| rtcc   | fcl-cpu         |  23.43  |    -    |  -  |  -  |
+
+Columns:
+- **us/pose** — framework kernel time per pose (full GPU pipeline for
+  robo-check; sphere FK + distance query for cuRobo; FCL is full CPU).
+- **+verify** — *pipeline metric*: total time per pose when every collision
+  the GPU checker reports is double-checked by FCL
+  (`rtcd-bench --verify`). For cuRobo the verification dominates: ~36-49 us
+  per checked pose, and 359-569 of the reported collisions turn out to be
+  **false** (FP column). robo-check needs no verification (0 FP / 0 FN).
+- **FP/FN** — vs FCL mesh ground truth over all 8192 poses.
 
 Notes:
 - robo-check numbers include the full pipeline (FK + BVH traversal + narrow
@@ -82,3 +92,6 @@ Notes:
   FP ~4-7%. robo-check is exact on both axes (0 FP / 0 FN).
 - FCL ground truth comes from `rtcd-bench --dump-labels` (per-pose uint8), so
   the cuRobo FP/FN use the exact same poses and scenes.
+- The FCL double-check metric (`+verify`) runs `rtcd-bench --verify <file>`
+  over exactly the poses cuRobo reported as colliding; the per-check cost is
+  dominated by FCL's triangle-level collision test.

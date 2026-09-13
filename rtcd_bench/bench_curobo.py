@@ -16,11 +16,13 @@ Usage:
 """
 
 import argparse
-import struct
-import time
 import csv
 import os
-import sys
+import re
+import struct
+import subprocess
+import tempfile
+import time
 
 import numpy as np
 import torch
@@ -124,6 +126,41 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 
 
+def run_fcl_verify(indices, scene, nposes):
+    """Double-check pose indices with FCL via rtcd-bench --verify.
+
+    Returns (checked, true_collisions, false_collisions, time_ms, us_per_check).
+    """
+    if len(indices) == 0:
+        return 0, 0, 0, 0.0, 0.0
+    rtcd_bin = os.path.join(REPO_ROOT, "rtcd-bench")
+    fd, path = tempfile.mkstemp(suffix=".txt", prefix="curobo_verify_")
+    try:
+        with os.fdopen(fd, "w") as f:
+            for i in indices:
+                f.write(f"{i}\n")
+        r = subprocess.run(
+            [rtcd_bin, "--scene", scene, "--nposes", str(nposes), "--verify", path],
+            capture_output=True,
+            text=True,
+            timeout=3600,
+            cwd=REPO_ROOT,
+        )
+        m = re.search(
+            r"FCL VERIFY: checked=(\d+) true=(\d+) false=(\d+) "
+            r"time_ms=([0-9.]+) us_per_check=([0-9.]+)",
+            r.stdout,
+        )
+        if not m:
+            raise RuntimeError(
+                f"rtcd-bench --verify failed:\n{r.stdout}\n{r.stderr}"
+            )
+        return (int(m.group(1)), int(m.group(2)), int(m.group(3)),
+                float(m.group(4)), float(m.group(5)))
+    finally:
+        os.unlink(path)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--scene", default="simple", choices=list(SCENES))
@@ -146,6 +183,14 @@ def main():
         help="cuRobo collision_activation_distance: inflates robot spheres by "
         "this margin (safety over-approximation). 0.02 makes cuRobo "
         "conservative (FN=0); 0.0 uses the raw fitted spheres.",
+    )
+    ap.add_argument(
+        "--verify-fcl",
+        action="store_true",
+        help="pipeline metric: after the cuRobo run, double-check every pose "
+        "cuRobo flagged as colliding with FCL (rtcd-bench --verify) and report "
+        "the false-collision count plus the total time "
+        "(cuRobo kernel + FCL verification).",
     )
     args = ap.parse_args()
 
@@ -190,6 +235,7 @@ def main():
         if args.sweep
         else [q_all.shape[0]]
     )
+    last_pred_idx = None
     for batch in batch_sizes:
         q = q_all[:batch].view(batch, 1, 7)
         times = []
@@ -215,28 +261,73 @@ def main():
                 if best is None or (fp + fn) < best[0]:
                     best = (fp + fn, sign, fp, fn)
             _, sign, fp, fn = best
+            pred = (sign * per_pose) > 0
             print(
                 f"BATCH {batch}: avg {avg_ms:.3f} ms -> {us_per_pose:.2f} us/pose "
                 f"(best {min(times):.3f} ms) FP={fp} FN={fn} "
-                f"(curobo collisions {int(np.sum((sign * per_pose) > 0))}, "
+                f"(curobo collisions {int(np.sum(pred))}, "
                 f"FCL collisions {int(np.sum(lab))})"
             )
         else:
+            pred = per_pose > 0
             fp = fn = -1
             print(
                 f"BATCH {batch}: avg {avg_ms:.3f} ms -> {us_per_pose:.2f} us/pose "
-                f"(best {min(times):.3f} ms) curobo collisions {int(np.sum(per_pose > 0))}"
+                f"(best {min(times):.3f} ms) curobo collisions {int(np.sum(pred))}"
             )
+        if batch == q_all.shape[0]:
+            last_pred_idx = np.nonzero(pred)[0]
         rows.append((args.scene, "curobo", batch, args.nposes, avg_ms, us_per_pose, fp, fn))
+
+    # Pipeline metric: FCL double-check of every cuRobo collision.
+    verify_ms = 0.0
+    total_ms = 0.0
+    verify_row = None
+    if args.verify_fcl:
+        last = rows[-1]
+        checked, ntrue, nfalse, verify_ms, us_per_check = run_fcl_verify(
+            last_pred_idx if last_pred_idx is not None else np.array([], dtype=int),
+            args.scene,
+            args.nposes,
+        )
+        kernel_ms = float(last[4])
+        total_ms = kernel_ms + verify_ms
+        total_us_per_pose = total_ms * 1e3 / args.nposes
+        print(
+            f"FCL VERIFY: {checked} cuRobo collisions double-checked -> "
+            f"{ntrue} true, {nfalse} FALSE "
+            f"| cuRobo kernel {kernel_ms:.3f} ms + FCL verify {verify_ms:.3f} ms "
+            f"= total {total_ms:.3f} ms -> {total_us_per_pose:.2f} us/pose "
+            f"({us_per_check:.1f} us per verified pose)"
+        )
+        verify_row = (checked, nfalse, verify_ms, total_ms, total_us_per_pose, us_per_check)
 
     if args.csv:
         new = not os.path.exists(args.csv) or os.path.getsize(args.csv) == 0
         with open(args.csv, "a", newline="") as f:
             w = csv.writer(f)
             if new:
-                w.writerow(["scene", "algorithm", "batch", "poses", "kernel_ms", "us_per_pose", "fp", "fn"])
-            w.writerows(rows)
-        print(f"wrote {len(rows)} rows to {args.csv}")
+                w.writerow(["scene", "algorithm", "batch", "poses", "kernel_ms",
+                            "us_per_pose", "fp", "fn",
+                            "fcl_verified", "fcl_false", "fcl_verify_ms",
+                            "total_ms", "us_per_pose_total", "us_per_check"])
+            if args.verify_fcl:
+                checked, nfalse, verify_ms, total_ms, total_us_per_pose, us_per_check = verify_row
+                for i, row in enumerate(rows):
+                    scene, algo, batch, nposes, kms, upp, fp, fn = row
+                    is_last = i == len(rows) - 1
+                    w.writerow(list(row) + [
+                        checked if is_last else "",
+                        nfalse if is_last else "",
+                        f"{verify_ms:.4f}" if is_last else "",
+                        f"{total_ms:.4f}" if is_last else "",
+                        f"{total_us_per_pose:.4f}" if is_last else "",
+                        f"{us_per_check:.2f}" if is_last else "",
+                    ])
+            else:
+                for row in rows:
+                    w.writerow(row)
+        print(f"appended {len(rows)} rows to {args.csv}")
 
 
 if __name__ == "__main__":

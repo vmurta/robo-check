@@ -368,6 +368,9 @@ static void usage(const char* prog) {
               << "  --repeat R                   repeat timed runs R times (default: 1)\n"
               << "  --no-fcl                     skip FCL ground-truth comparison\n"
               << "  --dump-labels <file>         write FCL per-pose collision labels (binary uint8)\n"
+              << "  --verify <file>              verify only the pose indices listed in <file> (one\n"
+              << "                               per line) with FCL and report the false-collision\n"
+              << "                               count + timing (pipeline double-check metric)\n"
               << "  --csv <file>                 append results as CSV\n";
 }
 
@@ -383,6 +386,7 @@ int main(int argc, char** argv) {
     bool doFCL            = true;
     std::string csvFile;
     std::string labelsFile;
+    std::string verifyFile;
     int debugPose         = -1;
 
     for (int i = 1; i < argc; ++i) {
@@ -401,6 +405,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-fcl") doFCL = false;
         else if (a == "--csv") csvFile = next();
         else if (a == "--dump-labels") labelsFile = next();
+        else if (a == "--verify") verifyFile = next();
         else if (a == "--debug-pose") debugPose = atoi(next().c_str());
         else if (a == "-h" || a == "--help") { usage(argv[0]); return 0; }
         else { std::cerr << "Unknown argument: " << a << std::endl; usage(argv[0]); return 1; }
@@ -631,14 +636,17 @@ int main(int argc, char** argv) {
     std::vector<std::vector<Eigen::Vector3f>> linkVerts;
     std::vector<std::vector<Triangle>> linkTris;
 
-    if (doFCL) {
+    auto buildFCLModels = [&]() {
+        if (!fclLinks.empty()) {
+            return;
+        }
         // link meshes (links 1..7; skip base like RTCD SKIP_BASE)
         for (int i = 1; i <= 7; ++i) {
             std::string path = meshDir + "/panda_link" + std::to_string(i) + "_visual.obj";
             std::vector<Eigen::Vector3f> verts;
             std::vector<Triangle> tris;
             loadOBJFile(path, verts, tris);
-            if (verts.empty()) { std::cerr << "Failed to load " << path << std::endl; return 1; }
+            if (verts.empty()) { std::cerr << "Failed to load " << path << std::endl; exit(1); }
             std::cout << "  link " << i << ": " << tris.size() << " tris (" << path << ")" << std::endl;
             linkVerts.push_back(verts);
             linkTris.push_back(tris);
@@ -653,6 +661,10 @@ int main(int argc, char** argv) {
             for (auto& v : verts) v += ob.second;
             fclObstacles.push_back(makeFCLMesh(verts, tris));
         }
+    };
+
+    if (doFCL && verifyFile.empty()) {
+        buildFCLModels();
 
         PandaFK fk;
         fclResult.assign(nPoses, 0);
@@ -696,6 +708,45 @@ int main(int argc, char** argv) {
             lf.close();
             std::cout << "Wrote " << nPoses << " FCL ground-truth labels to " << labelsFile << std::endl;
         }
+    }
+
+    // --- FCL verification-only mode: double-check the poses flagged by a GPU
+    // checker (pipeline metric). Reads one pose index per line, runs FCL on
+    // just those, and reports how many were false collisions + the time. ---
+    if (!verifyFile.empty()) {
+        std::ifstream vf(verifyFile);
+        if (!vf.is_open()) {
+            std::cerr << "Cannot open verify file: " << verifyFile << std::endl;
+            return 1;
+        }
+        std::vector<size_t> vIdx;
+        size_t x;
+        while (vf >> x) {
+            if (x < nPoses) vIdx.push_back(x);
+        }
+        vf.close();
+
+        buildFCLModels();
+
+        PandaFK fk;
+        size_t nTrue = 0, nFalse = 0;
+        const auto t0 = std::chrono::high_resolution_clock::now();
+        for (size_t i : vIdx) {
+            std::array<Eigen::Isometry3f, 7> tfms;
+            fk.compute(traj[i], tfms);
+            if (poseInCollisionFCL(tfms, fclLinks, fclObstacles, true)) {
+                ++nTrue;
+            } else {
+                ++nFalse;
+            }
+        }
+        const auto t1 = std::chrono::high_resolution_clock::now();
+        const double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+        const double usPerCheck = vIdx.empty() ? 0.0 : ms * 1000.0 / (double)vIdx.size();
+        std::cout << "FCL VERIFY: checked=" << vIdx.size() << " true=" << nTrue
+                  << " false=" << nFalse << " time_ms=" << ms
+                  << " us_per_check=" << usPerCheck << std::endl;
+        return 0;
     }
 
     // --- GPU articulated run ---
