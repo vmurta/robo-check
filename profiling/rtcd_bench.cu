@@ -367,6 +367,7 @@ static void usage(const char* prog) {
               << "  --sweep                      sweep batch sizes 1..4096 like RTCD\n"
               << "  --repeat R                   repeat timed runs R times (default: 1)\n"
               << "  --no-fcl                     skip FCL ground-truth comparison\n"
+              << "  --dump-labels <file>         write FCL per-pose collision labels (binary uint8)\n"
               << "  --csv <file>                 append results as CSV\n";
 }
 
@@ -381,6 +382,7 @@ int main(int argc, char** argv) {
     int repeat            = 1;
     bool doFCL            = true;
     std::string csvFile;
+    std::string labelsFile;
     int debugPose         = -1;
 
     for (int i = 1; i < argc; ++i) {
@@ -398,6 +400,7 @@ int main(int argc, char** argv) {
         else if (a == "--repeat") repeat = atoi(next().c_str());
         else if (a == "--no-fcl") doFCL = false;
         else if (a == "--csv") csvFile = next();
+        else if (a == "--dump-labels") labelsFile = next();
         else if (a == "--debug-pose") debugPose = atoi(next().c_str());
         else if (a == "-h" || a == "--help") { usage(argv[0]); return 0; }
         else { std::cerr << "Unknown argument: " << a << std::endl; usage(argv[0]); return 1; }
@@ -681,6 +684,17 @@ int main(int argc, char** argv) {
         if (mism != 0) {
             std::cerr << "FCL early-exit vs full-pair mismatch -- cannot trust ground truth" << std::endl;
             return 1;
+        }
+
+        if (!labelsFile.empty()) {
+            std::ofstream lf(labelsFile, std::ios::binary);
+            if (!lf.is_open()) {
+                std::cerr << "Cannot open labels file: " << labelsFile << std::endl;
+                return 1;
+            }
+            lf.write(reinterpret_cast<const char*>(fclResult.data()), (std::streamsize)fclResult.size());
+            lf.close();
+            std::cout << "Wrote " << nPoses << " FCL ground-truth labels to " << labelsFile << std::endl;
         }
     }
 

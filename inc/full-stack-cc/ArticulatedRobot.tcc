@@ -168,7 +168,7 @@ static __device__ bool linkCollides(const Eigen::Matrix3f& link_R, const Eigen::
 // Deferred leaf-pair triangle tests, run as a warp-uniform strided loop.
 // Kept out-of-line so the register pressure of the (rare) fallback path does
 // not inflate the traversal hot loop.
-__device__ __noinline__ void d_articulated_tri_phase(
+static __device__ __noinline__ void d_articulated_tri_phase(
     const uint32_t* triRob, const uint32_t* triObs, const int numTri,
     const Eigen::Matrix3f& link_R, const Eigen::Vector3f& link_T,
     const int linkVertOff, const int linkTriOff,

@@ -38,9 +38,12 @@ Checks for every build dependency of robo-check and installs what's missing:
   CUDA toolkit   nvcc -- prompts before installing (big download)
   libccd, FCL    built from source into /usr/local (for -lfcl -lccd)
   googletest     git submodules
+  cuRobo         NVlabs/curobo + torch + cuda-core (for the cuRobo benchmark;
+                 prompts before installing; skip with --skip-curobo)
 
 Options:
-  --yes          auto-confirm large installs (CUDA toolkit)
+  --yes          auto-confirm large installs (CUDA toolkit, cuRobo)
+  --skip-curobo  do not install cuRobo even if missing
   --debug        verbose debug output (same as DEBUG=1 ./SETUP.sh)
   --help         show this help
 EOF
@@ -48,10 +51,11 @@ EOF
 
 while [ "$#" -gt 0 ]; do
     case "$1" in
-        --yes|-y)   YES=1 ;;
-        --debug|-d) DEBUG=1 ;;
-        --help|-h)  usage; exit 0 ;;
-        *)          echo "SETUP.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
+        --yes|-y)         YES=1 ;;
+        --skip-curobo)    SKIP_CUROBO=1 ;;
+        --debug|-d)       DEBUG=1 ;;
+        --help|-h)        usage; exit 0 ;;
+        *)                echo "SETUP.sh: unknown argument '$1' (try --help)" >&2; exit 2 ;;
     esac
     shift
 done
@@ -130,6 +134,8 @@ NEED_CCD=0
 NEED_FCL=0
 NEED_CUDA=0
 NEED_SUB=0
+NEED_CUROBO=0
+SKIP_CUROBO="${SKIP_CUROBO:-0}"
 
 header_found() { # $1 = relative path under /usr[/local]/include
     local base
@@ -168,7 +174,7 @@ check_line() { # $1 = ok|miss|warn, $2 = text
     esac
 }
 
-CHECK_TOTAL=10
+CHECK_TOTAL=11
 CHECK_CUR=0
 step() {
     CHECK_CUR=$((CHECK_CUR + 1))
@@ -238,6 +244,16 @@ check_all() {
     else
         check_line miss "googletest missing (not a git checkout)"
         NEED_SUB=1
+    fi
+
+    step "cuRobo"
+    if [ "$SKIP_CUROBO" -eq 1 ]; then
+        check_line warn "cuRobo skipped (--skip-curobo)"
+    elif have python3 && python3 -c "import curobo, torch, cuda.core" >/dev/null 2>&1; then
+        check_line ok "cuRobo (python: $(python3 --version | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?'))"
+    else
+        check_line miss "cuRobo (NVlabs/curobo python package; needed for the cuRobo benchmark)"
+        NEED_CUROBO=1
     fi
 }
 
@@ -358,6 +374,65 @@ ensure_cuda() {
     have nvcc && ok "CUDA toolkit installed" || warn "nvcc still not on PATH -- check your CUDA install"
 }
 
+install_curobo() {
+    if have python3 && python3 -c "import curobo, torch, cuda.core" >/dev/null 2>&1; then
+        ok "cuRobo already installed, skipping"
+        return 0
+    fi
+    info "cuRobo: pip-installing NVlabs/curobo (+torch, cuda-core) into the current python environment"
+    if [ "$YES" -ne 1 ]; then
+        if [ "$NO_TTY" -eq 1 ]; then
+            warn "non-interactive mode and --yes not given; skipping cuRobo install"
+            FAILS=$((FAILS + 1))
+            return 0
+        fi
+        printf '  Install cuRobo now (torch + curobo, several GB download + compile)? [y/N] '
+        read -r ans
+        if [ "${ans,,}" != "y" ]; then
+            warn "skipped; install manually: pip install torch 'cuda-core[cu13]' <path-to-curobo>"
+            FAILS=$((FAILS + 1))
+            return 0
+        fi
+    fi
+    if ! have python3; then
+        warn "python3 not found -- install curobo manually in a python environment"
+        FAILS=$((FAILS + 1))
+        return 0
+    fi
+    if ! python3 -m pip --version >/dev/null 2>&1; then
+        warn "pip not available for $(python3 --version 2>&1) -- install pip first"
+        FAILS=$((FAILS + 1))
+        return 0
+    fi
+
+    local tot=3 cur
+    cur=1; bar "$cur" "$tot" "installing torch (large download)"
+    run "pip install torch" python3 -m pip install torch || return 1
+    bar_done
+
+    cur=2; bar "$cur" "$tot" "installing cuda-core kernel backend"
+    run "pip install cuda-core" python3 -m pip install 'cuda-core[cu13]' || {
+        run "pip install cuda-core (cu12 fallback)" python3 -m pip install 'cuda-core[cu12]' || return 1
+    }
+    bar_done
+
+    cur=3; bar "$cur" "$tot" "cloning + building cuRobo"
+    mkdir -p "$DEPS_DIR"
+    if [ ! -d "$DEPS_DIR/curobo/.git" ]; then
+        run "clone curobo" git clone --depth 1 https://github.com/NVlabs/curobo.git "$DEPS_DIR/curobo" || return 1
+    else
+        debug "curobo already cloned at $DEPS_DIR/curobo"
+    fi
+    local archs; archs="${TORCH_CUDA_ARCH_LIST:-12.0+PTX}"
+    run "pip install curobo (compile for ${archs})" \
+        env TORCH_CUDA_ARCH_LIST="$archs" python3 -m pip install "$DEPS_DIR/curobo" || return 1
+    bar_done
+
+    python3 -c "import curobo, torch, cuda.core" >/dev/null 2>&1 \
+        && ok "cuRobo installed" \
+        || { warn "cuRobo import check failed -- see pip output above"; FAILS=$((FAILS + 1)); }
+}
+
 refresh_ldconfig() {
     if lib_known 'libfcl\.so'; then
         debug "libfcl.so is visible to the dynamic linker"
@@ -401,6 +476,15 @@ EOF
             ok "nvcc: compiles"
         else
             fail "nvcc check failed"
+            FAILS=$((FAILS + 1))
+        fi
+    fi
+
+    if [ "$SKIP_CUROBO" -ne 1 ] && have python3; then
+        if run "cuRobo import check" python3 -c "import curobo, torch, cuda.core"; then
+            ok "cuRobo: imports"
+        else
+            fail "cuRobo import check failed (install with: pip install torch 'cuda-core[cu13]' /path/to/curobo)"
             FAILS=$((FAILS + 1))
         fi
     fi
@@ -451,6 +535,11 @@ main() {
     if [ "$NEED_CUDA" -eq 1 ]; then
         ensure_cuda || die "CUDA install failed"
     fi
+    if [ "$NEED_CUROBO" -eq 1 ] && [ "$SKIP_CUROBO" -ne 1 ]; then
+        install_curobo || die "cuRobo install failed"
+    else
+        ok "cuRobo already installed, skipping"
+    fi
 
     refresh_ldconfig
 
@@ -469,7 +558,7 @@ main() {
     printf '%b\n' "${BOLD}Next steps:${NC}"
     echo "  make                 # build the library + benchmark binaries"
     echo "  ./run-bvh.sh         # run the BVH benchmark"
-    echo "  ./run-benchmarks.sh  # run the benchmark suite"
+    echo "  ./run-benchmarks.sh  # run the benchmark suite (robo-check / cuRobo / FCL)"
     echo "If linking fails at runtime, ensure /usr/local/lib is in your library path:"
     echo "  export LD_LIBRARY_PATH=\$LD_LIBRARY_PATH:/usr/local/lib   # add to ~/.bashrc"
 }
