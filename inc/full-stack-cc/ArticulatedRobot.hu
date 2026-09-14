@@ -164,13 +164,14 @@ struct ArticQueueIdx<int32_t> {
 
 // ---------------------------------------------------------------------------
 // Node-data layouts (experiment): how each BVH node's R/T/dim/a is stored on
-// the device.
-//   0 = Eigen::Matrix3f/Vector3f SoA arrays (baseline, scalar LDG.E)
-//   1 = R as quaternion float4 (1x LDG.128 per node, quat->matrix in-kernel)
-//   2 = R as 3x float4 rows (16B-aligned, 3x LDG.128 per node)
-//   3 = R as quaternion + T/dim/a packed in 2x float4 (3x LDG.128 per node)
-// Only the pointers belonging to the kernel's LAYOUT are non-null.
+// the device. Only the pointers belonging to the kernel's LAYOUT are non-null.
 // ---------------------------------------------------------------------------
+enum class NodeLayout : int {
+    Matrix = 0,  // Eigen::Matrix3f/Vector3f SoA arrays (baseline, scalar LDG.E)
+    Quat   = 1,  // R as quaternion float4 (1x LDG.128 per node, quat->matrix in-kernel)
+    VecR   = 2,  // R as 3x float4 rows (16B-aligned, 3x LDG.128 per node)
+    QuatTD = 3,  // R as quaternion + T/dim/a packed in 2x float4 (3x LDG.128 per node)
+};
 struct NodePtrs {
     const Eigen::Matrix3f* R; // layout 0
     const float4* Rq;         // layouts 1, 3 (x,y,z,w)
@@ -183,22 +184,22 @@ struct NodePtrs {
 
 // Loads one node's (R, T, dim, a) into registers. LAYOUT is a template
 // constant, so the dead branches fold away per instantiation.
-template <int LAYOUT>
+template <NodeLayout LAYOUT>
 __device__ __forceinline__ void loadNode(const NodePtrs& p, int i,
                                          Eigen::Matrix3f& R, Eigen::Vector3f& T,
                                          Eigen::Vector3f& dim, float& a) {
-    if (LAYOUT == 0) {
+    if (LAYOUT == NodeLayout::Matrix) {
         R = p.R[i];
         T = p.T[i];
         dim = p.dim[i];
         a = p.a[i];
-    } else if (LAYOUT == 1) {
+    } else if (LAYOUT == NodeLayout::Quat) {
         const float4 q = p.Rq[i];
         R = quatToMatrix(Quat{q.x, q.y, q.z, q.w});
         T = p.T[i];
         dim = p.dim[i];
         a = p.a[i];
-    } else if (LAYOUT == 2) {
+    } else if (LAYOUT == NodeLayout::VecR) {
         const float4 r0 = p.Rp[i * 3 + 0];
         const float4 r1 = p.Rp[i * 3 + 1];
         const float4 r2 = p.Rp[i * 3 + 2];
@@ -225,30 +226,52 @@ __device__ __forceinline__ void loadNode(const NodePtrs& p, int i,
     }
 }
 
+// SoA parameter bundles for d_bvh_articulated: one struct per side plus the
+// result/queue/counter struct. Struct params are copied into the kernel
+// parameter space exactly like the equivalent flat parameter list, so this
+// costs nothing and keeps the (large) kernel call readable.
+template <typename ChildT>
+struct ObstacleSoA {
+    NodePtrs nodes;                  // node data for the selected LAYOUT
+    const ChildT* first_child;
+    size_t num_nodes;
+    const Eigen::Vector3f* verts;
+    const Triangle* tris;
+};
+
+template <typename ChildT>
+struct RobotSoA {
+    NodePtrs nodes;                  // node data for the selected LAYOUT
+    const ChildT* first_child;
+    const int* linkOffset;           // per-link partition of the concatenated BVH
+    const int* linkVertOffset;
+    const int* linkTriOffset;
+    const JointParams* joints;
+    const Eigen::Vector3f* verts;
+    const Triangle* tris;
+};
+
+struct KernelOut {
+    uint32_t* pdisjoint;             // bitpacked results (1 = disjoint/free)
+    uint32_t* g_next_conf;           // global config work queue
+    unsigned long long* overflowCounter;
+};
+
 // d_bvh_articulated: articulated version of d_bvh_naive with the same
 // persistent-block / block-serial traversal strategy. Results are bit-packed
-// in pdisjoint (1 = disjoint/free). overflowCounter counts conservative
-// pending-list overflows (must stay 0).
+// in out.pdisjoint (1 = disjoint/free). out.overflowCounter counts
+// conservative pending-list overflows (must stay 0).
 //
 // Variants:
 //   RobChildT/ObsChildT = int16_t shrinks child loads/queues per side
 //   RESTRICT_PTRS=true  adds __restrict__ pointers
-//   LAYOUT              selects the node-data storage layout (see NodePtrs)
+//   LAYOUT              selects the node-data storage layout (see NodeLayout)
 template <size_t N, typename RobChildT = int32_t, typename ObsChildT = int32_t,
-          bool RESTRICT_PTRS = false, int LAYOUT = 0>
-__global__ void d_bvh_articulated(const NodePtrs obsN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::ObsChild pObs_first_child,
-                                  size_t num_obs_nodes,
-                                  const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
-                                  const NodePtrs robN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::RobChild pRob_first_child,
-                                  const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
-                                  const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
-                                  int num_links,
-                                  const JointParams* pJoints,
+          bool RESTRICT_PTRS = false, NodeLayout LAYOUT = NodeLayout::Matrix>
+__global__ void d_bvh_articulated(const ObstacleSoA<ObsChildT> obs,
+                                  const RobotSoA<RobChildT> rob,
                                   const articulated_conf<N>* pConf, size_t num_confs,
-                                  uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* overflowCounter);
+                                  const KernelOut out);
 
 // Host wrapper mirroring bvh_naive. Builds per-link BVHs from the URDF,
 // allocates device memory, launches d_bvh_articulated<N>, and copies results.

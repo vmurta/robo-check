@@ -582,19 +582,11 @@ BVNode_soa<ChildT> BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t p
 
 constexpr int BLOCK_SIZE = 32;
 
-__global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, const Eigen::Vector3f* __restrict__ pT_obs,
-                                const Eigen::Matrix3f* __restrict__ pR_rob, const Eigen::Vector3f* __restrict__ pT_rob,
-                                const Eigen::Vector3f* __restrict__ pObs_dim, const Eigen::Vector3f* __restrict__ pRob_dim,
-                                const Eigen::Matrix3f* __restrict__ pRob_conf_rot, const Eigen::Vector3f* __restrict__ pRob_conf_trans,
-                                const int16_t* __restrict__ pObs_first_child, const int16_t* __restrict__ pRob_first_child,
-                                const float* __restrict__ pObs_a, const float* __restrict__ pRob_a,
-                                const Eigen::Vector3f * __restrict__ pRob_verts, const Triangle * __restrict__ pRob_tris, size_t num_rob_nodes,
-                                const Eigen::Vector3f * __restrict__ pObs_verts, const Triangle * __restrict__ pObs_tris, size_t num_obs_nodes,
-                                uint32_t* __restrict__ pdisjoint, size_t num_confs, uint32_t* __restrict__ g_next_conf,
-                                unsigned long long* __restrict__ d_phase) {
+__global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+                            size_t num_confs, const RigidKernelOut out) {
 
-    if (num_obs_nodes == 0) {
-        printf("Error: num_obs_nodes is zero. Exiting kernel.\n");
+    if (obs.num_nodes == 0) {
+        printf("Error: obs.num_nodes is zero. Exiting kernel.\n");
         return;
     }
 
@@ -602,27 +594,27 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
 
     size_t smem_offset = 0;
     int16_t* sObs_first_child = reinterpret_cast<int16_t*>(shared_mem + smem_offset);
-    smem_offset += num_obs_nodes * sizeof(int16_t);
+    smem_offset += obs.num_nodes * sizeof(int16_t);
     int16_t* sRob_first_child = reinterpret_cast<int16_t*>(shared_mem + smem_offset);
 
     // Load the first_child arrays into shared memory once per block; they are
     // read-only for the lifetime of the kernel.
-    for (uint16_t i = threadIdx.x; i < num_rob_nodes; i += blockDim.x){
-        sRob_first_child[i] = pRob_first_child[i];
+    for (uint16_t i = threadIdx.x; i < rob.num_nodes; i += blockDim.x){
+        sRob_first_child[i] = rob.first_child[i];
     }
-    for (uint16_t i = threadIdx.x; i < num_obs_nodes; i += blockDim.x){
-        sObs_first_child[i] = pObs_first_child[i];
+    for (uint16_t i = threadIdx.x; i < obs.num_nodes; i += blockDim.x){
+        sObs_first_child[i] = obs.first_child[i];
     }
     __syncthreads();
 
-    Eigen::Matrix3f R_obs_abs_root = pR_obs[0]; // rotation of B wrt origin
-    Eigen::Vector3f T_obs_abs_root = pT_obs[0]; // translation of B wrt origin
+    Eigen::Matrix3f R_obs_abs_root = obs.R[0]; // rotation of B wrt origin
+    Eigen::Vector3f T_obs_abs_root = obs.T[0]; // translation of B wrt origin
 
-    Eigen::Matrix3f R_rob_abs_root = pR_rob[0]; // rotation of A wrt origin
-    Eigen::Vector3f T_rob_abs_root = pT_rob[0]; // translation of A wrt origin
+    Eigen::Matrix3f R_rob_abs_root = rob.R[0]; // rotation of A wrt origin
+    Eigen::Vector3f T_rob_abs_root = rob.T[0]; // translation of A wrt origin
 
-    Eigen::Vector3f b_root = pRob_dim[0]; // half dimensions of box A
-    Eigen::Vector3f a_root = pObs_dim[0]; // half dimensions of box B
+    Eigen::Vector3f b_root = rob.dim[0]; // half dimensions of box A
+    Eigen::Vector3f a_root = obs.dim[0]; // half dimensions of box B
 
     const float epsilon = 1e-6f; // small value to avoid numerical issues
 
@@ -675,16 +667,16 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
     // balance load across blocks instead of static contiguous chunking.
     //
     // Phase timers (profiling): thread 0 accumulates %globaltimer deltas for the
-    // block-serial phases into d_phase[0..2] (pull+initial check, OBB
+    // block-serial phases into out.d_phase[0..2] (pull+initial check, OBB
     // traversal, triangle tests). Each block adds its own totals once at
     // termination, so these are SUMS ACROSS BLOCKS (not wall-clock); the host
-    // divides by the contributing block count in d_phase[3].
+    // divides by the contributing block count in out.d_phase[3].
     unsigned long long acc_init = 0, acc_trav = 0, acc_tri = 0;
     while (true) {
         __syncthreads();
         const unsigned long long t_phase0 = (threadIdx.x == 0) ? globaltimer() : 0;
         if (threadIdx.x == 0) {
-            s_batch_start = atomicAdd(g_next_conf, BATCH);
+            s_batch_start = atomicAdd(out.g_next_conf, BATCH);
             s_num_pend = 0;
             s_disjoint_word = 0;
         }
@@ -692,10 +684,10 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
         const uint32_t batch_start = s_batch_start;
         if (batch_start >= num_confs) {
             if (threadIdx.x == 0) {
-                atomicAdd(&d_phase[0], acc_init);
-                atomicAdd(&d_phase[1], acc_trav);
-                atomicAdd(&d_phase[2], acc_tri);
-                atomicAdd(&d_phase[3], 1);
+                atomicAdd(&out.d_phase[0], acc_init);
+                atomicAdd(&out.d_phase[1], acc_trav);
+                atomicAdd(&out.d_phase[2], acc_tri);
+                atomicAdd(&out.d_phase[3], 1);
             }
             return;
         }
@@ -703,8 +695,8 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
         // parallel outermost OBB check: one config per thread
         const uint32_t index = batch_start + threadIdx.x;
         if (index < num_confs) {
-            R_conf = pRob_conf_rot[index];
-            T_conf = pRob_conf_trans[index];
+            R_conf = rob.conf_rot[index];
+            T_conf = rob.conf_trans[index];
 
             //Calculate relative rotation of B wrt A
             //TODO: precompute inverse rotations of A
@@ -727,7 +719,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
         // Flush the bitpacked results of the outermost check before any early
         // continue: bits are only ever set, so re-ORing below is idempotent.
         if (threadIdx.x == 0) {
-            pdisjoint[batch_start >> 5] |= s_disjoint_word;
+            out.pdisjoint[batch_start >> 5] |= s_disjoint_word;
         }
 
         // profiling
@@ -813,12 +805,12 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
                     continue;
                 }
 
-                R_obs_abs = pR_obs[obs_obb_idx];
-                T_obs_abs = pT_obs[obs_obb_idx];
-                R_rob_abs = pR_rob[rob_obb_idx];
-                T_rob_abs = pT_rob[rob_obb_idx];
-                b = pRob_dim[rob_obb_idx];
-                a = pObs_dim[obs_obb_idx];
+                R_obs_abs = obs.R[obs_obb_idx];
+                T_obs_abs = obs.T[obs_obb_idx];
+                R_rob_abs = rob.R[rob_obb_idx];
+                T_rob_abs = rob.T[rob_obb_idx];
+                b = rob.dim[rob_obb_idx];
+                a = obs.dim[obs_obb_idx];
 
                 computeRelTransform(R_obs_abs, T_obs_abs, R_rob_abs, T_rob_abs, R_conf, T_conf, epsilon, B, Bf, T);
 
@@ -845,22 +837,22 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
                         // overlap test above.
                         const int rob_tri = -(rob_first_child_idx + 1);
                         const int obs_tri = -(obs_first_child_idx + 1);
-                        const Eigen::Vector3f& dimObs = pObs_dim[obs_obb_idx];
-                        const Eigen::Vector3f& dimRob = pRob_dim[rob_obb_idx];
-                        const int verdict = paperTriTri(dimObs(0), dimObs(1), pObs_a[obs_obb_idx],
-                                                        dimRob(0), dimRob(1), pRob_a[rob_obb_idx],
+                        const Eigen::Vector3f& dimObs = obs.dim[obs_obb_idx];
+                        const Eigen::Vector3f& dimRob = rob.dim[rob_obb_idx];
+                        const int verdict = paperTriTri(dimObs(0), dimObs(1), obs.a[obs_obb_idx],
+                                                        dimRob(0), dimRob(1), rob.a[rob_obb_idx],
                                                         B, T);
                         if (verdict > 0) {
                             s_collision = true;
                         } else if (verdict < 0) {
                             // borderline/coplanar: full world-frame test
-                            const Triangle& rt = pRob_tris[rob_tri];
-                            const Triangle& ot = pObs_tris[obs_tri];
-                            const Eigen::Vector3f rv0 = R_conf * pRob_verts[rt.v1] + T_conf;
-                            const Eigen::Vector3f rv1 = R_conf * pRob_verts[rt.v2] + T_conf;
-                            const Eigen::Vector3f rv2 = R_conf * pRob_verts[rt.v3] + T_conf;
+                            const Triangle& rt = rob.tris[rob_tri];
+                            const Triangle& ot = obs.tris[obs_tri];
+                            const Eigen::Vector3f rv0 = R_conf * rob.verts[rt.v1] + T_conf;
+                            const Eigen::Vector3f rv1 = R_conf * rob.verts[rt.v2] + T_conf;
+                            const Eigen::Vector3f rv2 = R_conf * rob.verts[rt.v3] + T_conf;
                             if (!triangles_valid_f(rv0, rv1, rv2,
-                                                   pObs_verts[ot.v1], pObs_verts[ot.v2], pObs_verts[ot.v3])) {
+                                                   obs.verts[ot.v1], obs.verts[ot.v2], obs.verts[ot.v3])) {
                                 s_collision = true;
                             }
                         }
@@ -901,7 +893,7 @@ __global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, cons
         // Flush the batch's bitpacked word once (one 4-byte write instead of
         // 32 threads storing the same byte).
         if (threadIdx.x == 0) {
-            pdisjoint[batch_start >> 5] |= s_disjoint_word;
+            out.pdisjoint[batch_start >> 5] |= s_disjoint_word;
         }
     }
     return;
@@ -1033,17 +1025,24 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
 
     std::cout << "obs_BVH.size: " << obs_BVH.size << ", rob_BVH.size: " << rob_BVH.size << std::endl;
 
+    RigidObstacleSoA obsSoA;
+    obsSoA.R = d_R_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
+    obsSoA.first_child = d_Obs_first_child; obsSoA.a = d_Obs_a;
+    obsSoA.verts = d_Obs_vertices; obsSoA.tris = d_Obs_triangles;
+    obsSoA.num_nodes = obs_BVH.size;
+    RigidRobotSoA robSoA;
+    robSoA.R = d_R_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
+    robSoA.first_child = d_Rob_first_child; robSoA.a = d_Rob_a;
+    robSoA.verts = d_Rob_vertices; robSoA.tris = d_Rob_triangles;
+    robSoA.num_nodes = rob_BVH.size;
+    robSoA.conf_rot = d_Rob_conf_rot; robSoA.conf_trans = d_Rob_conf_trans;
+    RigidKernelOut outSoA;
+    outSoA.pdisjoint = pdisjoint; outSoA.g_next_conf = d_next_conf;
+    outSoA.d_phase = (unsigned long long*)d_phase;
+
     auto launch_bvh_naive = [&]() {
         d_bvh_naive<<<gridSize, blockSize, smem_size>>>(
-                                                d_R_obs, d_T_obs,
-                                                d_R_rob, d_T_rob,
-                                                d_Obs_dim, d_Rob_dim,
-                                                d_Rob_conf_rot, d_Rob_conf_trans,
-                                                d_Obs_first_child, d_Rob_first_child,
-                                                d_Obs_a, d_Rob_a,
-                                                d_Rob_vertices, d_Rob_triangles, rob_BVH.size,
-                                                d_Obs_vertices, d_Obs_triangles, obs_BVH.size,
-                                                pdisjoint, static_cast<size_t>(num_confs), d_next_conf, (unsigned long long*)d_phase);
+            obsSoA, robSoA, static_cast<size_t>(num_confs), outSoA);
     };
 
     // Dynamic shared memory above 48KB requires opting in once per kernel.
@@ -1072,15 +1071,7 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     if (dry_run) {
         const size_t dry_confs = (num_confs < (size_t)blockSize) ? num_confs : (size_t)blockSize;
         d_bvh_naive<<<1, blockSize, smem_size>>>(
-                                                d_R_obs, d_T_obs,
-                                                d_R_rob, d_T_rob,
-                                                d_Obs_dim, d_Rob_dim,
-                                                d_Rob_conf_rot, d_Rob_conf_trans,
-                                                d_Obs_first_child, d_Rob_first_child,
-                                                d_Obs_a, d_Rob_a,
-                                                d_Rob_vertices, d_Rob_triangles, rob_BVH.size,
-                                                d_Obs_vertices, d_Obs_triangles, obs_BVH.size,
-                                                pdisjoint, dry_confs, d_next_conf, (unsigned long long*)d_phase);
+            obsSoA, robSoA, dry_confs, outSoA);
         checkCudaMem(cudaGetLastError());
         checkCudaMem(cudaDeviceSynchronize());
         std::cout << "BVH Naive dry run completed successfully." << std::endl;

@@ -257,16 +257,42 @@ __device__ __forceinline__ bool obbOverlapAbs(const Eigen::Vector3f& a, const Ei
     return true;
 }
 
-__global__ void d_bvh_naive   ( const Eigen::Matrix3f* __restrict__ pR_obs, const Eigen::Vector3f* __restrict__ pT_obs,
-                                const Eigen::Matrix3f* __restrict__ pR_rob, const Eigen::Vector3f* __restrict__ pT_rob,
-                                const Eigen::Vector3f* __restrict__ pObs_dim, const Eigen::Vector3f* __restrict__ pRob_dim,
-                                const Eigen::Matrix3f* __restrict__ pRob_conf_rot, const Eigen::Vector3f* __restrict__ pRob_conf_trans,
-                                const int16_t* __restrict__ pObs_first_child, const int16_t* __restrict__ pRob_first_child,
-                                const float* __restrict__ pObs_a, const float* __restrict__ pRob_a,
-                                const Eigen::Vector3f * __restrict__ pRob_verts, const Triangle * __restrict__ pRob_tris, size_t num_rob_nodes,
-                                const Eigen::Vector3f * __restrict__ pObs_verts, const Triangle * __restrict__ pObs_tris, size_t num_obs_nodes,
-                                uint32_t* __restrict__ pdisjoint, size_t num_confs, uint32_t* __restrict__ g_next_conf,
-                                unsigned long long* __restrict__ d_phase);
+// SoA parameter bundles for d_bvh_naive: one struct per side (obstacle /
+// robot) plus the result/queue/profiling counters. Struct params keep the
+// kernel call readable; they are copied into the kernel parameter space
+// exactly like the equivalent flat parameter list, so this costs nothing.
+struct RigidObstacleSoA {
+    const Eigen::Matrix3f* __restrict__ R;
+    const Eigen::Vector3f* __restrict__ T;
+    const Eigen::Vector3f* __restrict__ dim;
+    const int16_t* __restrict__ first_child;
+    const float* __restrict__ a;
+    const Eigen::Vector3f* __restrict__ verts;
+    const Triangle* __restrict__ tris;
+    size_t num_nodes;
+};
+
+struct RigidRobotSoA {
+    const Eigen::Matrix3f* __restrict__ R;
+    const Eigen::Vector3f* __restrict__ T;
+    const Eigen::Vector3f* __restrict__ dim;
+    const int16_t* __restrict__ first_child;
+    const float* __restrict__ a;
+    const Eigen::Vector3f* __restrict__ verts;
+    const Triangle* __restrict__ tris;
+    size_t num_nodes;
+    const Eigen::Matrix3f* __restrict__ conf_rot;    // per-config rigid transforms
+    const Eigen::Vector3f* __restrict__ conf_trans;
+};
+
+struct RigidKernelOut {
+    uint32_t* __restrict__ pdisjoint;
+    uint32_t* __restrict__ g_next_conf;
+    unsigned long long* __restrict__ d_phase;
+};
+
+__global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+                            size_t num_confs, const RigidKernelOut out);
 
 // Checks the given configurations for collisions against the obstacle.
 // Returns one entry per configuration: true if the configuration is valid (no collision).

@@ -173,15 +173,12 @@ static __device__ bool linkCollides(const Eigen::Matrix3f& link_R, const Eigen::
 // (verdict > 0 hit / 0 free / < 0 unreliable); unreliable pairs fall back to
 // the full world-frame test triangles_valid_f. Templated on the child/queue
 // index types.
-template <typename RobChildT, typename ObsChildT, typename QRob, typename QObs, int LAYOUT>
+template <typename RobChildT, typename ObsChildT, typename QRob, typename QObs, NodeLayout LAYOUT>
 static __device__ __noinline__ void d_articulated_tri_phase(
     const QRob* triRob, const QObs* triObs, const int numTri,
     const Eigen::Matrix3f& link_R, const Eigen::Vector3f& link_T,
     const int linkVertOff, const int linkTriOff,
-    const NodePtrs obsN, const ObsChildT* pObs_first_child,
-    const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
-    const NodePtrs robN, const RobChildT* pRob_first_child,
-    const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
+    const ObstacleSoA<ObsChildT> obs, const RobotSoA<RobChildT> rob,
     bool* s_collision) {
     const int lane = threadIdx.x & 31;
     for (int t = lane; t < numTri; t += 32) {
@@ -194,49 +191,40 @@ static __device__ __noinline__ void d_articulated_tri_phase(
         Eigen::Matrix3f R_obs_abs, R_rob_abs;
         Eigen::Vector3f T_obs_abs, T_rob_abs, dimObs, dimRob;
         float aObs, aRob;
-        loadNode<LAYOUT>(obsN, obs_obb_idx, R_obs_abs, T_obs_abs, dimObs, aObs);
-        loadNode<LAYOUT>(robN, rob_obb_idx, R_rob_abs, T_rob_abs, dimRob, aRob);
+        loadNode<LAYOUT>(obs.nodes, obs_obb_idx, R_obs_abs, T_obs_abs, dimObs, aObs);
+        loadNode<LAYOUT>(rob.nodes, rob_obb_idx, R_rob_abs, T_rob_abs, dimRob, aRob);
 
         Eigen::Matrix3f B;
         Eigen::Vector3f T;
         computeRelTransformNoBf(R_obs_abs, T_obs_abs, R_rob_abs, T_rob_abs,
                                 link_R, link_T, B, T);
 
-        const int rob_tri = -pRob_first_child[rob_obb_idx] - 1 + linkTriOff;
-        const int obs_tri = -pObs_first_child[obs_obb_idx] - 1;
+        const int rob_tri = -rob.first_child[rob_obb_idx] - 1 + linkTriOff;
+        const int obs_tri = -obs.first_child[obs_obb_idx] - 1;
         const int verdict = paperTriTri(dimObs(0), dimObs(1), aObs,
                                         dimRob(0), dimRob(1), aRob,
                                         B, T);
         if (verdict > 0) {
             *s_collision = true;
         } else if (verdict < 0) {
-            const Triangle& rt = pRob_tris[rob_tri];
-            const Triangle& ot = pObs_tris[obs_tri];
-            const Eigen::Vector3f rv0 = link_R * pRob_verts[linkVertOff + rt.v1] + link_T;
-            const Eigen::Vector3f rv1 = link_R * pRob_verts[linkVertOff + rt.v2] + link_T;
-            const Eigen::Vector3f rv2 = link_R * pRob_verts[linkVertOff + rt.v3] + link_T;
+            const Triangle& rt = rob.tris[rob_tri];
+            const Triangle& ot = obs.tris[obs_tri];
+            const Eigen::Vector3f rv0 = link_R * rob.verts[linkVertOff + rt.v1] + link_T;
+            const Eigen::Vector3f rv1 = link_R * rob.verts[linkVertOff + rt.v2] + link_T;
+            const Eigen::Vector3f rv2 = link_R * rob.verts[linkVertOff + rt.v3] + link_T;
             if (!triangles_valid_f(rv0, rv1, rv2,
-                                   pObs_verts[ot.v1], pObs_verts[ot.v2], pObs_verts[ot.v3])) {
+                                   obs.verts[ot.v1], obs.verts[ot.v2], obs.verts[ot.v3])) {
                 *s_collision = true;
             }
         }
     }
 }
 
-template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS, int LAYOUT>
-__device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::ObsChild pObs_first_child,
-                                  size_t num_obs_nodes,
-                                  const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
-                                  const NodePtrs robN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::RobChild pRob_first_child,
-                                  const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
-                                  const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
-                                  int num_links,
-                                  const JointParams* pJoints,
+template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS, NodeLayout LAYOUT>
+__device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChildT> obs,
+                                  const RobotSoA<RobChildT> rob,
                                   const articulated_conf<N>* pConf, size_t num_confs,
-                                  uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* overflowCounter) {
+                                  const KernelOut out) {
     // Config-per-warp design: 256-thread blocks, one configuration per lane
     // per batch pull. Each warp owns its 32 configurations and runs its
     // serial phases independently with __syncwarp (no block-wide barrier
@@ -262,17 +250,16 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
     // flushed incrementally (every TRI_BATCH candidates) for early exit and
     // a tiny candidate buffer.
     //
-    // overflowCounter counts conservative "buffer full -> report collision"
+    // out.overflowCounter counts conservative "buffer full -> report collision"
     // exits; the host asserts it is 0.
 
-    if (num_obs_nodes == 0) {
-        printf("Error: num_obs_nodes is zero. Exiting kernel.\n");
+    if (obs.num_nodes == 0) {
+        printf("Error: obs.num_nodes is zero. Exiting kernel.\n");
         return;
     }
-    if (num_links > N + 1) {
-        printf("Error: num_links exceeds N + 1. Exiting kernel.\n");
-        return;
-    }
+    // The link count is a compile-time constant (serial chain: N joints ->
+    // N+1 links), so the per-link loops can be flattened/unrolled.
+    constexpr int num_links = (int)N + 1;
 
     constexpr int BLOCK_SIZE = 256;
     constexpr int WARP_BATCH = 32;   // configs per warp pull (one per lane)
@@ -307,7 +294,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
     Eigen::Matrix3f R_obs_abs_root;
     Eigen::Vector3f T_obs_abs_root, a_root;
     float a_root_unused;
-    loadNode<LAYOUT>(obsN, 0, R_obs_abs_root, T_obs_abs_root, a_root, a_root_unused);
+    loadNode<LAYOUT>(obs.nodes, 0, R_obs_abs_root, T_obs_abs_root, a_root, a_root_unused);
 
     const int16_t conf_offset   = (lane >> 4) - 2;
     const int16_t rob_child_idx = (lane >> 2) & 0x3;
@@ -321,7 +308,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
         // balances the work, since a warp never waits for siblings).
         uint32_t warp_start = 0;
         if (lane == 0) {
-            warp_start = atomicAdd(g_next_conf, WARP_BATCH);
+            warp_start = atomicAdd(out.g_next_conf, WARP_BATCH);
         }
         warp_start = __shfl_sync(0xffffffffu, warp_start, 0);
         if (warp_start >= num_confs) {
@@ -338,12 +325,12 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                 Eigen::Matrix3f link_R = Eigen::Matrix3f::Identity();
                 Eigen::Vector3f link_T = Eigen::Vector3f::Zero();
                 for (int l = 0; l < num_links; ++l) {
-                    if (pLinkOffset[l + 1] > pLinkOffset[l]) {
-                        const int rob_root = pLinkOffset[l];
+                    if (rob.linkOffset[l + 1] > rob.linkOffset[l]) {
+                        const int rob_root = rob.linkOffset[l];
                         Eigen::Matrix3f robRootR, B;
                         Eigen::Vector3f robRootT, robRootDim, T;
                         float robRootA;
-                        loadNode<LAYOUT>(robN, rob_root, robRootR, robRootT, robRootDim, robRootA);
+                        loadNode<LAYOUT>(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
                         computeRelTransformNoBf(R_obs_abs_root, T_obs_abs_root,
                                                 robRootR, robRootT,
                                                 link_R, link_T, B, T);
@@ -352,7 +339,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                         }
                     }
                     if (l + 1 < num_links) {
-                        const JointParams& jp = pJoints[l];
+                        const JointParams& jp = rob.joints[l];
                         const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
                         const Eigen::Matrix3f nextR = link_R * jp.origin_R * Rj;
                         const Eigen::Vector3f nextT = link_T + link_R * jp.origin_T;
@@ -372,7 +359,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
             }
             __syncwarp();
             if (lane == 0) {
-                pdisjoint[warp_start >> 5] |= s_disjoint[warp];
+                out.pdisjoint[warp_start >> 5] |= s_disjoint[warp];
                 s_disjoint[warp] = 0;
             }
         }
@@ -405,7 +392,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                     link_T[i] = __shfl_sync(0xffffffffu, ownT[i], owner, 32);
                 }
 
-                const bool hasMesh = (pLinkOffset[l + 1] > pLinkOffset[l]);
+                const bool hasMesh = (rob.linkOffset[l + 1] > rob.linkOffset[l]);
                 const bool rootHit = ((mask >> l) & 1u) != 0;
 
                 // Seed the frontier with the (link root, scene root) pair;
@@ -414,7 +401,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                     s_num_obb_pend[warp] = 0;
                     s_num_tri[warp] = 0;
                     if (hasMesh && rootHit) {
-                        s_rob_pend[warp][0] = (QRob)pLinkOffset[l];
+                        s_rob_pend[warp][0] = (QRob)rob.linkOffset[l];
                         s_obs_pend[warp][0] = 0;
                         s_num_obb_pend[warp] = 1;
                     }
@@ -431,7 +418,12 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                         // TRI_BATCH accumulate (bounds the buffer, gives
                         // early exit at this granularity).
                         if (s_num_tri[warp] >= TRI_BATCH) {
-                            d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>( s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp], link_R, link_T, pLinkVertOffset[l], pLinkTriOffset[l], obsN, pObs_first_child, pObs_verts, pObs_tris, robN, pRob_first_child, pRob_verts, pRob_tris, &s_collision[warp]);
+                            d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>(
+                                s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp],
+                                link_R, link_T,
+                                rob.linkVertOffset[l], rob.linkTriOffset[l],
+                                obs, rob,
+                                &s_collision[warp]);
                             if (lane == 0) {
                                 s_num_tri[warp] = 0;
                             }
@@ -442,7 +434,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                         }
                         if (s_num_obb_pend[warp] >= MAX_BUFFER - 32) {
                             if (lane == 0) {
-                                atomicAdd(overflowCounter, 1ull);
+                                atomicAdd(out.overflowCounter, 1ull);
                                 s_collision[warp] = true;
                             }
                             break;
@@ -470,8 +462,8 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 
                         const int rob_obb_par_idx = (int)s_rob_pend[warp][pend_idx];
                         const int obs_obb_par_idx = (int)s_obs_pend[warp][pend_idx];
-                        const int rob_fc_par = pRob_first_child[rob_obb_par_idx];
-                        const int obs_fc_par = pObs_first_child[obs_obb_par_idx];
+                        const int rob_fc_par = rob.first_child[rob_obb_par_idx];
+                        const int obs_fc_par = obs.first_child[obs_obb_par_idx];
 
                         // Leaf-aware child selection: a leaf stays paired
                         // with each child of the other node (also handles
@@ -503,8 +495,8 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                             continue;
                         }
 
-                        const int rob_first_child_idx = pRob_first_child[rob_obb_idx];
-                        const int obs_first_child_idx = pObs_first_child[obs_obb_idx];
+                        const int rob_first_child_idx = rob.first_child[rob_obb_idx];
+                        const int obs_first_child_idx = obs.first_child[obs_obb_idx];
                         if (rob_first_child_idx == 0 || obs_first_child_idx == 0) {
                             continue; // dummy (padding) node
                         }
@@ -512,8 +504,8 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                         Eigen::Matrix3f R_obs_abs, R_rob_abs;
                         Eigen::Vector3f T_obs_abs, T_rob_abs, b, a;
                         float aObs, aRob;
-                        loadNode<LAYOUT>(obsN, obs_obb_idx, R_obs_abs, T_obs_abs, a, aObs);
-                        loadNode<LAYOUT>(robN, rob_obb_idx, R_rob_abs, T_rob_abs, b, aRob);
+                        loadNode<LAYOUT>(obs.nodes, obs_obb_idx, R_obs_abs, T_obs_abs, a, aObs);
+                        loadNode<LAYOUT>(rob.nodes, rob_obb_idx, R_rob_abs, T_rob_abs, b, aRob);
 
                         Eigen::Matrix3f B;
                         Eigen::Vector3f T;
@@ -530,7 +522,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                                 s_tri_rob[warp][pos] = (QRob)rob_obb_idx;
                                 s_tri_obs[warp][pos] = (QObs)obs_obb_idx;
                             } else if (lane == 0) {
-                                atomicAdd(overflowCounter, 1ull);
+                                atomicAdd(out.overflowCounter, 1ull);
                                 s_collision[warp] = true; // conservative
                             }
                         } else {
@@ -540,7 +532,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                                 s_obs_pend[warp][pos] = (QObs)obs_obb_idx;
                                 s_rob_pend[warp][pos] = (QRob)rob_obb_idx;
                             } else if (lane == 0) {
-                                atomicAdd(overflowCounter, 1ull);
+                                atomicAdd(out.overflowCounter, 1ull);
                                 s_collision[warp] = true; // conservative
                             }
                         }
@@ -550,7 +542,12 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 
                     // Final triangle phase for the leftover candidates.
                     if (!s_collision[warp] && s_num_tri[warp] > 0) {
-                        d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>( s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp], link_R, link_T, pLinkVertOffset[l], pLinkTriOffset[l], obsN, pObs_first_child, pObs_verts, pObs_tris, robN, pRob_first_child, pRob_verts, pRob_tris, &s_collision[warp]);
+                        d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>(
+                                s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp],
+                                link_R, link_T,
+                                rob.linkVertOffset[l], rob.linkTriOffset[l],
+                                obs, rob,
+                                &s_collision[warp]);
                     }
                     __syncwarp();
                     if (lane == 0) {
@@ -564,7 +561,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 
                 // Advance the owner lane's FK to the next link.
                 if (l + 1 < num_links) {
-                    const JointParams& jp = pJoints[l];
+                    const JointParams& jp = rob.joints[l];
                     const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
                     const Eigen::Matrix3f nextR = ownR * jp.origin_R * Rj;
                     const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
@@ -584,7 +581,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 
         __syncwarp();
         if (lane == 0) {
-            pdisjoint[warp_start >> 5] |= s_disjoint[warp];
+            out.pdisjoint[warp_start >> 5] |= s_disjoint[warp];
             s_disjoint[warp] = 0;
             s_num_pend[warp] = 0;
         }
@@ -597,46 +594,22 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 //   d_bvh_articulated_2bsm   = __launch_bounds__(256, 2) caps registers at 128
 //                              so 2 blocks co-reside per SM. Only worth it when
 //                              the grid exceeds the SM count (e.g. Orin Nano).
-template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS, int LAYOUT>
-__global__ void d_bvh_articulated(const NodePtrs obsN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::ObsChild pObs_first_child,
-                                  size_t num_obs_nodes,
-                                  const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
-                                  const NodePtrs robN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::RobChild pRob_first_child,
-                                  const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
-                                  const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
-                                  int num_links,
-                                  const JointParams* pJoints,
+template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS, NodeLayout LAYOUT>
+__global__ void d_bvh_articulated(const ObstacleSoA<ObsChildT> obs,
+                                  const RobotSoA<RobChildT> rob,
                                   const articulated_conf<N>* pConf, size_t num_confs,
-                                  uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* overflowCounter) {
+                                  const KernelOut out) {
     d_bvh_articulated_body<N, RobChildT, ObsChildT, RESTRICT_PTRS, LAYOUT>(
-        obsN, pObs_first_child, num_obs_nodes, pObs_verts, pObs_tris,
-        robN, pRob_first_child, pRob_verts, pRob_tris,
-        pLinkOffset, pLinkVertOffset, pLinkTriOffset, num_links,
-        pJoints, pConf, num_confs, pdisjoint, g_next_conf, overflowCounter);
+        obs, rob, pConf, num_confs, out);
 }
 
-template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS, int LAYOUT>
-__global__ void __launch_bounds__(256, 2) d_bvh_articulated_2bsm(const NodePtrs obsN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::ObsChild pObs_first_child,
-                                  size_t num_obs_nodes,
-                                  const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
-                                  const NodePtrs robN,
-                                  typename ArticKernelPtrs<N, RobChildT, ObsChildT, RESTRICT_PTRS>::RobChild pRob_first_child,
-                                  const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
-                                  const int* pLinkOffset, const int* pLinkVertOffset, const int* pLinkTriOffset,
-                                  int num_links,
-                                  const JointParams* pJoints,
+template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS, NodeLayout LAYOUT>
+__global__ void __launch_bounds__(256, 2) d_bvh_articulated_2bsm(const ObstacleSoA<ObsChildT> obs,
+                                  const RobotSoA<RobChildT> rob,
                                   const articulated_conf<N>* pConf, size_t num_confs,
-                                  uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* overflowCounter) {
+                                  const KernelOut out) {
     d_bvh_articulated_body<N, RobChildT, ObsChildT, RESTRICT_PTRS, LAYOUT>(
-        obsN, pObs_first_child, num_obs_nodes, pObs_verts, pObs_tris,
-        robN, pRob_first_child, pRob_verts, pRob_tris,
-        pLinkOffset, pLinkVertOffset, pLinkTriOffset, num_links,
-        pJoints, pConf, num_confs, pdisjoint, g_next_conf, overflowCounter);
+        obs, rob, pConf, num_confs, out);
 }
 
 
@@ -717,7 +690,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
     // ---- A/B/C/BC variant selection (int16 applied per side where it fits) --
     const bool want16 = (kernel_mode & 1) != 0;
     const bool want_restrict = (kernel_mode & 2) != 0;
-    const int layout = (kernel_mode >> 2) & 3;
+    const NodeLayout layout = static_cast<NodeLayout>((kernel_mode >> 2) & 3);
     const bool rob16 = want16 && (rob_first_child.size() < 32768);
     const bool obs16 = want16 && (obs_BVH.size < 32768);
     if (want16 && !(rob16 && obs16)) {
@@ -732,7 +705,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
     std::cout << "bvh_articulated: kernel variant = rob<"
               << (rob16 ? "int16" : "int32") << "> obs<"
               << (obs16 ? "int16" : "int32") << "> layout="
-              << kLayoutName[layout]
+              << kLayoutName[static_cast<int>(layout)]
               << (want_restrict ? " +restrict" : "") << std::endl;
 
     std::vector<int16_t> obs_first_child16, rob_first_child16;
@@ -751,7 +724,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
 
     // ---- Node-data packing for layouts 1-3 --------------------------------
     std::vector<float4> obs_Rq, obs_Rp, obs_TD, rob_Rq, rob_Rp, rob_TD;
-    if (layout == 1 || layout == 3) {
+    if (layout == NodeLayout::Quat || layout == NodeLayout::QuatTD) {
         obs_Rq.reserve(obs_BVH.size);
         for (size_t i = 0; i < obs_BVH.size; ++i) {
             const Eigen::Quaternionf q(obs_BVH.pR[i]);
@@ -763,7 +736,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
             rob_Rq.push_back(make_float4(q.x(), q.y(), q.z(), q.w()));
         }
     }
-    if (layout == 2) {
+    if (layout == NodeLayout::VecR) {
         obs_Rp.reserve(obs_BVH.size * 3);
         for (size_t i = 0; i < obs_BVH.size; ++i) {
             const Eigen::Matrix3f& R = obs_BVH.pR[i];
@@ -779,7 +752,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
             rob_Rp.push_back(make_float4(R(2, 0), R(2, 1), R(2, 2), 0.0f));
         }
     }
-    if (layout == 3) {
+    if (layout == NodeLayout::QuatTD) {
         obs_TD.reserve(obs_BVH.size * 2);
         for (size_t i = 0; i < obs_BVH.size; ++i) {
             const Eigen::Vector3f& T = obs_BVH.pT[i];
@@ -815,7 +788,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
     int blocks_per_sm = 0;
     {
         const auto occForLayout = [&](auto layoutTag) {
-            constexpr int L = decltype(layoutTag)::value;
+            constexpr NodeLayout L = decltype(layoutTag)::value;
             const auto occ = [&](auto kernel) {
                 cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
                 checkCudaMem(cudaOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -840,10 +813,10 @@ double bvh_articulated(const std::string& robot_urdf_path,
             }
         };
         switch (layout) {
-            case 0: occForLayout(std::integral_constant<int, 0>()); break;
-            case 1: occForLayout(std::integral_constant<int, 1>()); break;
-            case 2: occForLayout(std::integral_constant<int, 2>()); break;
-            default: occForLayout(std::integral_constant<int, 3>()); break;
+            case NodeLayout::Matrix: occForLayout(std::integral_constant<NodeLayout, NodeLayout::Matrix>()); break;
+            case NodeLayout::Quat:   occForLayout(std::integral_constant<NodeLayout, NodeLayout::Quat>()); break;
+            case NodeLayout::VecR:   occForLayout(std::integral_constant<NodeLayout, NodeLayout::VecR>()); break;
+            default:                 occForLayout(std::integral_constant<NodeLayout, NodeLayout::QuatTD>()); break;
         }
     }
     if (blocks_per_sm < 1) blocks_per_sm = 1;
@@ -913,15 +886,15 @@ double bvh_articulated(const std::string& robot_urdf_path,
 
     d_Obs_Rq = d_Obs_Rp = d_Obs_TD = nullptr;
     d_Rob_Rq = d_Rob_Rp = d_Rob_TD = nullptr;
-    if (layout == 1 || layout == 3) {
+    if (layout == NodeLayout::Quat || layout == NodeLayout::QuatTD) {
         cudaMalloc((void**)&d_Obs_Rq, obs_Rq.size() * sizeof(float4));
         cudaMalloc((void**)&d_Rob_Rq, rob_Rq.size() * sizeof(float4));
     }
-    if (layout == 2) {
+    if (layout == NodeLayout::VecR) {
         cudaMalloc((void**)&d_Obs_Rp, obs_Rp.size() * sizeof(float4));
         cudaMalloc((void**)&d_Rob_Rp, rob_Rp.size() * sizeof(float4));
     }
-    if (layout == 3) {
+    if (layout == NodeLayout::QuatTD) {
         cudaMalloc((void**)&d_Obs_TD, obs_TD.size() * sizeof(float4));
         cudaMalloc((void**)&d_Rob_TD, rob_TD.size() * sizeof(float4));
     }
@@ -959,15 +932,15 @@ double bvh_articulated(const std::string& robot_urdf_path,
     checkCudaMem(cudaMemcpy(d_Rob_verts, rob_verts.data(), rob_verts.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_tris, rob_tris.data(), rob_tris.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
 
-    if (layout == 1 || layout == 3) {
+    if (layout == NodeLayout::Quat || layout == NodeLayout::QuatTD) {
         checkCudaMem(cudaMemcpy(d_Obs_Rq, obs_Rq.data(), obs_Rq.size() * sizeof(float4), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(d_Rob_Rq, rob_Rq.data(), rob_Rq.size() * sizeof(float4), cudaMemcpyHostToDevice));
     }
-    if (layout == 2) {
+    if (layout == NodeLayout::VecR) {
         checkCudaMem(cudaMemcpy(d_Obs_Rp, obs_Rp.data(), obs_Rp.size() * sizeof(float4), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(d_Rob_Rp, rob_Rp.data(), rob_Rp.size() * sizeof(float4), cudaMemcpyHostToDevice));
     }
-    if (layout == 3) {
+    if (layout == NodeLayout::QuatTD) {
         checkCudaMem(cudaMemcpy(d_Obs_TD, obs_TD.data(), obs_TD.size() * sizeof(float4), cudaMemcpyHostToDevice));
         checkCudaMem(cudaMemcpy(d_Rob_TD, rob_TD.data(), rob_TD.size() * sizeof(float4), cudaMemcpyHostToDevice));
     }
@@ -985,72 +958,89 @@ double bvh_articulated(const std::string& robot_urdf_path,
     cudaEventElapsedTime(&duration, start, stop);
     std::cout << "Articulated BVH allocation and transfer to GPU took " << duration << " ms." << std::endl;
 
-    // Node-data pointer bundles (device pointers; layout decides which are read).
-    NodePtrs obsN;
-    obsN.R = d_R_obs;
-    obsN.Rq = d_Obs_Rq;
-    obsN.Rp = d_Obs_Rp;
-    obsN.TD = d_Obs_TD;
-    obsN.T = d_T_obs;
-    obsN.dim = d_Obs_dim;
-    obsN.a = d_Obs_a;
-    NodePtrs robN;
-    robN.R = d_Rob_R;
-    robN.Rq = d_Rob_Rq;
-    robN.Rp = d_Rob_Rp;
-    robN.TD = d_Rob_TD;
-    robN.T = d_Rob_T;
-    robN.dim = d_Rob_dim;
-    robN.a = d_Rob_a;
+    // Per-side SoA parameter bundles (device pointers; the layout decides
+    // which node-data pointers are read).
+    ObstacleSoA<int16_t> obsSoA16;
+    ObstacleSoA<int32_t> obsSoA32;
+    const auto fillObs = [&](auto* o) {
+        o->nodes.R = d_R_obs;
+        o->nodes.Rq = d_Obs_Rq;
+        o->nodes.Rp = d_Obs_Rp;
+        o->nodes.TD = d_Obs_TD;
+        o->nodes.T = d_T_obs;
+        o->nodes.dim = d_Obs_dim;
+        o->nodes.a = d_Obs_a;
+        o->num_nodes = obs_BVH.size;
+        o->verts = d_Obs_verts;
+        o->tris = d_Obs_tris;
+    };
+    fillObs(&obsSoA16);
+    fillObs(&obsSoA32);
+    obsSoA16.first_child = d_Obs_first_child16;
+    obsSoA32.first_child = d_Obs_first_child32;
+    RobotSoA<int16_t> robSoA16;
+    RobotSoA<int32_t> robSoA32;
+    const auto fillRob = [&](auto* r) {
+        r->nodes.R = d_Rob_R;
+        r->nodes.Rq = d_Rob_Rq;
+        r->nodes.Rp = d_Rob_Rp;
+        r->nodes.TD = d_Rob_TD;
+        r->nodes.T = d_Rob_T;
+        r->nodes.dim = d_Rob_dim;
+        r->nodes.a = d_Rob_a;
+        r->linkOffset = d_LinkOffset;
+        r->linkVertOffset = d_LinkVertOffset;
+        r->linkTriOffset = d_LinkTriOffset;
+        r->joints = d_Joints;
+        r->verts = d_Rob_verts;
+        r->tris = d_Rob_tris;
+    };
+    fillRob(&robSoA16);
+    fillRob(&robSoA32);
+    robSoA16.first_child = d_Rob_first_child16;
+    robSoA32.first_child = d_Rob_first_child32;
+    KernelOut kout;
+    kout.pdisjoint = d_disjoint;
+    kout.g_next_conf = d_next_conf;
+    kout.overflowCounter = d_overflow;
 
     auto launch = [&](int blocks, size_t launchConfs) {
-        const auto doLaunch = [&](auto kernel, const auto* obsFc, const auto* robFc) {
+        const auto doLaunch = [&](auto kernel, const auto& obsS, const auto& robS) {
             // Max out the shared-memory carveout so shared doesn't limit
             // occupancy (2 blocks/SM needs 2x26.7KB = 53.5KB shared/SM).
             cudaFuncSetAttribute(kernel, cudaFuncAttributePreferredSharedMemoryCarveout, 100);
             kernel<<<blocks, blockSize>>>(
-                obsN, obsFc, obs_BVH.size,
-                d_Obs_verts, d_Obs_tris,
-                robN, robFc,
-                d_Rob_verts, d_Rob_tris,
-                d_LinkOffset, d_LinkVertOffset, d_LinkTriOffset,
-                num_links,
-                d_Joints, d_Conf, launchConfs,
-                d_disjoint, d_next_conf, d_overflow);
+                obsS, robS, d_Conf, launchConfs, kout);
         };
-        const int16_t* obsFc16 = obs16 ? d_Obs_first_child16 : nullptr;
-        const int32_t* obsFc32 = obs16 ? nullptr : d_Obs_first_child32;
-        const int16_t* robFc16 = rob16 ? d_Rob_first_child16 : nullptr;
-        const int32_t* robFc32 = rob16 ? nullptr : d_Rob_first_child32;
         const auto doLaunchForLayout = [&](auto layoutTag) {
-            constexpr int L = decltype(layoutTag)::value;
-            const auto pickLaunch = [&](auto k1bsm, auto k2bsm, const auto* obsFc, const auto* robFc) {
-                if (use2bsm) doLaunch(k2bsm, obsFc, robFc);
-                else doLaunch(k1bsm, obsFc, robFc);
+            constexpr NodeLayout L = decltype(layoutTag)::value;
+            const auto pickLaunch = [&](auto k1bsm, auto k2bsm, const auto& obsS, const auto& robS) {
+                if (use2bsm) doLaunch(k2bsm, obsS, robS);
+                else doLaunch(k1bsm, obsS, robS);
             };
             if (rob16) {
                 if (obs16) {
-                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int16_t, int16_t, true, L>, d_bvh_articulated_2bsm<N, int16_t, int16_t, true, L>, obsFc16, robFc16);
-                    else               pickLaunch(d_bvh_articulated<N, int16_t, int16_t, false, L>, d_bvh_articulated_2bsm<N, int16_t, int16_t, false, L>, obsFc16, robFc16);
+                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int16_t, int16_t, true, L>, d_bvh_articulated_2bsm<N, int16_t, int16_t, true, L>, obsSoA16, robSoA16);
+                    else               pickLaunch(d_bvh_articulated<N, int16_t, int16_t, false, L>, d_bvh_articulated_2bsm<N, int16_t, int16_t, false, L>, obsSoA16, robSoA16);
                 } else {
-                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int16_t, int32_t, true, L>, d_bvh_articulated_2bsm<N, int16_t, int32_t, true, L>, obsFc32, robFc16);
-                    else               pickLaunch(d_bvh_articulated<N, int16_t, int32_t, false, L>, d_bvh_articulated_2bsm<N, int16_t, int32_t, false, L>, obsFc32, robFc16);
+                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int16_t, int32_t, true, L>, d_bvh_articulated_2bsm<N, int16_t, int32_t, true, L>, obsSoA32, robSoA16);
+                    else               pickLaunch(d_bvh_articulated<N, int16_t, int32_t, false, L>, d_bvh_articulated_2bsm<N, int16_t, int32_t, false, L>, obsSoA32, robSoA16);
                 }
             } else {
                 if (obs16) {
-                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int32_t, int16_t, true, L>, d_bvh_articulated_2bsm<N, int32_t, int16_t, true, L>, obsFc16, robFc32);
-                    else               pickLaunch(d_bvh_articulated<N, int32_t, int16_t, false, L>, d_bvh_articulated_2bsm<N, int32_t, int16_t, false, L>, obsFc16, robFc32);
+                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int32_t, int16_t, true, L>, d_bvh_articulated_2bsm<N, int32_t, int16_t, true, L>, obsSoA16, robSoA32);
+                    else               pickLaunch(d_bvh_articulated<N, int32_t, int16_t, false, L>, d_bvh_articulated_2bsm<N, int32_t, int16_t, false, L>, obsSoA16, robSoA32);
                 } else {
-                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int32_t, int32_t, true, L>, d_bvh_articulated_2bsm<N, int32_t, int32_t, true, L>, obsFc32, robFc32);
-                    else               pickLaunch(d_bvh_articulated<N, int32_t, int32_t, false, L>, d_bvh_articulated_2bsm<N, int32_t, int32_t, false, L>, obsFc32, robFc32);
+                    if (want_restrict) pickLaunch(d_bvh_articulated<N, int32_t, int32_t, true, L>, d_bvh_articulated_2bsm<N, int32_t, int32_t, true, L>, obsSoA32, robSoA32);
+                    else               pickLaunch(d_bvh_articulated<N, int32_t, int32_t, false, L>, d_bvh_articulated_2bsm<N, int32_t, int32_t, false, L>, obsSoA32, robSoA32);
                 }
             }
         };
         switch (layout) {
-            case 0: doLaunchForLayout(std::integral_constant<int, 0>()); break;
-            case 1: doLaunchForLayout(std::integral_constant<int, 1>()); break;
-            case 2: doLaunchForLayout(std::integral_constant<int, 2>()); break;
-            default: doLaunchForLayout(std::integral_constant<int, 3>()); break;
+            case NodeLayout::Matrix: doLaunchForLayout(std::integral_constant<NodeLayout, NodeLayout::Matrix>()); break;
+            case NodeLayout::Quat:   doLaunchForLayout(std::integral_constant<NodeLayout, NodeLayout::Quat>()); break;
+            case NodeLayout::VecR:   doLaunchForLayout(std::integral_constant<NodeLayout, NodeLayout::VecR>()); break;
+            default:                 doLaunchForLayout(std::integral_constant<NodeLayout, NodeLayout::QuatTD>()); break;
         }
     };
 
