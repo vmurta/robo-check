@@ -392,26 +392,71 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                 for (int l = 0; l < num_links; ++l) {
                     if (rob.linkOffset[l + 1] > rob.linkOffset[l]) {
                         const int rob_root = rob.linkOffset[l];
-                        if constexpr (LAYOUT == NodeLayout::QuatSAT) {
-                            Quat qRoot, qB;
-                            Eigen::Vector3f robRootT, robRootDim, T;
-                            float robRootA;
-                            loadNodeQuat(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
-                            computeRelTransformQuat(q_obs_root, T_obs_abs_root,
-                                                    qRoot, robRootT,
-                                                    link_Q, link_T, qB, T);
-                            if (obbOverlapQuat(qB, T, a_root, robRootDim, epsilon)) {
-                                root_mask |= (1u << l);
+                        if (obs.gate_count == 1) {
+                            // Fast path: single preloaded root node (default).
+                            if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                                Quat qRoot, qB;
+                                Eigen::Vector3f robRootT, robRootDim, T;
+                                float robRootA;
+                                loadNodeQuat(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
+                                computeRelTransformQuat(q_obs_root, T_obs_abs_root,
+                                                        qRoot, robRootT,
+                                                        link_Q, link_T, qB, T);
+                                if (obbOverlapQuat(qB, T, a_root, robRootDim, epsilon)) {
+                                    root_mask |= (1u << l);
+                                }
+                            } else {
+                                Eigen::Matrix3f robRootR, B;
+                                Eigen::Vector3f robRootT, robRootDim, T;
+                                float robRootA;
+                                loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
+                                computeRelTransformNoBf(R_obs_abs_root, T_obs_abs_root,
+                                                        robRootR, robRootT,
+                                                        link_R, link_T, B, T);
+                                if (obbOverlapAbs(a_root, robRootDim, B, epsilon, T)) {
+                                    root_mask |= (1u << l);
+                                }
                             }
                         } else {
-                            Eigen::Matrix3f robRootR, B;
-                            Eigen::Vector3f robRootT, robRootDim, T;
-                            float robRootA;
-                            loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
-                            computeRelTransformNoBf(R_obs_abs_root, T_obs_abs_root,
-                                                    robRootR, robRootT,
-                                                    link_R, link_T, B, T);
-                            if (obbOverlapAbs(a_root, robRootDim, B, epsilon, T)) {
+                            // Multi-node gate (merged-BVH cut or per-obstacle
+                            // roots): bit l = link root OBB overlaps >=1 gate
+                            // node. Bit-clear links are provably collision-free
+                            // (the gate covers every scene primitive) and skip
+                            // the serial traversal. Early exit on the first
+                            // overlap keeps proximal links cheap.
+                            bool any = false;
+                            if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                                Quat qRoot, qG, qB;
+                                Eigen::Vector3f robRootT, robRootDim, T, T_gate, a_gate;
+                                float robRootA, aG;
+                                loadNodeQuat(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
+                                for (int g = 0; g < obs.gate_count; ++g) {
+                                    loadNodeQuat(obs.gate_nodes, g, qG, T_gate, a_gate, aG);
+                                    computeRelTransformQuat(qG, T_gate,
+                                                            qRoot, robRootT,
+                                                            link_Q, link_T, qB, T);
+                                    if (obbOverlapQuat(qB, T, a_gate, robRootDim, epsilon)) {
+                                        any = true;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                Eigen::Matrix3f robRootR, B, R_gate;
+                                Eigen::Vector3f robRootT, robRootDim, T, T_gate, a_gate;
+                                float robRootA, aG;
+                                loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
+                                for (int g = 0; g < obs.gate_count; ++g) {
+                                    loadNode(obs.gate_nodes, g, R_gate, T_gate, a_gate, aG);
+                                    computeRelTransformNoBf(R_gate, T_gate,
+                                                            robRootR, robRootT,
+                                                            link_R, link_T, B, T);
+                                    if (obbOverlapAbs(a_gate, robRootDim, B, epsilon, T)) {
+                                        any = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (any) {
                                 root_mask |= (1u << l);
                             }
                         }
@@ -806,7 +851,10 @@ template <size_t N>
 double bvh_articulated(const std::string& robot_urdf_path,
                        const BVNode_soa<int32_t>& obs_BVH, const MeshData& obs_mesh,
                        const std::vector<articulated_conf<N>>& confs,
-                       std::vector<bool>& valid, bool dry_run, int kernel_mode) {
+                       std::vector<bool>& valid, bool dry_run, int kernel_mode,
+                       const std::vector<Eigen::Matrix3f>* gate_R,
+                       const std::vector<Eigen::Vector3f>* gate_T,
+                       const std::vector<Eigen::Vector3f>* gate_dim) {
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
     cudaEventCreate(&stop);
@@ -965,6 +1013,63 @@ double bvh_articulated(const std::string& robot_urdf_path,
             rob_TD.push_back(make_float4(d.y(), d.z(), rob_a[i], 0.0f));
         }
     }
+    // ---- Parallel-phase gate nodes (default: obs root only) ----------------
+    // A link is gated iff its root OBB overlaps >=1 gate node; links that
+    // overlap none skip the serial traversal. The caller guarantees the gate
+    // covers every scene primitive (BVH cut at level k, or per-obstacle
+    // roots). Node list order is preserved (pass largest-first for early
+    // positive exit on proximal links).
+    std::vector<Eigen::Matrix3f> gate_R_vec;
+    std::vector<Eigen::Vector3f> gate_T_vec, gate_dim_vec;
+    if (gate_R && !gate_R->empty()) {
+        gate_R_vec = *gate_R;
+        gate_T_vec = *gate_T;
+        gate_dim_vec = *gate_dim;
+    } else {
+        gate_R_vec.push_back(obs_BVH.pR[0]);
+        gate_T_vec.push_back(obs_BVH.pT[0]);
+        gate_dim_vec.push_back(obs_BVH.pDim[0]);
+    }
+    const int gate_count = (int)gate_R_vec.size();
+    std::cout << "bvh_articulated: parallel-phase gate = " << gate_count
+              << " node(s)" << (gate_count == 1 ? " (root)" : "") << std::endl;
+
+    std::vector<float4> gate_Rq, gate_Rp, gate_TD;
+    std::vector<Eigen::Vector3f> gate_T_split, gate_dim_split;
+    std::vector<float> gate_a;
+    if (layout == NodeLayout::Quat || layout == NodeLayout::QuatTD || layout == NodeLayout::QuatSAT) {
+        gate_Rq.reserve(gate_count);
+        for (int i = 0; i < gate_count; ++i) {
+            const Eigen::Quaternionf q(gate_R_vec[i]);
+            gate_Rq.push_back(make_float4(q.x(), q.y(), q.z(), q.w()));
+        }
+    }
+    if (layout == NodeLayout::VecR) {
+        gate_Rp.reserve(gate_count * 3);
+        for (int i = 0; i < gate_count; ++i) {
+            const Eigen::Matrix3f& R = gate_R_vec[i];
+            gate_Rp.push_back(make_float4(R(0, 0), R(0, 1), R(0, 2), 0.0f));
+            gate_Rp.push_back(make_float4(R(1, 0), R(1, 1), R(1, 2), 0.0f));
+            gate_Rp.push_back(make_float4(R(2, 0), R(2, 1), R(2, 2), 0.0f));
+        }
+    }
+    if (layout == NodeLayout::QuatTD || layout == NodeLayout::QuatSAT) {
+        gate_TD.reserve(gate_count * 2);
+        for (int i = 0; i < gate_count; ++i) {
+            const Eigen::Vector3f& T = gate_T_vec[i];
+            const Eigen::Vector3f& d = gate_dim_vec[i];
+            gate_TD.push_back(make_float4(T.x(), T.y(), T.z(), d.x()));
+            // a is unused by the gate SAT (Chang-Kim leaf parameter only
+            // matters in the narrow phase).
+            gate_TD.push_back(make_float4(d.y(), d.z(), 0.0f, 0.0f));
+        }
+    }
+    if (needsSplitArrays) {
+        gate_T_split = gate_T_vec;
+        gate_dim_split = gate_dim_vec;
+        gate_a.assign(gate_count, 0.0f);
+    }
+
     // Matrix-free joint data for QuatSAT: no Eigen matrix in global memory.
     std::vector<JointParamsQuat> joints_q;
     if (layout == NodeLayout::QuatSAT) {
@@ -1061,6 +1166,14 @@ double bvh_articulated(const std::string& robot_urdf_path,
     float4* d_Rob_Rp;
     float4* d_Rob_TD;
 
+    float4* d_Gate_Rq;
+    float4* d_Gate_Rp;
+    float4* d_Gate_TD;
+    Eigen::Matrix3f* d_Gate_R;
+    Eigen::Vector3f* d_Gate_T;
+    Eigen::Vector3f* d_Gate_dim;
+    float* d_Gate_a;
+
     int* d_LinkOffset;
     int* d_LinkVertOffset;
     int* d_LinkTriOffset;
@@ -1118,6 +1231,28 @@ double bvh_articulated(const std::string& robot_urdf_path,
     if (layout == NodeLayout::QuatTD || layout == NodeLayout::QuatSAT) {
         cudaMalloc((void**)&d_Obs_TD, obs_TD.size() * sizeof(float4));
         cudaMalloc((void**)&d_Rob_TD, rob_TD.size() * sizeof(float4));
+    }
+
+    d_Gate_Rq = d_Gate_Rp = d_Gate_TD = nullptr;
+    d_Gate_R = nullptr;
+    d_Gate_T = d_Gate_dim = nullptr;
+    d_Gate_a = nullptr;
+    if (layout == NodeLayout::Quat || layout == NodeLayout::QuatTD || layout == NodeLayout::QuatSAT) {
+        cudaMalloc((void**)&d_Gate_Rq, gate_Rq.size() * sizeof(float4));
+    }
+    if (layout == NodeLayout::VecR) {
+        cudaMalloc((void**)&d_Gate_Rp, gate_Rp.size() * sizeof(float4));
+    }
+    if (layout == NodeLayout::QuatTD || layout == NodeLayout::QuatSAT) {
+        cudaMalloc((void**)&d_Gate_TD, gate_TD.size() * sizeof(float4));
+    }
+    if (layout == NodeLayout::Matrix) {
+        cudaMalloc((void**)&d_Gate_R, gate_count * sizeof(Eigen::Matrix3f));
+    }
+    if (needsSplitArrays) {
+        cudaMalloc((void**)&d_Gate_T, gate_count * sizeof(Eigen::Vector3f));
+        cudaMalloc((void**)&d_Gate_dim, gate_count * sizeof(Eigen::Vector3f));
+        cudaMalloc((void**)&d_Gate_a, gate_count * sizeof(float));
     }
 
     cudaMalloc((void**)&d_LinkOffset, (num_links + 1) * sizeof(int));
@@ -1178,6 +1313,24 @@ double bvh_articulated(const std::string& robot_urdf_path,
         checkCudaMem(cudaMemcpy(d_Rob_TD, rob_TD.data(), rob_TD.size() * sizeof(float4), cudaMemcpyHostToDevice));
     }
 
+    if (layout == NodeLayout::Quat || layout == NodeLayout::QuatTD || layout == NodeLayout::QuatSAT) {
+        checkCudaMem(cudaMemcpy(d_Gate_Rq, gate_Rq.data(), gate_Rq.size() * sizeof(float4), cudaMemcpyHostToDevice));
+    }
+    if (layout == NodeLayout::VecR) {
+        checkCudaMem(cudaMemcpy(d_Gate_Rp, gate_Rp.data(), gate_Rp.size() * sizeof(float4), cudaMemcpyHostToDevice));
+    }
+    if (layout == NodeLayout::QuatTD || layout == NodeLayout::QuatSAT) {
+        checkCudaMem(cudaMemcpy(d_Gate_TD, gate_TD.data(), gate_TD.size() * sizeof(float4), cudaMemcpyHostToDevice));
+    }
+    if (layout == NodeLayout::Matrix) {
+        checkCudaMem(cudaMemcpy(d_Gate_R, gate_R_vec.data(), gate_count * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    }
+    if (needsSplitArrays) {
+        checkCudaMem(cudaMemcpy(d_Gate_T, gate_T_split.data(), gate_count * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Gate_dim, gate_dim_split.data(), gate_count * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Gate_a, gate_a.data(), gate_count * sizeof(float), cudaMemcpyHostToDevice));
+    }
+
     checkCudaMem(cudaMemcpy(d_LinkOffset, link_offset.data(), (num_links + 1) * sizeof(int), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_LinkVertOffset, link_vert_offset.data(), (num_links + 1) * sizeof(int), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_LinkTriOffset, link_tri_offset.data(), (num_links + 1) * sizeof(int), cudaMemcpyHostToDevice));
@@ -1207,21 +1360,30 @@ double bvh_articulated(const std::string& robot_urdf_path,
         ObstacleSoA<std::decay_t<decltype(*fc)>, L> o;
         if constexpr (L == NodeLayout::Matrix) {
             o.nodes.R = d_R_obs;
+            o.gate_nodes.R = d_Gate_R;
         } else if constexpr (L == NodeLayout::Quat) {
             o.nodes.Rq = d_Obs_Rq;
+            o.gate_nodes.Rq = d_Gate_Rq;
         } else if constexpr (L == NodeLayout::VecR) {
             o.nodes.Rp = d_Obs_Rp;
+            o.gate_nodes.Rp = d_Gate_Rp;
         } else {
             o.nodes.Rq = d_Obs_Rq;
             o.nodes.TD = d_Obs_TD;
+            o.gate_nodes.Rq = d_Gate_Rq;
+            o.gate_nodes.TD = d_Gate_TD;
         }
         if constexpr (L != NodeLayout::QuatTD && L != NodeLayout::QuatSAT) {
             o.nodes.T = d_T_obs;
             o.nodes.dim = d_Obs_dim;
             o.nodes.a = d_Obs_a;
+            o.gate_nodes.T = d_Gate_T;
+            o.gate_nodes.dim = d_Gate_dim;
+            o.gate_nodes.a = d_Gate_a;
         }
         o.first_child = fc;
         o.num_nodes = obs_BVH.size;
+        o.gate_count = gate_count;
         o.verts = d_Obs_verts;
         o.tris = d_Obs_tris;
         return o;

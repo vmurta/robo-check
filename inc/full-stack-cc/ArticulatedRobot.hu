@@ -329,6 +329,8 @@ struct ObstacleSoA {
     NodePtrsFor<L> nodes;
     const ChildT* first_child;
     size_t num_nodes;
+    NodePtrsFor<L> gate_nodes;       // parallel-phase gate list (same packing as nodes)
+    int gate_count;                  // 1 = obs root only (default)
     const Eigen::Vector3f* verts;
     const Triangle* tris;
 };
@@ -376,11 +378,20 @@ __global__ void d_bvh_articulated(const ObstacleSoA<ObsChildT, LAYOUT> obs,
 //   bit 1  = __restrict__ pointers
 //   bits 2-3 = node-data layout (0-3, see NodePtrs)
 // int16 silently falls back to int32 when any node index exceeds 15 bits.
+//
+// The optional gate_R/gate_T/gate_dim vectors override the parallel-phase
+// gate (default: the obs root OBB only). A link is gated iff its root OBB
+// overlaps >=1 gate node; links that overlap none are provably collision-free
+// and skip the serial traversal (the caller must ensure the gate covers every
+// scene primitive, e.g. a BVH cut at level k or per-obstacle roots).
 template <size_t N>
 double bvh_articulated(const std::string& robot_urdf_path,
                        const BVNode_soa<int32_t>& obs_BVH, const MeshData& obs_mesh,
                        const std::vector<articulated_conf<N>>& confs,
                        std::vector<bool>& valid, bool dry_run = false,
-                       int kernel_mode = 0);
+                       int kernel_mode = 0,
+                       const std::vector<Eigen::Matrix3f>* gate_R = nullptr,
+                       const std::vector<Eigen::Vector3f>* gate_T = nullptr,
+                       const std::vector<Eigen::Vector3f>* gate_dim = nullptr);
 
 #include "ArticulatedRobot.tcc"

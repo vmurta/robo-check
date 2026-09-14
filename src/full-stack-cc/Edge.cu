@@ -2425,6 +2425,8 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
         }
         o.first_child = fc;
         o.num_nodes = obs_BVH.size;
+        o.gate_nodes = o.nodes;   // edge kernel keeps the root-only gate
+        o.gate_count = 1;
         o.verts = d_Obs_verts;
         o.tris = d_Obs_tris;
         return o;

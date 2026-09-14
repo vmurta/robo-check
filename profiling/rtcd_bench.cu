@@ -232,6 +232,92 @@ static SceneData buildScene(const std::string& sceneDir, const std::string& scen
 }
 
 // ---------------------------------------------------------------------------
+// Parallel-phase gate node lists (G0 root / Gk merged-BVH cut / Gobs roots)
+// ---------------------------------------------------------------------------
+// 4-ary levels are serialized contiguously in the SoA; level k+1 holds exactly
+// 4 slots per internal slot of level k, in order. Cut(k) = non-dummy slots at
+// level k + leaf slots at levels 1..k-1 (shallow leaves are NOT carried to
+// deeper levels, so a naive "all level-k slots" gate would miss their tris).
+static std::vector<int> cutIndices(const BVNode_soa<int32_t>& bvh, int k) {
+    if (k <= 0) return {0};
+    std::vector<int> lvl_start(1, 0), lvl_size(1, 1);
+    while ((int)lvl_start.size() <= k) {
+        int internal = 0;
+        const int s = lvl_start.back();
+        const int n = lvl_size.back();
+        for (int i = s; i < s + n; ++i) {
+            if (bvh.first_child[i] > 0) internal++;
+        }
+        if (internal == 0) break; // tree bottoms out above level k
+        lvl_start.push_back(s + n);
+        lvl_size.push_back(4 * internal);
+    }
+    std::vector<int> cut;
+    for (int lv = 1; lv <= k && lv < (int)lvl_start.size(); ++lv) {
+        const int s = lvl_start[lv];
+        const int end = s + lvl_size[lv];
+        for (int i = s; i < end; ++i) {
+            const int fc = bvh.first_child[i];
+            if (fc == 0) continue;            // dummy (padding)
+            if (lv < k && fc > 0) continue;   // internal above the cut
+            cut.push_back(i);                 // level-k slot or shallow leaf
+        }
+    }
+    return cut;
+}
+
+// Gate node lists for the gate modes:
+//   0 = empty (wrapper default: obs root only)
+//   1 = merged-BVH cut at 4-ary level 1
+//   2 = merged-BVH cut at 4-ary level 2
+//   3 = per-obstacle root OBBs (built by the validated BVH builder, node 0,
+//       T += scene offset). Nodes are sorted largest-volume first so the
+//       gate loop exits early on proximal links.
+static void buildGateLists(int gateMode, const SceneData& sd, const std::string& sceneDir,
+                           std::vector<Eigen::Matrix3f>& gR,
+                           std::vector<Eigen::Vector3f>& gT,
+                           std::vector<Eigen::Vector3f>& gD) {
+    gR.clear(); gT.clear(); gD.clear();
+    if (gateMode == 0) return;
+    if (gateMode == 1 || gateMode == 2) {
+        const int k = gateMode;
+        const std::vector<int> cut = cutIndices(sd.bvh, k);
+        for (int idx : cut) {
+            gR.push_back(sd.bvh.pR[idx]);
+            gT.push_back(sd.bvh.pT[idx]);
+            gD.push_back(sd.bvh.pDim[idx]);
+        }
+    } else if (gateMode == 3) {
+        for (const auto& ob : sd.obstacles) {
+            const std::string path = sceneDir + "/" + ob.first;
+            BVNode_soa<int32_t> bvh = BVH_n_ary_hierarchy_from_mesh<int32_t>(path.c_str(), 2);
+            gR.push_back(bvh.pR[0]);
+            gT.push_back(bvh.pT[0] + ob.second);
+            gD.push_back(bvh.pDim[0]);
+        }
+    } else {
+        std::cerr << "buildGateLists: unknown gate mode " << gateMode << std::endl;
+        exit(1);
+    }
+    std::vector<int> order(gR.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = (int)i;
+    std::sort(order.begin(), order.end(), [&](int a, int b) {
+        const Eigen::Vector3f da = gD[a], db = gD[b];
+        return (da.x() * da.y() * da.z()) > (db.x() * db.y() * db.z());
+    });
+    std::vector<Eigen::Matrix3f> sR(gR.size());
+    std::vector<Eigen::Vector3f> sT(gT.size()), sD(gD.size());
+    for (size_t i = 0; i < order.size(); ++i) {
+        sR[i] = gR[order[i]];
+        sT[i] = gT[order[i]];
+        sD[i] = gD[order[i]];
+    }
+    gR.swap(sR);
+    gT.swap(sT);
+    gD.swap(sD);
+}
+
+// ---------------------------------------------------------------------------
 // FCL ground truth: mirrors the RTCD FCLBenchmark harness
 // (fcl::BVHModel<OBBRSSf> per link/per obstacle, fcl::collide).
 // ---------------------------------------------------------------------------
@@ -386,6 +472,8 @@ static void usage(const char* prog) {
               << "  --edge-check <n>             articulated edge checking: n consecutive-pose edges,\n"
               << "                               GPU vs FCL, FP/FN + timing, then exit\n"
               << "  --edge-lvs <float>           longest valid joint delta per edge step (default 0.1 rad)\n"
+              << "  --gate-sweep                 parallel-phase gate sweep: G0 root / G1 lv1 / G2 lv2 /\n"
+              << "                               Gobs per-obstacle roots on the quatSAT layout (4 cells)\n"
               << "  --csv <file>                 append results as CSV\n";
 }
 
@@ -407,6 +495,7 @@ int main(int argc, char** argv) {
     size_t edgeCheckN     = 0;
     float edgeLvs         = 0.1f;
     int edgeKmode         = 64;
+    bool gateSweep        = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -430,6 +519,7 @@ int main(int argc, char** argv) {
         else if (a == "--edge-check") edgeCheckN = (size_t)atoi(next().c_str());
         else if (a == "--edge-lvs") edgeLvs = (float)atof(next().c_str());
         else if (a == "--edge-kmode") edgeKmode = atoi(next().c_str());
+        else if (a == "--gate-sweep") gateSweep = true;
         else if (a == "-h" || a == "--help") { usage(argv[0]); return 0; }
         else { std::cerr << "Unknown argument: " << a << std::endl; usage(argv[0]); return 1; }
     }
@@ -461,6 +551,16 @@ int main(int argc, char** argv) {
 
     // --- scene ---
     SceneData sd = buildScene(sceneDir, scene);
+
+    // --- parallel-phase gate node lists (modes 1..3; mode 0 = obs root) ---
+    std::vector<Eigen::Matrix3f> gateR[4];
+    std::vector<Eigen::Vector3f> gateT[4], gateD[4];
+    for (int gm = 1; gm <= 3; ++gm) {
+        buildGateLists(gm, sd, sceneDir, gateR[gm], gateT[gm], gateD[gm]);
+        if (!gateR[gm].empty()) {
+            std::cout << "gate mode " << gm << ": " << gateR[gm].size() << " nodes" << std::endl;
+        }
+    }
 
     // --- per-link bisection debug mode ---
     if (debugPose >= 0 && debugPose < (int)traj.size()) {
@@ -859,14 +959,39 @@ int main(int argc, char** argv) {
     // A/B/C/BC kernel variants (node-layout experiment):
     //   0 = base (matrix SoA)        4 = quat R
     //   8 = vecR (padded float4 R)  12 = quat R + packed T/dim/a
-    static const int kVariantMode[4] = {0, 4, 8, 12};
-    static const char* kVariantName[4] = {"base", "quat", "vecR", "quat+TD"};
+    // gate sweep: quatSAT (64) x gate mode in kernel_mode bits 7-8
+    //   (0 = obs root, 1 = lv1 cut, 2 = lv2 cut, 3 = per-obstacle roots)
+    static int kVariantMode[4];
+    static const char* kVariantName[4];
+    if (gateSweep) {
+        kVariantMode[0] = 64;
+        kVariantMode[1] = 64 + (1 << 7);
+        kVariantMode[2] = 64 + (2 << 7);
+        kVariantMode[3] = 64 + (3 << 7);
+        kVariantName[0] = "quatSAT-G0";
+        kVariantName[1] = "quatSAT-G1";
+        kVariantName[2] = "quatSAT-G2";
+        kVariantName[3] = "quatSAT-Gobs";
+    } else {
+        kVariantMode[0] = 0;
+        kVariantMode[1] = 4;
+        kVariantMode[2] = 8;
+        kVariantMode[3] = 12;
+        kVariantName[0] = "base";
+        kVariantName[1] = "quat";
+        kVariantName[2] = "vecR";
+        kVariantName[3] = "quat+TD";
+    }
     const int nCells = (kernelModeOverride >= 0) ? 1 : 4;
 
     auto runGpu = [&](size_t n, int kmode, std::vector<bool>* outValid) -> double {
         std::vector<articulated_conf<7>> sub(confs.begin(), confs.begin() + n);
         std::vector<bool> valid;
-        const double kernelMs = bvh_articulated<7>(urdfPath, sd.bvh, sd.mesh, sub, valid, true, kmode);
+        const int gateMode = (kmode >> 7) & 3;
+        const std::vector<Eigen::Matrix3f>* gR = (gateMode == 0) ? nullptr : &gateR[gateMode];
+        const std::vector<Eigen::Vector3f>* gT = (gateMode == 0) ? nullptr : &gateT[gateMode];
+        const std::vector<Eigen::Vector3f>* gD = (gateMode == 0) ? nullptr : &gateD[gateMode];
+        const double kernelMs = bvh_articulated<7>(urdfPath, sd.bvh, sd.mesh, sub, valid, true, kmode, gR, gT, gD);
 #ifdef RTCD_PROF
         articulatedProfDump();
         articulatedObbDump();
@@ -894,7 +1019,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            const char* kName = (kmode == 0) ? "base" : (kmode == 4) ? "quat" : (kmode == 8) ? "vecR" : (kmode == 12) ? "quat+TD" : (kmode == 32) ? "1bsm" : (kmode == 16) ? "2bsm" : (kmode == 64) ? "quatSAT" : "mode?";
+            const char* kName = (kmode == 0) ? "base" : (kmode == 4) ? "quat" : (kmode == 8) ? "vecR" : (kmode == 12) ? "quat+TD" : (kmode == 32) ? "1bsm" : (kmode == 16) ? "2bsm" : (kmode == 64) ? "quatSAT" : (kmode == 192) ? "quatSAT-G1" : (kmode == 320) ? "quatSAT-G2" : (kmode == 448) ? "quatSAT-Gobs" : "mode?";
         std::cout << "FP/FN check [" << kName << "] (" << n << " poses): TP=" << tp
                       << " TN=" << tn << " FP=" << fp << " FN=" << fn << std::endl;
             if (fp != 0 || fn != 0) {
@@ -968,9 +1093,10 @@ int main(int argc, char** argv) {
             }
         }
         if (nCells == 4)
-        std::cout << "BATCH " << batch << " [AB/BC]: best-kernel speedup vs base: quat="
-                  << bestMs[0] / bestMs[1] << "x vecR=" << bestMs[0] / bestMs[2]
-                  << "x quat+TD=" << bestMs[0] / bestMs[3]
+        std::cout << "BATCH " << batch << " [AB/BC]: best-kernel speedup vs " << kVariantName[0]
+                  << ": " << kVariantName[1] << "=" << bestMs[0] / bestMs[1]
+                  << "x " << kVariantName[2] << "=" << bestMs[0] / bestMs[2]
+                  << "x " << kVariantName[3] << "=" << bestMs[0] / bestMs[3]
                   << "x, results " << (agree ? "identical" : "DIFFER!") << std::endl;
     }
 
