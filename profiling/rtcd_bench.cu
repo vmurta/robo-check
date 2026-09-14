@@ -806,7 +806,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            const char* kName = (kmode == 0) ? "base" : (kmode == 4) ? "quat" : (kmode == 8) ? "vecR" : (kmode == 12) ? "quat+TD" : (kmode == 32) ? "1bsm" : "mode?";
+            const char* kName = (kmode == 0) ? "base" : (kmode == 4) ? "quat" : (kmode == 8) ? "vecR" : (kmode == 12) ? "quat+TD" : (kmode == 32) ? "1bsm" : (kmode == 16) ? "2bsm" : (kmode == 64) ? "quatSAT" : "mode?";
         std::cout << "FP/FN check [" << kName << "] (" << n << " poses): TP=" << tp
                       << " TN=" << tn << " FP=" << fp << " FN=" << fn << std::endl;
             if (fp != 0 || fn != 0) {
@@ -873,7 +873,8 @@ int main(int argc, char** argv) {
             if (csv.is_open()) {
                 const char* kName = (kVariantMode[i] == 0) ? "base" : (kVariantMode[i] == 4) ? "quat"
                                   : (kVariantMode[i] == 8) ? "vecR" : (kVariantMode[i] == 12) ? "quat+TD"
-                                  : (kVariantMode[i] == 32) ? "1bsm" : kVariantName[i];
+                                  : (kVariantMode[i] == 32) ? "1bsm" : (kVariantMode[i] == 16) ? "2bsm"
+                                  : (kVariantMode[i] == 64) ? "quatSAT" : kVariantName[i];
                 csv << scene << ",robo-check-bvh-" << kName << "," << batch << "," << nPoses
                     << "," << avgMs << "," << usPerPose << "\n";
             }
