@@ -607,10 +607,12 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
     }
     __syncthreads();
 
-    Eigen::Matrix3f R_obs_abs_root = obs.R[0]; // rotation of B wrt origin
+    const float4 q_obs_root_f4 = obs.Rq[0]; // rotation of B wrt origin (unit quat)
+    const Quat q_obs_root = {q_obs_root_f4.x, q_obs_root_f4.y, q_obs_root_f4.z, q_obs_root_f4.w};
     Eigen::Vector3f T_obs_abs_root = obs.T[0]; // translation of B wrt origin
 
-    Eigen::Matrix3f R_rob_abs_root = rob.R[0]; // rotation of A wrt origin
+    const float4 q_rob_root_f4 = rob.Rq[0]; // rotation of A wrt origin (unit quat)
+    const Quat q_rob_root = {q_rob_root_f4.x, q_rob_root_f4.y, q_rob_root_f4.z, q_rob_root_f4.w};
     Eigen::Vector3f T_rob_abs_root = rob.T[0]; // translation of A wrt origin
 
     Eigen::Vector3f b_root = rob.dim[0]; // half dimensions of box A
@@ -618,16 +620,15 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
 
     const float epsilon = 1e-6f; // small value to avoid numerical issues
 
-    Eigen::Matrix3f R_conf; // rotation of robot wrt world
+    Quat q_conf;          // rotation of robot wrt world (unit quat, per config)
     Eigen::Vector3f T_conf; // translation of robot wrt world
-    Eigen::Matrix3f R_obs_abs; // rotation of B wrt origin (per node)
+    Quat q_obs_abs;         // rotation of B wrt origin (per node)
     Eigen::Vector3f T_obs_abs;
-    Eigen::Matrix3f R_rob_abs;
+    Quat q_rob_abs;         // rotation of A wrt origin (per node)
     Eigen::Vector3f T_rob_abs;
-    Eigen::Vector3f b; // half dimensions of box A (per node)
-    Eigen::Vector3f a; // half dimensions of box B (per node)
-    Eigen::Matrix3f B;      // rotation of A wrt B
-    Eigen::Matrix3f Bf;     // absolute value of B (plus epsilon)
+    Eigen::Vector3f b;      // half dimensions of box A (per node)
+    Eigen::Vector3f a;      // half dimensions of box B (per node)
+    Quat qB;                // rotation of A wrt B (pure quat, quatSAT)
     Eigen::Vector3f T;      // translation of A wrt B
 
     // intent: for each i in rob_obb_pend, need to check all children of rob_obb_pend[i] against all children of obs_obb_pend[j]
@@ -647,7 +648,7 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
     constexpr int BATCH = BLOCK_SIZE; // configs pulled per queue transaction (one per thread)
     __shared__ uint32_t s_batch_start;
     __shared__ uint32_t s_num_pend;
-    __shared__ Eigen::Matrix3f s_pend_rot[BATCH];
+    __shared__ float4 s_pend_rot[BATCH]; // per-config unit quaternions
     __shared__ Eigen::Vector3f s_pend_trans[BATCH];
     __shared__ uint32_t s_pend_idx[BATCH];
 
@@ -695,21 +696,21 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
         // parallel outermost OBB check: one config per thread
         const uint32_t index = batch_start + threadIdx.x;
         if (index < num_confs) {
-            R_conf = rob.conf_rot[index];
             T_conf = rob.conf_trans[index];
+            q_conf = matrixToQuat(rob.conf_rot[index]);
 
-            //Calculate relative rotation of B wrt A
-            //TODO: precompute inverse rotations of A
-            computeRelTransform(R_obs_abs_root, T_obs_abs_root,
-                                R_rob_abs_root, T_rob_abs_root,
-                                R_conf, T_conf, epsilon, B, Bf, T);
+            // Calculate the relative rotation of B wrt A purely in
+            // quaternion space (quatSAT: no matrix materialized).
+            computeRelTransformQuat(q_obs_root, T_obs_abs_root,
+                                    q_rob_root, T_rob_abs_root,
+                                    q_conf, T_conf, qB, T);
 
-            //initial per conf outermost bounding box check
-            if (!obbOverlap(a_root, b_root, B, Bf, T)) {
+            // initial per-conf outermost bounding box check
+            if (!obbOverlapQuat(qB, T, a_root, b_root, epsilon)) {
                 atomicOr(&s_disjoint_word, 1u << threadIdx.x);
             } else {
                 uint32_t pos = atomicAdd(&s_num_pend, 1);
-                s_pend_rot[pos] = R_conf;
+                s_pend_rot[pos] = make_float4(q_conf.x, q_conf.y, q_conf.z, q_conf.w);
                 s_pend_trans[pos] = T_conf;
                 s_pend_idx[pos] = index;
             }
@@ -734,7 +735,8 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
         for (uint32_t i = 0; i < s_num_pend; i++) {
             __syncthreads();
             const unsigned long long t_cfg = (threadIdx.x == 0) ? globaltimer() : 0;
-            R_conf = s_pend_rot[i];
+            const float4 qc = s_pend_rot[i];
+            q_conf = {qc.x, qc.y, qc.z, qc.w};
             T_conf = s_pend_trans[i];
             const uint32_t index = s_pend_idx[i];
 
@@ -763,12 +765,9 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
                 int pend_idx = num_obb_pend + conf_offset;
                 if (num_obb_pend >= MAX_BUFFER - 32){
                     if (threadIdx.x == 0) {
-                        printf("obb overflow with %d\n boxes on configuration with rotation matrix \n\r \
-                                %f, %f, %f, \n %f, %f, %f, \n %f, %f, %f, \n and translation \n \n with block index %d\n \
-                                %f, %f, %f \n", 
-                                num_obb_pend, R_conf(0, 0), R_conf(0, 1), R_conf(0, 2),
-                                R_conf(1, 0), R_conf(1, 1), R_conf(1, 2),
-                                R_conf(2, 0), R_conf(2, 1), R_conf(2, 2),
+                        printf("obb overflow with %d\n boxes on configuration with quat "
+                                "%f, %f, %f, %f and translation %f, %f, %f (block %d)\n",
+                                num_obb_pend, q_conf.x, q_conf.y, q_conf.z, q_conf.w,
                                 T_conf[0], T_conf[1], T_conf[2], blockIdx.x);
                     }
                     break;
@@ -805,16 +804,19 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
                     continue;
                 }
 
-                R_obs_abs = obs.R[obs_obb_idx];
+                const float4 qo = obs.Rq[obs_obb_idx];
+                q_obs_abs = {qo.x, qo.y, qo.z, qo.w};
                 T_obs_abs = obs.T[obs_obb_idx];
-                R_rob_abs = rob.R[rob_obb_idx];
+                const float4 qr = rob.Rq[rob_obb_idx];
+                q_rob_abs = {qr.x, qr.y, qr.z, qr.w};
                 T_rob_abs = rob.T[rob_obb_idx];
                 b = rob.dim[rob_obb_idx];
                 a = obs.dim[obs_obb_idx];
 
-                computeRelTransform(R_obs_abs, T_obs_abs, R_rob_abs, T_rob_abs, R_conf, T_conf, epsilon, B, Bf, T);
+                computeRelTransformQuat(q_obs_abs, T_obs_abs, q_rob_abs, T_rob_abs,
+                                        q_conf, T_conf, qB, T);
 
-                if (!obbOverlap(a, b, B, Bf, T)) {
+                if (!obbOverlapQuat(qB, T, a, b, epsilon)) {
                     continue;
                 }
 
@@ -839,6 +841,7 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
                         const int obs_tri = -(obs_first_child_idx + 1);
                         const Eigen::Vector3f& dimObs = obs.dim[obs_obb_idx];
                         const Eigen::Vector3f& dimRob = rob.dim[rob_obb_idx];
+                        const Eigen::Matrix3f B = quatToMatrix(qB); // narrow phase still uses the matrix form
                         const int verdict = paperTriTri(dimObs(0), dimObs(1), obs.a[obs_obb_idx],
                                                         dimRob(0), dimRob(1), rob.a[rob_obb_idx],
                                                         B, T);
@@ -848,9 +851,9 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
                             // borderline/coplanar: full world-frame test
                             const Triangle& rt = rob.tris[rob_tri];
                             const Triangle& ot = obs.tris[obs_tri];
-                            const Eigen::Vector3f rv0 = R_conf * rob.verts[rt.v1] + T_conf;
-                            const Eigen::Vector3f rv1 = R_conf * rob.verts[rt.v2] + T_conf;
-                            const Eigen::Vector3f rv2 = R_conf * rob.verts[rt.v3] + T_conf;
+                            const Eigen::Vector3f rv0 = quatRotateVec(q_conf, rob.verts[rt.v1]) + T_conf;
+                            const Eigen::Vector3f rv1 = quatRotateVec(q_conf, rob.verts[rt.v2]) + T_conf;
+                            const Eigen::Vector3f rv2 = quatRotateVec(q_conf, rob.verts[rt.v3]) + T_conf;
                             if (!triangles_valid_f(rv0, rv1, rv2,
                                                    obs.verts[ot.v1], obs.verts[ot.v2], obs.verts[ot.v3])) {
                                 s_collision = true;
@@ -946,9 +949,9 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     const int gridSize = (max_blocks < persistent_blocks) ? max_blocks : persistent_blocks;
 
 
-    Eigen::Matrix3f* d_R_obs;
+    float4* d_Rq_obs;
     Eigen::Vector3f* d_T_obs;
-    Eigen::Matrix3f* d_R_rob;
+    float4* d_Rq_rob;
     Eigen::Vector3f* d_T_rob;
     Eigen::Vector3f* d_Rob_dim;
     Eigen::Vector3f* d_Obs_dim;
@@ -968,9 +971,9 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
 
     // Allocate memory for device pointers
     cudaEventRecord(start, 0);
-    cudaMalloc((void**)&d_R_obs, obs_BVH.size * sizeof(Eigen::Matrix3f));
+    cudaMalloc((void**)&d_Rq_obs, obs_BVH.size * sizeof(float4));
     cudaMalloc((void**)&d_T_obs, obs_BVH.size * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_R_rob, rob_BVH.size * sizeof(Eigen::Matrix3f));
+    cudaMalloc((void**)&d_Rq_rob, rob_BVH.size * sizeof(float4));
     cudaMalloc((void**)&d_T_rob, rob_BVH.size * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_dim, rob_BVH.size * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_dim, obs_BVH.size * sizeof(Eigen::Vector3f));
@@ -991,9 +994,24 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     checkCudaMem(cudaMemset(d_phase, 0, 4 * sizeof(uint64_t)));
 
     cudaDeviceSynchronize();
-    checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    {
+        // Pack node rotations as unit quaternions (quatSAT storage).
+        std::vector<float4> obsRq(obs_BVH.size);
+        for (size_t i = 0; i < obs_BVH.size; ++i) {
+            const Eigen::Quaternionf q(obs_BVH.pR[i]);
+            obsRq[i] = make_float4(q.x(), q.y(), q.z(), q.w());
+        }
+        checkCudaMem(cudaMemcpy(d_Rq_obs, obsRq.data(), obsRq.size() * sizeof(float4), cudaMemcpyHostToDevice));
+    }
     checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_R_rob, rob_BVH.pR, rob_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    {
+        std::vector<float4> robRq(rob_BVH.size);
+        for (size_t i = 0; i < rob_BVH.size; ++i) {
+            const Eigen::Quaternionf q(rob_BVH.pR[i]);
+            robRq[i] = make_float4(q.x(), q.y(), q.z(), q.w());
+        }
+        checkCudaMem(cudaMemcpy(d_Rq_rob, robRq.data(), robRq.size() * sizeof(float4), cudaMemcpyHostToDevice));
+    }
     checkCudaMem(cudaMemcpy(d_T_rob, rob_BVH.pT, rob_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_dim, rob_BVH.pDim, rob_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
@@ -1026,12 +1044,12 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     std::cout << "obs_BVH.size: " << obs_BVH.size << ", rob_BVH.size: " << rob_BVH.size << std::endl;
 
     RigidObstacleSoA obsSoA;
-    obsSoA.R = d_R_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
+    obsSoA.R = nullptr; obsSoA.Rq = d_Rq_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
     obsSoA.first_child = d_Obs_first_child; obsSoA.a = d_Obs_a;
     obsSoA.verts = d_Obs_vertices; obsSoA.tris = d_Obs_triangles;
     obsSoA.num_nodes = obs_BVH.size;
     RigidRobotSoA robSoA;
-    robSoA.R = d_R_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
+    robSoA.R = nullptr; robSoA.Rq = d_Rq_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
     robSoA.first_child = d_Rob_first_child; robSoA.a = d_Rob_a;
     robSoA.verts = d_Rob_vertices; robSoA.tris = d_Rob_triangles;
     robSoA.num_nodes = rob_BVH.size;
@@ -1120,9 +1138,9 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     }
 
     // Free device memory
-    cudaFree(d_R_obs);
+    cudaFree(d_Rq_obs);
     cudaFree(d_T_obs);
-    cudaFree(d_R_rob);
+    cudaFree(d_Rq_rob);
     cudaFree(d_T_rob);
     cudaFree(d_Rob_dim);
     cudaFree(d_Obs_dim);

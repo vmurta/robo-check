@@ -315,6 +315,25 @@ fcl::Transform3f configurationToTransform(const Configuration& config);
 __device__ __host__ Eigen::Matrix3f createRotationMatrix(const Configuration &config);
 __device__ __host__ Eigen::Matrix4f createHomogeneousMatrix(const Configuration &config);
 
+// Euler angles to unit quaternion (x, y, z, w) in float4, matching the
+// convention of createRotationMatrix: R = Rz(yaw) * Ry(pitch) * Rx(roll).
+__device__ __host__ inline float4 configurationToQuat(const Configuration& config) {
+    const float cy = cosf(config.yaw * 0.5f), sy = sinf(config.yaw * 0.5f);
+    const float cp = cosf(config.pitch * 0.5f), sp = sinf(config.pitch * 0.5f);
+    const float cr = cosf(config.roll * 0.5f), sr = sinf(config.roll * 0.5f);
+
+    float4 q;
+    q.x = sr * cp * cy - cr * sp * sy;
+    q.y = cr * sp * cy + sr * cp * sy;
+    q.z = cr * cp * sy - sr * sp * cy;
+    q.w = cr * cp * cy + sr * sp * sy;
+
+    // Normalize (products of unit quats drift slightly in float).
+    const float n = sqrtf(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    q.x /= n; q.y /= n; q.z /= n; q.w /= n;
+    return q;
+}
+
 template<typename Derived>
 std::string pythonifyEigenMatrix(const Eigen::MatrixBase<Derived>& m)
 {
