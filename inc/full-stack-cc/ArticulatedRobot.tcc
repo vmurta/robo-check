@@ -288,7 +288,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
     __shared__ int s_num_obb_pend[NWARP];
     __shared__ QRob s_tri_rob[NWARP][MAX_TRI];
     __shared__ QObs s_tri_obs[NWARP][MAX_TRI];
-    __shared__ uint8_t s_num_tri[NWARP];
+    __shared__ int s_num_tri[NWARP];
     __shared__ bool s_collision[NWARP];
 
     const int warp = threadIdx.x >> 5;
