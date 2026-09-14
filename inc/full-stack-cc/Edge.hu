@@ -263,7 +263,8 @@ struct EdgeKernelOut {
 // free). When EDGE_FLAG_REPORT_FIRST_INVALID_T is set, the t of the first
 // colliding sample is stored in out.pfirst_invalid_t.
 // ===========================================================================
-__global__ void d_bvh_edges(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+template <typename RotT = float4>
+__global__ void d_bvh_edges(const RigidObstacleSoA<RotT> obs, const RigidRobotSoA<RotT> rob,
                             const EdgeSoA edges, size_t num_edges,
                             const EdgeKernelOut out);
 
@@ -272,7 +273,8 @@ __global__ void d_bvh_edges(const RigidObstacleSoA obs, const RigidRobotSoA rob,
 // only root-overlapping samples enter a shared candidate ring, and the ring
 // is drained by two lockstep 16-lane traversal engines with a sticky per-edge
 // dead mask for early exits. Modernized the same way as d_bvh_edges.
-__global__ void d_bvh_edges_collab(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+template <typename RotT = float4>
+__global__ void d_bvh_edges_collab(const RigidObstacleSoA<RotT> obs, const RigidRobotSoA<RotT> rob,
                                    const EdgeSoA edges, size_t num_edges,
                                    const EdgeKernelOut out);
 
@@ -391,8 +393,8 @@ struct ArticulatedEdgeSoA {
 // quatSAT traversal (see d_bvh_articulated for the LAYOUT semantics).
 template <size_t N, typename RobChildT = int32_t, typename ObsChildT = int32_t,
           NodeLayout LAYOUT = NodeLayout::Matrix>
-__global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
-                                        const RobotSoA<RobChildT> rob,
+__global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT, LAYOUT> obs,
+                                        const RobotSoA<RobChildT, LAYOUT> rob,
                                         const ArticulatedEdgeSoA<N> edges, size_t num_edges,
                                         const EdgeKernelOut out);
 

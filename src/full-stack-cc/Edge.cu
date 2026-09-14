@@ -3,7 +3,8 @@
 
 constexpr int EDGE_BLOCK_SIZE = 32;
 
-__global__ void d_bvh_edges(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+template <typename RotT>
+__global__ void d_bvh_edges(const RigidObstacleSoA<RotT> obs, const RigidRobotSoA<RotT> rob,
                             const EdgeSoA edges, size_t num_edges,
                             const EdgeKernelOut out) {
 
@@ -29,12 +30,10 @@ __global__ void d_bvh_edges(const RigidObstacleSoA obs, const RigidRobotSoA rob,
     }
     __syncwarp(0xFFFFFFFFu);
 
-    const float4 qo0 = obs.Rq[0];
-    const Quat q_obs_root = {qo0.x, qo0.y, qo0.z, qo0.w}; // rotation of B wrt origin
+    const Quat q_obs_root = loadRot(obs.R, 0); // rotation of B wrt origin
     Eigen::Vector3f T_obs_abs_root = obs.T[0]; // translation of B wrt origin
 
-    const float4 qr0 = rob.Rq[0];
-    const Quat q_rob_root = {qr0.x, qr0.y, qr0.z, qr0.w}; // rotation of A wrt origin
+    const Quat q_rob_root = loadRot(rob.R, 0); // rotation of A wrt origin
     Eigen::Vector3f T_rob_abs_root = rob.T[0]; // translation of A wrt origin
 
     Eigen::Vector3f b_root = rob.dim[0]; // half dimensions of box A
@@ -257,11 +256,9 @@ __global__ void d_bvh_edges(const RigidObstacleSoA obs, const RigidRobotSoA rob,
                         continue;
                     }
 
-                    const float4 qof = obs.Rq[obs_obb_idx];
-                    q_obs_abs = {qof.x, qof.y, qof.z, qof.w};
+                    q_obs_abs = loadRot(obs.R, obs_obb_idx);
                     T_obs_abs = obs.T[obs_obb_idx];
-                    const float4 qrf = rob.Rq[rob_obb_idx];
-                    q_rob_abs = {qrf.x, qrf.y, qrf.z, qrf.w};
+                    q_rob_abs = loadRot(rob.R, rob_obb_idx);
                     T_rob_abs = rob.T[rob_obb_idx];
                     b = rob.dim[rob_obb_idx];
                     a = obs.dim[obs_obb_idx];
@@ -408,7 +405,7 @@ double bvh_edges(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     const size_t smem_size = (obs_BVH.size + rob_BVH.size) * sizeof(int16_t);
 
     int blocks_per_sm = 0;
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, d_bvh_edges, blockSize, smem_size);
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, d_bvh_edges<float4>, blockSize, smem_size);
     if (blocks_per_sm < 1) blocks_per_sm = 1;
     const int max_blocks = (num_edges + blockSize - 1) / blockSize;
     const int persistent_blocks = num_sms * blocks_per_sm;
@@ -515,13 +512,13 @@ double bvh_edges(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
 
     std::cout << "obs_BVH.size: " << obs_BVH.size << ", rob_BVH.size: " << rob_BVH.size << std::endl;
 
-    RigidObstacleSoA obsSoA;
-    obsSoA.R = nullptr; obsSoA.Rq = d_Q_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
+    RigidObstacleSoA<float4> obsSoA;
+    obsSoA.R = d_Q_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
     obsSoA.first_child = d_Obs_first_child; obsSoA.a = d_Obs_a;
     obsSoA.verts = d_Obs_vertices; obsSoA.tris = d_Obs_triangles;
     obsSoA.num_nodes = obs_BVH.size;
-    RigidRobotSoA robSoA;
-    robSoA.R = nullptr; robSoA.Rq = d_Q_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
+    RigidRobotSoA<float4> robSoA;
+    robSoA.R = d_Q_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
     robSoA.first_child = d_Rob_first_child; robSoA.a = d_Rob_a;
     robSoA.verts = d_Rob_vertices; robSoA.tris = d_Rob_triangles;
     robSoA.num_nodes = rob_BVH.size;
@@ -537,7 +534,7 @@ double bvh_edges(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     outSoA.overflowCounter = nullptr; // rigid kernels report overflows via printf
 
     auto launch_bvh_edges = [&]() {
-        d_bvh_edges<<<gridSize, blockSize, smem_size>>>(
+        d_bvh_edges<float4><<<gridSize, blockSize, smem_size>>>(
             obsSoA, robSoA, edgeSoA, static_cast<size_t>(num_edges), outSoA);
     };
 
@@ -546,7 +543,7 @@ double bvh_edges(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     // block, so the static usage of this kernel must be subtracted.
     if (smem_size > 48 * 1024) {
         cudaFuncAttributes attr;
-        checkCudaMem(cudaFuncGetAttributes(&attr, d_bvh_edges));
+        checkCudaMem(cudaFuncGetAttributes(&attr, d_bvh_edges<float4>));
         int optin = 0;
         checkCudaMem(cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0));
         const int maxDyn = optin - (int)attr.sharedSizeBytes;
@@ -556,7 +553,7 @@ double bvh_edges(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
                       << attr.sharedSizeBytes << " B)." << std::endl;
             exit(1);
         }
-        checkCudaMem(cudaFuncSetAttribute(d_bvh_edges, cudaFuncAttributeMaxDynamicSharedMemorySize, maxDyn));
+        checkCudaMem(cudaFuncSetAttribute(d_bvh_edges<float4>, cudaFuncAttributeMaxDynamicSharedMemorySize, maxDyn));
         std::cout << "Opted d_bvh_edges into " << maxDyn << " B dynamic shared memory (needs "
                   << smem_size << " B)." << std::endl;
     }
@@ -566,7 +563,7 @@ double bvh_edges(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     // entire workload in this block).
     if (dry_run) {
         const size_t dry_edges = (num_edges < (size_t)blockSize) ? num_edges : (size_t)blockSize;
-        d_bvh_edges<<<1, blockSize, smem_size>>>(
+        d_bvh_edges<float4><<<1, blockSize, smem_size>>>(
             obsSoA, robSoA, edgeSoA, dry_edges, outSoA);
         checkCudaMem(cudaGetLastError());
         checkCudaMem(cudaDeviceSynchronize());
@@ -805,7 +802,8 @@ __device__ __noinline__ void edgeOverflowReport(int num_pend, int edge_idx, uint
 
 } // namespace
 
-__global__ void d_bvh_edges_collab(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+template <typename RotT>
+__global__ void d_bvh_edges_collab(const RigidObstacleSoA<RotT> obs, const RigidRobotSoA<RotT> rob,
                                    const EdgeSoA edges, size_t num_edges,
                                    const EdgeKernelOut out) {
 
@@ -831,12 +829,10 @@ __global__ void d_bvh_edges_collab(const RigidObstacleSoA obs, const RigidRobotS
     }
     __syncwarp(0xFFFFFFFFu);
 
-    const float4 qo0 = obs.Rq[0];
-    const Quat q_obs_root = {qo0.x, qo0.y, qo0.z, qo0.w}; // rotation of B wrt origin
+    const Quat q_obs_root = loadRot(obs.R, 0); // rotation of B wrt origin
     Eigen::Vector3f T_obs_abs_root = obs.T[0]; // translation of B wrt origin
 
-    const float4 qr0 = rob.Rq[0];
-    const Quat q_rob_root = {qr0.x, qr0.y, qr0.z, qr0.w}; // rotation of A wrt origin
+    const Quat q_rob_root = loadRot(rob.R, 0); // rotation of A wrt origin
     Eigen::Vector3f T_rob_abs_root = rob.T[0]; // translation of A wrt origin
 
     Eigen::Vector3f b_root = rob.dim[0]; // half dimensions of box A
@@ -1210,11 +1206,9 @@ __global__ void d_bvh_edges_collab(const RigidObstacleSoA obs, const RigidRobotS
                             // if: no continue here - it would skip the
                             // loop-bottom __syncwarp and deadlock)
                             if (rob_first_child_idx != 0 && obs_first_child_idx != 0) {
-                                const float4 qof = obs.Rq[obs_obb_idx];
-                                q_obs_abs = {qof.x, qof.y, qof.z, qof.w}; // load the two boxes...
+                                q_obs_abs = loadRot(obs.R, obs_obb_idx); // load the two boxes...
                                 T_obs_abs = obs.T[obs_obb_idx];
-                                const float4 qrf = rob.Rq[rob_obb_idx];
-                                q_rob_abs = {qrf.x, qrf.y, qrf.z, qrf.w};
+                                q_rob_abs = loadRot(rob.R, rob_obb_idx);
                                 T_rob_abs = rob.T[rob_obb_idx];
                                 b = rob.dim[rob_obb_idx];          // ...their half dimensions...
                                 a = obs.dim[obs_obb_idx];
@@ -1372,7 +1366,7 @@ double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH
     const size_t smem_size = (obs_BVH.size + rob_BVH.size) * sizeof(int16_t);
 
     int blocks_per_sm = 0;
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, d_bvh_edges_collab, blockSize, smem_size);
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, d_bvh_edges_collab<float4>, blockSize, smem_size);
     if (blocks_per_sm < 1) blocks_per_sm = 1;
     const int max_blocks = (num_edges + blockSize - 1) / blockSize;
     const int persistent_blocks = num_sms * blocks_per_sm;
@@ -1479,13 +1473,13 @@ double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH
 
     std::cout << "obs_BVH.size: " << obs_BVH.size << ", rob_BVH.size: " << rob_BVH.size << std::endl;
 
-    RigidObstacleSoA obsSoA;
-    obsSoA.R = nullptr; obsSoA.Rq = d_Q_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
+    RigidObstacleSoA<float4> obsSoA;
+    obsSoA.R = d_Q_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
     obsSoA.first_child = d_Obs_first_child; obsSoA.a = d_Obs_a;
     obsSoA.verts = d_Obs_vertices; obsSoA.tris = d_Obs_triangles;
     obsSoA.num_nodes = obs_BVH.size;
-    RigidRobotSoA robSoA;
-    robSoA.R = nullptr; robSoA.Rq = d_Q_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
+    RigidRobotSoA<float4> robSoA;
+    robSoA.R = d_Q_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
     robSoA.first_child = d_Rob_first_child; robSoA.a = d_Rob_a;
     robSoA.verts = d_Rob_vertices; robSoA.tris = d_Rob_triangles;
     robSoA.num_nodes = rob_BVH.size;
@@ -1501,7 +1495,7 @@ double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH
     outSoA.overflowCounter = nullptr; // rigid kernels report overflows via printf
 
     auto launch_bvh_edges_collab = [&]() {
-        d_bvh_edges_collab<<<gridSize, blockSize, smem_size>>>(
+        d_bvh_edges_collab<float4><<<gridSize, blockSize, smem_size>>>(
             obsSoA, robSoA, edgeSoA, static_cast<size_t>(num_edges), outSoA);
     };
 
@@ -1510,7 +1504,7 @@ double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH
     // block, so the static usage of this kernel must be subtracted.
     if (smem_size > 48 * 1024) {
         cudaFuncAttributes attr;
-        checkCudaMem(cudaFuncGetAttributes(&attr, d_bvh_edges_collab));
+        checkCudaMem(cudaFuncGetAttributes(&attr, d_bvh_edges_collab<float4>));
         int optin = 0;
         checkCudaMem(cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0));
         const int maxDyn = optin - (int)attr.sharedSizeBytes;
@@ -1520,7 +1514,7 @@ double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH
                       << attr.sharedSizeBytes << " B)." << std::endl;
             exit(1);
         }
-        checkCudaMem(cudaFuncSetAttribute(d_bvh_edges_collab, cudaFuncAttributeMaxDynamicSharedMemorySize, maxDyn));
+        checkCudaMem(cudaFuncSetAttribute(d_bvh_edges_collab<float4>, cudaFuncAttributeMaxDynamicSharedMemorySize, maxDyn));
         std::cout << "Opted d_bvh_edges_collab into " << maxDyn << " B dynamic shared memory (needs "
                   << smem_size << " B)." << std::endl;
     }
@@ -1530,7 +1524,7 @@ double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH
     // entire workload in this block).
     if (dry_run) {
         const size_t dry_edges = (num_edges < (size_t)blockSize) ? num_edges : (size_t)blockSize;
-        d_bvh_edges_collab<<<1, blockSize, smem_size>>>(
+        d_bvh_edges_collab<float4><<<1, blockSize, smem_size>>>(
             obsSoA, robSoA, edgeSoA, dry_edges, outSoA);
         checkCudaMem(cudaGetLastError());
         checkCudaMem(cudaDeviceSynchronize());
@@ -1609,8 +1603,8 @@ double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH
 // d_bvh_articulated) and breaks on the first colliding sample.
 // ===========================================================================
 template <size_t N, typename RobChildT, typename ObsChildT, NodeLayout LAYOUT>
-__global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
-                                        const RobotSoA<RobChildT> rob,
+__global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT, LAYOUT> obs,
+                                        const RobotSoA<RobChildT, LAYOUT> rob,
                                         const ArticulatedEdgeSoA<N> edges, size_t num_edges,
                                         const EdgeKernelOut out) {
     typedef typename ArticQueueIdx<RobChildT>::Q QRob;
@@ -1628,12 +1622,9 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
     float a_root_unused;
     Quat q_obs_root;
     if (LAYOUT == NodeLayout::QuatSAT) {
-        const float4 qo0 = obs.nodes.Rq[0];
-        q_obs_root = {qo0.x, qo0.y, qo0.z, qo0.w};
-        T_obs_abs_root = obs.nodes.T[0];
-        a_root = obs.nodes.dim[0];
+        loadNodeQuat(obs.nodes, 0, q_obs_root, T_obs_abs_root, a_root, a_root_unused);
     } else {
-        loadNode<LAYOUT>(obs.nodes, 0, R_obs_abs_root, T_obs_abs_root, a_root, a_root_unused);
+        loadNode(obs.nodes, 0, R_obs_abs_root, T_obs_abs_root, a_root, a_root_unused);
     }
 
     // Per-warp traversal state (this block IS one warp).
@@ -1696,14 +1687,14 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
                         float robRootA;
                         if (LAYOUT == NodeLayout::QuatSAT) {
                             Quat qRoot, qB;
-                            loadNodeQuat<LAYOUT>(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
+                            loadNodeQuat(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
                             const Quat qLink = matrixToQuat(link_R);
                             computeRelTransformQuat(q_obs_root, T_obs_abs_root,
                                                     qRoot, robRootT,
                                                     qLink, link_T, qB, T);
                             any = obbOverlapQuat(qB, T, a_root, robRootDim, epsilon);
                         } else {
-                            loadNode<LAYOUT>(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
+                            loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
                             computeRelTransformNoBf(R_obs_abs_root, T_obs_abs_root,
                                                     robRootR, robRootT,
                                                     link_R, link_T, B, T);
@@ -1803,14 +1794,14 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
                     float robRootA;
                     if (LAYOUT == NodeLayout::QuatSAT) {
                         Quat qRoot, qB;
-                        loadNodeQuat<LAYOUT>(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
+                        loadNodeQuat(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
                         const Quat qLink = matrixToQuat(link_R);
                         computeRelTransformQuat(q_obs_root, T_obs_abs_root,
                                                 qRoot, robRootT,
                                                 qLink, link_T, qB, rT);
                         rootHit = obbOverlapQuat(qB, rT, a_root, robRootDim, epsilon);
                     } else {
-                        loadNode<LAYOUT>(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
+                        loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
                         computeRelTransformNoBf(R_obs_abs_root, T_obs_abs_root,
                                                 robRootR, robRootT,
                                                 link_R, link_T, rB, rT);
@@ -1928,8 +1919,8 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
                             Quat qObs, qRob, qB;
                             Eigen::Vector3f T_obs_abs, T_rob_abs, b, a;
                             float aObs, aRob;
-                            loadNodeQuat<LAYOUT>(obs.nodes, obs_obb_idx, qObs, T_obs_abs, a, aObs);
-                            loadNodeQuat<LAYOUT>(rob.nodes, rob_obb_idx, qRob, T_rob_abs, b, aRob);
+                            loadNodeQuat(obs.nodes, obs_obb_idx, qObs, T_obs_abs, a, aObs);
+                            loadNodeQuat(rob.nodes, rob_obb_idx, qRob, T_rob_abs, b, aRob);
                             Eigen::Vector3f T;
                             computeRelTransformQuat(qObs, T_obs_abs, qRob, T_rob_abs,
                                                     q_link, link_T, qB, T);
@@ -1940,8 +1931,8 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
                             Eigen::Matrix3f R_obs_abs, R_rob_abs;
                             Eigen::Vector3f T_obs_abs, T_rob_abs, b, a;
                             float aObs, aRob;
-                            loadNode<LAYOUT>(obs.nodes, obs_obb_idx, R_obs_abs, T_obs_abs, a, aObs);
-                            loadNode<LAYOUT>(rob.nodes, rob_obb_idx, R_rob_abs, T_rob_abs, b, aRob);
+                            loadNode(obs.nodes, obs_obb_idx, R_obs_abs, T_obs_abs, a, aObs);
+                            loadNode(rob.nodes, rob_obb_idx, R_rob_abs, T_rob_abs, b, aRob);
 
                             Eigen::Matrix3f B;
                             Eigen::Vector3f T;
@@ -2206,7 +2197,9 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
     unsigned long long* d_overflow;
 
     cudaEventRecord(start, 0);
-    cudaMalloc((void**)&d_R_obs, obs_BVH.size * sizeof(Eigen::Matrix3f));
+    if (layout == NodeLayout::Matrix) {
+        cudaMalloc((void**)&d_R_obs, obs_BVH.size * sizeof(Eigen::Matrix3f));
+    }
     cudaMalloc((void**)&d_T_obs, obs_BVH.size * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_dim, obs_BVH.size * sizeof(Eigen::Vector3f));
     if (obs16) cudaMalloc((void**)&d_Obs_first_child16, obs_BVH.size * sizeof(int16_t));
@@ -2214,7 +2207,9 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
     cudaMalloc((void**)&d_Obs_verts, obs_mesh.vertices.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_tris, obs_mesh.triangles.size() * sizeof(Triangle));
     cudaMalloc((void**)&d_Obs_a, obs_BVH.size * sizeof(float));
-    cudaMalloc((void**)&d_Rob_R, rob_R.size() * sizeof(Eigen::Matrix3f));
+    if (layout == NodeLayout::Matrix) {
+        cudaMalloc((void**)&d_Rob_R, rob_R.size() * sizeof(Eigen::Matrix3f));
+    }
     cudaMalloc((void**)&d_Rob_T, rob_T.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_dim, rob_dim.size() * sizeof(Eigen::Vector3f));
     if (rob16) cudaMalloc((void**)&d_Rob_first_child16, rob_first_child.size() * sizeof(int16_t));
@@ -2247,7 +2242,9 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
     cudaMalloc((void**)&d_next_edge, sizeof(uint32_t));
     cudaMalloc((void**)&d_overflow, sizeof(unsigned long long));
 
-    checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    if (layout == NodeLayout::Matrix) {
+        checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    }
     checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     if (obs16) checkCudaMem(cudaMemcpy(d_Obs_first_child16, obs_first_child16.data(), obs_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
@@ -2255,7 +2252,9 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
     checkCudaMem(cudaMemcpy(d_Obs_verts, obs_mesh.vertices.data(), obs_mesh.vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_tris, obs_mesh.triangles.data(), obs_mesh.triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_a, obs_BVH.pA, obs_BVH.size * sizeof(float), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_R, rob_R.data(), rob_R.size() * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    if (layout == NodeLayout::Matrix) {
+        checkCudaMem(cudaMemcpy(d_Rob_R, rob_R.data(), rob_R.size() * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
+    }
     checkCudaMem(cudaMemcpy(d_Rob_T, rob_T.data(), rob_T.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_dim, rob_dim.data(), rob_dim.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     if (rob16) checkCudaMem(cudaMemcpy(d_Rob_first_child16, rob_first_child16.data(), rob_first_child.size() * sizeof(int16_t), cudaMemcpyHostToDevice));
@@ -2295,45 +2294,57 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
     std::cout << "Articulated edge BVH allocation and transfer took " << duration << " ms." << std::endl;
 
     // ---- SoA parameter bundles + dispatch --------------------------------
-    ObstacleSoA<int16_t> obsSoA16;
-    ObstacleSoA<int32_t> obsSoA32;
-    const auto fillObs = [&](auto* o) {
-        o->nodes.R = d_R_obs;
-        o->nodes.Rq = d_Obs_Rq;
-        o->nodes.Rp = d_Obs_Rp;
-        o->nodes.TD = d_Obs_TD;
-        o->nodes.T = d_T_obs;
-        o->nodes.dim = d_Obs_dim;
-        o->nodes.a = d_Obs_a;
-        o->num_nodes = obs_BVH.size;
-        o->verts = d_Obs_verts;
-        o->tris = d_Obs_tris;
+    const auto makeObs = [&](auto layoutTag, const auto* fc) {
+        constexpr NodeLayout L = decltype(layoutTag)::value;
+        ObstacleSoA<std::decay_t<decltype(*fc)>, L> o;
+        if constexpr (L == NodeLayout::Matrix) {
+            o.nodes.R = d_R_obs;
+        } else if constexpr (L == NodeLayout::Quat) {
+            o.nodes.Rq = d_Obs_Rq;
+        } else if constexpr (L == NodeLayout::VecR) {
+            o.nodes.Rp = d_Obs_Rp;
+        } else {
+            o.nodes.Rq = d_Obs_Rq;
+            o.nodes.TD = d_Obs_TD;
+        }
+        if constexpr (L != NodeLayout::QuatTD && L != NodeLayout::QuatSAT) {
+            o.nodes.T = d_T_obs;
+            o.nodes.dim = d_Obs_dim;
+            o.nodes.a = d_Obs_a;
+        }
+        o.first_child = fc;
+        o.num_nodes = obs_BVH.size;
+        o.verts = d_Obs_verts;
+        o.tris = d_Obs_tris;
+        return o;
     };
-    fillObs(&obsSoA16);
-    fillObs(&obsSoA32);
-    obsSoA16.first_child = d_Obs_first_child16;
-    obsSoA32.first_child = d_Obs_first_child32;
-    RobotSoA<int16_t> robSoA16;
-    RobotSoA<int32_t> robSoA32;
-    const auto fillRob = [&](auto* r) {
-        r->nodes.R = d_Rob_R;
-        r->nodes.Rq = d_Rob_Rq;
-        r->nodes.Rp = d_Rob_Rp;
-        r->nodes.TD = d_Rob_TD;
-        r->nodes.T = d_Rob_T;
-        r->nodes.dim = d_Rob_dim;
-        r->nodes.a = d_Rob_a;
-        r->linkOffset = d_LinkOffset;
-        r->linkVertOffset = d_LinkVertOffset;
-        r->linkTriOffset = d_LinkTriOffset;
-        r->joints = d_Joints;
-        r->verts = d_Rob_verts;
-        r->tris = d_Rob_tris;
+    const auto makeRob = [&](auto layoutTag, const auto* fc) {
+        constexpr NodeLayout L = decltype(layoutTag)::value;
+        RobotSoA<std::decay_t<decltype(*fc)>, L> r;
+        if constexpr (L == NodeLayout::Matrix) {
+            r.nodes.R = d_Rob_R;
+        } else if constexpr (L == NodeLayout::Quat) {
+            r.nodes.Rq = d_Rob_Rq;
+        } else if constexpr (L == NodeLayout::VecR) {
+            r.nodes.Rp = d_Rob_Rp;
+        } else {
+            r.nodes.Rq = d_Rob_Rq;
+            r.nodes.TD = d_Rob_TD;
+        }
+        if constexpr (L != NodeLayout::QuatTD && L != NodeLayout::QuatSAT) {
+            r.nodes.T = d_Rob_T;
+            r.nodes.dim = d_Rob_dim;
+            r.nodes.a = d_Rob_a;
+        }
+        r.first_child = fc;
+        r.linkOffset = d_LinkOffset;
+        r.linkVertOffset = d_LinkVertOffset;
+        r.linkTriOffset = d_LinkTriOffset;
+        r.joints = d_Joints;
+        r.verts = d_Rob_verts;
+        r.tris = d_Rob_tris;
+        return r;
     };
-    fillRob(&robSoA16);
-    fillRob(&robSoA32);
-    robSoA16.first_child = d_Rob_first_child16;
-    robSoA32.first_child = d_Rob_first_child32;
     ArticulatedEdgeSoA<N> edgeSoA;
     edgeSoA.s = d_Edge_s;
     edgeSoA.e = d_Edge_e;
@@ -2376,10 +2387,10 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
         const size_t dryEdges = (num_edges < (size_t)blockSize) ? num_edges : (size_t)blockSize;
         const auto dry = [&](auto layoutTag) {
             constexpr NodeLayout L = decltype(layoutTag)::value;
-            if (rob16 && obs16)       doLaunch(d_bvh_edges_articulated<N, int16_t, int16_t, L>, obsSoA16, robSoA16, 1, dryEdges);
-            else if (rob16)           doLaunch(d_bvh_edges_articulated<N, int16_t, int32_t, L>, obsSoA32, robSoA16, 1, dryEdges);
-            else if (obs16)           doLaunch(d_bvh_edges_articulated<N, int32_t, int16_t, L>, obsSoA16, robSoA32, 1, dryEdges);
-            else                      doLaunch(d_bvh_edges_articulated<N, int32_t, int32_t, L>, obsSoA32, robSoA32, 1, dryEdges);
+            if (rob16 && obs16)       doLaunch(d_bvh_edges_articulated<N, int16_t, int16_t, L>, makeObs(layoutTag, d_Obs_first_child16), makeRob(layoutTag, d_Rob_first_child16), 1, dryEdges);
+            else if (rob16)           doLaunch(d_bvh_edges_articulated<N, int16_t, int32_t, L>, makeObs(layoutTag, d_Obs_first_child32), makeRob(layoutTag, d_Rob_first_child16), 1, dryEdges);
+            else if (obs16)           doLaunch(d_bvh_edges_articulated<N, int32_t, int16_t, L>, makeObs(layoutTag, d_Obs_first_child16), makeRob(layoutTag, d_Rob_first_child32), 1, dryEdges);
+            else                      doLaunch(d_bvh_edges_articulated<N, int32_t, int32_t, L>, makeObs(layoutTag, d_Obs_first_child32), makeRob(layoutTag, d_Rob_first_child32), 1, dryEdges);
         };
         switch (layout) {
             case NodeLayout::Matrix: dry(std::integral_constant<NodeLayout, NodeLayout::Matrix>()); break;
@@ -2399,10 +2410,10 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
     cudaEventRecord(start, 0);
     const auto launchMain = [&](auto layoutTag) {
         constexpr NodeLayout L = decltype(layoutTag)::value;
-        if (rob16 && obs16)       doLaunch(d_bvh_edges_articulated<N, int16_t, int16_t, L>, obsSoA16, robSoA16, gridSize, num_edges);
-        else if (rob16)           doLaunch(d_bvh_edges_articulated<N, int16_t, int32_t, L>, obsSoA32, robSoA16, gridSize, num_edges);
-        else if (obs16)           doLaunch(d_bvh_edges_articulated<N, int32_t, int16_t, L>, obsSoA16, robSoA32, gridSize, num_edges);
-        else                      doLaunch(d_bvh_edges_articulated<N, int32_t, int32_t, L>, obsSoA32, robSoA32, gridSize, num_edges);
+        if (rob16 && obs16)       doLaunch(d_bvh_edges_articulated<N, int16_t, int16_t, L>, makeObs(layoutTag, d_Obs_first_child16), makeRob(layoutTag, d_Rob_first_child16), gridSize, num_edges);
+        else if (rob16)           doLaunch(d_bvh_edges_articulated<N, int16_t, int32_t, L>, makeObs(layoutTag, d_Obs_first_child32), makeRob(layoutTag, d_Rob_first_child16), gridSize, num_edges);
+        else if (obs16)           doLaunch(d_bvh_edges_articulated<N, int32_t, int16_t, L>, makeObs(layoutTag, d_Obs_first_child16), makeRob(layoutTag, d_Rob_first_child32), gridSize, num_edges);
+        else                      doLaunch(d_bvh_edges_articulated<N, int32_t, int32_t, L>, makeObs(layoutTag, d_Obs_first_child32), makeRob(layoutTag, d_Rob_first_child32), gridSize, num_edges);
     };
     switch (layout) {
         case NodeLayout::Matrix: launchMain(std::integral_constant<NodeLayout, NodeLayout::Matrix>()); break;
@@ -2432,10 +2443,12 @@ double bvh_edges_articulated(const std::string& robot_urdf_path,
         valid[i] = ((disjoint[i >> 5] >> (i & 31)) & 1u) != 0;
     }
 
-    cudaFree(d_R_obs); cudaFree(d_T_obs); cudaFree(d_Obs_dim);
+    if (layout == NodeLayout::Matrix) cudaFree(d_R_obs);
+    cudaFree(d_T_obs); cudaFree(d_Obs_dim);
     if (obs16) cudaFree(d_Obs_first_child16); else cudaFree(d_Obs_first_child32);
     cudaFree(d_Obs_verts); cudaFree(d_Obs_tris); cudaFree(d_Obs_a);
-    cudaFree(d_Rob_R); cudaFree(d_Rob_T); cudaFree(d_Rob_dim);
+    if (layout == NodeLayout::Matrix) cudaFree(d_Rob_R);
+    cudaFree(d_Rob_T); cudaFree(d_Rob_dim);
     if (rob16) cudaFree(d_Rob_first_child16); else cudaFree(d_Rob_first_child32);
     cudaFree(d_Rob_a); cudaFree(d_Rob_verts); cudaFree(d_Rob_tris);
     cudaFree(d_LinkOffset); cudaFree(d_LinkVertOffset); cudaFree(d_LinkTriOffset);

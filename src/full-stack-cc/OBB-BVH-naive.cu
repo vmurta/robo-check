@@ -582,7 +582,8 @@ BVNode_soa<ChildT> BVH_n_ary_hierarchy_from_mesh(const char* mesh_path, size_t p
 
 constexpr int BLOCK_SIZE = 32;
 
-__global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+template <typename RotT>
+__global__ void d_bvh_naive(const RigidObstacleSoA<RotT> obs, const RigidRobotSoA<RotT> rob,
                             size_t num_confs, const RigidKernelOut out) {
 
     if (obs.num_nodes == 0) {
@@ -607,12 +608,10 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
     }
     __syncthreads();
 
-    const float4 q_obs_root_f4 = obs.Rq[0]; // rotation of B wrt origin (unit quat)
-    const Quat q_obs_root = {q_obs_root_f4.x, q_obs_root_f4.y, q_obs_root_f4.z, q_obs_root_f4.w};
+    const Quat q_obs_root = loadRot(obs.R, 0); // rotation of B wrt origin
     Eigen::Vector3f T_obs_abs_root = obs.T[0]; // translation of B wrt origin
 
-    const float4 q_rob_root_f4 = rob.Rq[0]; // rotation of A wrt origin (unit quat)
-    const Quat q_rob_root = {q_rob_root_f4.x, q_rob_root_f4.y, q_rob_root_f4.z, q_rob_root_f4.w};
+    const Quat q_rob_root = loadRot(rob.R, 0); // rotation of A wrt origin
     Eigen::Vector3f T_rob_abs_root = rob.T[0]; // translation of A wrt origin
 
     Eigen::Vector3f b_root = rob.dim[0]; // half dimensions of box A
@@ -804,11 +803,9 @@ __global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
                     continue;
                 }
 
-                const float4 qo = obs.Rq[obs_obb_idx];
-                q_obs_abs = {qo.x, qo.y, qo.z, qo.w};
+                q_obs_abs = loadRot(obs.R, obs_obb_idx);
                 T_obs_abs = obs.T[obs_obb_idx];
-                const float4 qr = rob.Rq[rob_obb_idx];
-                q_rob_abs = {qr.x, qr.y, qr.z, qr.w};
+                q_rob_abs = loadRot(rob.R, rob_obb_idx);
                 T_rob_abs = rob.T[rob_obb_idx];
                 b = rob.dim[rob_obb_idx];
                 a = obs.dim[obs_obb_idx];
@@ -942,7 +939,7 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     const size_t smem_size = (obs_BVH.size + rob_BVH.size) * sizeof(int16_t);
 
     int blocks_per_sm = 0;
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, d_bvh_naive, blockSize, smem_size);
+    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks_per_sm, d_bvh_naive<float4>, blockSize, smem_size);
     if (blocks_per_sm < 1) blocks_per_sm = 1;
     const int max_blocks = (num_confs + blockSize - 1) / blockSize;
     const int persistent_blocks = num_sms * blocks_per_sm;
@@ -1043,13 +1040,13 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
 
     std::cout << "obs_BVH.size: " << obs_BVH.size << ", rob_BVH.size: " << rob_BVH.size << std::endl;
 
-    RigidObstacleSoA obsSoA;
-    obsSoA.R = nullptr; obsSoA.Rq = d_Rq_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
+    RigidObstacleSoA<float4> obsSoA;
+    obsSoA.R = d_Rq_obs; obsSoA.T = d_T_obs; obsSoA.dim = d_Obs_dim;
     obsSoA.first_child = d_Obs_first_child; obsSoA.a = d_Obs_a;
     obsSoA.verts = d_Obs_vertices; obsSoA.tris = d_Obs_triangles;
     obsSoA.num_nodes = obs_BVH.size;
-    RigidRobotSoA robSoA;
-    robSoA.R = nullptr; robSoA.Rq = d_Rq_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
+    RigidRobotSoA<float4> robSoA;
+    robSoA.R = d_Rq_rob; robSoA.T = d_T_rob; robSoA.dim = d_Rob_dim;
     robSoA.first_child = d_Rob_first_child; robSoA.a = d_Rob_a;
     robSoA.verts = d_Rob_vertices; robSoA.tris = d_Rob_triangles;
     robSoA.num_nodes = rob_BVH.size;
@@ -1068,7 +1065,7 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
     // block, so the static usage of this kernel must be subtracted.
     if (smem_size > 48 * 1024) {
         cudaFuncAttributes attr;
-        checkCudaMem(cudaFuncGetAttributes(&attr, d_bvh_naive));
+        checkCudaMem(cudaFuncGetAttributes(&attr, d_bvh_naive<float4>));
         int optin = 0;
         checkCudaMem(cudaDeviceGetAttribute(&optin, cudaDevAttrMaxSharedMemoryPerBlockOptin, 0));
         const int maxDyn = optin - (int)attr.sharedSizeBytes;
@@ -1078,7 +1075,7 @@ double bvh_naive(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
                       << attr.sharedSizeBytes << " B)." << std::endl;
             exit(1);
         }
-        checkCudaMem(cudaFuncSetAttribute(d_bvh_naive, cudaFuncAttributeMaxDynamicSharedMemorySize, maxDyn));
+        checkCudaMem(cudaFuncSetAttribute(d_bvh_naive<float4>, cudaFuncAttributeMaxDynamicSharedMemorySize, maxDyn));
         std::cout << "Opted d_bvh_naive into " << maxDyn << " B dynamic shared memory (needs "
                   << smem_size << " B)." << std::endl;
     }

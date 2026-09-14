@@ -478,9 +478,12 @@ __device__ __forceinline__ bool obbOverlapAbs(const Eigen::Vector3f& a, const Ei
 // robot) plus the result/queue/profiling counters. Struct params keep the
 // kernel call readable; they are copied into the kernel parameter space
 // exactly like the equivalent flat parameter list, so this costs nothing.
+// Rigid SoA parameter bundles, templated on the node-rotation storage type
+// (Eigen::Matrix3f or float4 unit quaternion). The kernels convert either
+// form to a Quat on load (loadRot), so the traversal is always pure-quat.
+template <typename RotT>
 struct RigidObstacleSoA {
-    const Eigen::Matrix3f* __restrict__ R;      // matrix storage (legacy)
-    const float4* __restrict__ Rq;              // quaternion storage (quatSAT)
+    const RotT* __restrict__ R;
     const Eigen::Vector3f* __restrict__ T;
     const Eigen::Vector3f* __restrict__ dim;
     const int16_t* __restrict__ first_child;
@@ -490,9 +493,9 @@ struct RigidObstacleSoA {
     size_t num_nodes;
 };
 
+template <typename RotT>
 struct RigidRobotSoA {
-    const Eigen::Matrix3f* __restrict__ R;      // matrix storage (legacy)
-    const float4* __restrict__ Rq;              // quaternion storage (quatSAT)
+    const RotT* __restrict__ R;
     const Eigen::Vector3f* __restrict__ T;
     const Eigen::Vector3f* __restrict__ dim;
     const int16_t* __restrict__ first_child;
@@ -504,13 +507,23 @@ struct RigidRobotSoA {
     const Eigen::Vector3f* __restrict__ conf_trans;
 };
 
+// Node-rotation load helpers: both storage forms yield a unit Quat.
+__device__ __forceinline__ Quat loadRot(const float4* a, int i) {
+    const float4 q = a[i];
+    return Quat{q.x, q.y, q.z, q.w};
+}
+__device__ __forceinline__ Quat loadRot(const Eigen::Matrix3f* a, int i) {
+    return matrixToQuat(a[i]);
+}
+
 struct RigidKernelOut {
     uint32_t* __restrict__ pdisjoint;
     uint32_t* __restrict__ g_next_conf;
     unsigned long long* __restrict__ d_phase;
 };
 
-__global__ void d_bvh_naive(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+template <typename RotT = float4>
+__global__ void d_bvh_naive(const RigidObstacleSoA<RotT> obs, const RigidRobotSoA<RotT> rob,
                             size_t num_confs, const RigidKernelOut out);
 
 // Checks the given configurations for collisions against the obstacle.

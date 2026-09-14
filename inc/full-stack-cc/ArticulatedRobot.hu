@@ -145,100 +145,168 @@ enum class NodeLayout : int {
                  // is never converted to a matrix in the traversal; the 15 SAT
                  // B entries are evaluated from quaternion components.
 };
-struct NodePtrs {
-    const Eigen::Matrix3f* R; // layout 0
-    const float4* Rq;         // layouts 1, 3, 4 (x,y,z,w)
-    const float4* Rp;         // layout 2 (3x float4 rows per node)
-    const float4* TD;         // layouts 3, 4: (T.xyz,dim.x),(dim.yz,a,pad)
-    const Eigen::Vector3f* T; // layouts 0-2
-    const Eigen::Vector3f* dim; // layouts 0-2
-    const float* a;           // layouts 0-2
+// Per-layout node-data pointer bundles: each specialization holds exactly
+// the pointers its layout uses (no nulls, no unused fields). The loadNode /
+// loadNodeQuat overloads dispatch on the bundle type, so call sites need no
+// layout template argument.
+template <NodeLayout L>
+struct NodePtrsFor;
+
+template <>
+struct NodePtrsFor<NodeLayout::Matrix> {
+    const Eigen::Matrix3f* R;
+    const Eigen::Vector3f* T;
+    const Eigen::Vector3f* dim;
+    const float* a;
 };
 
-// Loads one node's (R, T, dim, a) into registers. LAYOUT is a template
-// constant, so the dead branches fold away per instantiation.
-template <NodeLayout LAYOUT>
-__device__ __forceinline__ void loadNode(const NodePtrs& p, int i,
+template <>
+struct NodePtrsFor<NodeLayout::Quat> {
+    const float4* Rq; // unit quaternion x,y,z,w
+    const Eigen::Vector3f* T;
+    const Eigen::Vector3f* dim;
+    const float* a;
+};
+
+template <>
+struct NodePtrsFor<NodeLayout::VecR> {
+    const float4* Rp; // 3x float4 rows per node (16B-aligned)
+    const Eigen::Vector3f* T;
+    const Eigen::Vector3f* dim;
+    const float* a;
+};
+
+template <>
+struct NodePtrsFor<NodeLayout::QuatTD> {
+    const float4* Rq; // unit quaternion x,y,z,w
+    const float4* TD; // (T.xyz, dim.x) + (dim.yz, a, pad)
+};
+
+// QuatSAT uses exactly the QuatTD storage; sharing the bundle keeps the
+// loadNode/loadNodeQuat overload set identical for both layouts.
+template <>
+struct NodePtrsFor<NodeLayout::QuatSAT> : NodePtrsFor<NodeLayout::QuatTD> {};
+
+// Load one node's (R, T, dim, a) as a rotation MATRIX (matrix layouts, or the
+// narrow phase). Overloads dispatch on the bundle type.
+__device__ __forceinline__ void loadNode(const NodePtrsFor<NodeLayout::Matrix>& p, int i,
                                          Eigen::Matrix3f& R, Eigen::Vector3f& T,
                                          Eigen::Vector3f& dim, float& a) {
-    if (LAYOUT == NodeLayout::Matrix) {
-        R = p.R[i];
-        T = p.T[i];
-        dim = p.dim[i];
-        a = p.a[i];
-    } else if (LAYOUT == NodeLayout::Quat) {
-        const float4 q = p.Rq[i];
-        R = quatToMatrix(Quat{q.x, q.y, q.z, q.w});
-        T = p.T[i];
-        dim = p.dim[i];
-        a = p.a[i];
-    } else if (LAYOUT == NodeLayout::VecR) {
-        const float4 r0 = p.Rp[i * 3 + 0];
-        const float4 r1 = p.Rp[i * 3 + 1];
-        const float4 r2 = p.Rp[i * 3 + 2];
-        R(0, 0) = r0.x;
-        R(0, 1) = r0.y;
-        R(0, 2) = r0.z;
-        R(1, 0) = r1.x;
-        R(1, 1) = r1.y;
-        R(1, 2) = r1.z;
-        R(2, 0) = r2.x;
-        R(2, 1) = r2.y;
-        R(2, 2) = r2.z;
-        T = p.T[i];
-        dim = p.dim[i];
-        a = p.a[i];
-    } else {
-        const float4 q = p.Rq[i];
-        const float4 t0 = p.TD[i * 2 + 0];
-        const float4 t1 = p.TD[i * 2 + 1];
-        R = quatToMatrix(Quat{q.x, q.y, q.z, q.w});
-        T = Eigen::Vector3f(t0.x, t0.y, t0.z);
-        dim = Eigen::Vector3f(t0.w, t1.x, t1.y);
-        a = t1.z;
-    }
+    R = p.R[i];
+    T = p.T[i];
+    dim = p.dim[i];
+    a = p.a[i];
 }
 
-// Loads one node's (quat, T, dim, a) WITHOUT converting the quaternion to a
-// matrix (NodeLayout::Quat = separate SoA arrays, QuatTD/QuatSAT = packed
-// TD float4s). Used by the pure-quaternion broad phase.
-template <NodeLayout LAYOUT>
-__device__ __forceinline__ void loadNodeQuat(const NodePtrs& p, int i,
+__device__ __forceinline__ void loadNode(const NodePtrsFor<NodeLayout::Quat>& p, int i,
+                                         Eigen::Matrix3f& R, Eigen::Vector3f& T,
+                                         Eigen::Vector3f& dim, float& a) {
+    const float4 q = p.Rq[i];
+    R = quatToMatrix(Quat{q.x, q.y, q.z, q.w});
+    T = p.T[i];
+    dim = p.dim[i];
+    a = p.a[i];
+}
+
+__device__ __forceinline__ void loadNode(const NodePtrsFor<NodeLayout::VecR>& p, int i,
+                                         Eigen::Matrix3f& R, Eigen::Vector3f& T,
+                                         Eigen::Vector3f& dim, float& a) {
+    const float4 r0 = p.Rp[i * 3 + 0];
+    const float4 r1 = p.Rp[i * 3 + 1];
+    const float4 r2 = p.Rp[i * 3 + 2];
+    R(0, 0) = r0.x;
+    R(0, 1) = r0.y;
+    R(0, 2) = r0.z;
+    R(1, 0) = r1.x;
+    R(1, 1) = r1.y;
+    R(1, 2) = r1.z;
+    R(2, 0) = r2.x;
+    R(2, 1) = r2.y;
+    R(2, 2) = r2.z;
+    T = p.T[i];
+    dim = p.dim[i];
+    a = p.a[i];
+}
+
+__device__ __forceinline__ void loadNode(const NodePtrsFor<NodeLayout::QuatTD>& p, int i,
+                                         Eigen::Matrix3f& R, Eigen::Vector3f& T,
+                                         Eigen::Vector3f& dim, float& a) {
+    const float4 q = p.Rq[i];
+    const float4 t0 = p.TD[i * 2 + 0];
+    const float4 t1 = p.TD[i * 2 + 1];
+    R = quatToMatrix(Quat{q.x, q.y, q.z, q.w});
+    T = Eigen::Vector3f(t0.x, t0.y, t0.z);
+    dim = Eigen::Vector3f(t0.w, t1.x, t1.y);
+    a = t1.z;
+}
+
+// Load one node's (quat, T, dim, a) WITHOUT matrix conversion (pure-quat
+// broad phase). QuatSAT uses the QuatTD bundle (identical storage). The
+// Matrix/VecR overloads exist only so the QuatSAT branch compiles for every
+// LAYOUT instantiation; they are never executed there.
+__device__ __forceinline__ void loadNodeQuat(const NodePtrsFor<NodeLayout::Matrix>& p, int i,
                                              Quat& q, Eigen::Vector3f& T,
                                              Eigen::Vector3f& dim, float& a) {
-    if (LAYOUT == NodeLayout::Quat) {
-        const float4 qq = p.Rq[i];
-        q = Quat{qq.x, qq.y, qq.z, qq.w};
-        T = p.T[i];
-        dim = p.dim[i];
-        a = p.a[i];
-    } else {
-        const float4 qq = p.Rq[i];
-        const float4 t0 = p.TD[i * 2 + 0];
-        const float4 t1 = p.TD[i * 2 + 1];
-        q = Quat{qq.x, qq.y, qq.z, qq.w};
-        T = Eigen::Vector3f(t0.x, t0.y, t0.z);
-        dim = Eigen::Vector3f(t0.w, t1.x, t1.y);
-        a = t1.z;
-    }
+    q = matrixToQuat(p.R[i]);
+    T = p.T[i];
+    dim = p.dim[i];
+    a = p.a[i];
+}
+
+__device__ __forceinline__ void loadNodeQuat(const NodePtrsFor<NodeLayout::VecR>& p, int i,
+                                             Quat& q, Eigen::Vector3f& T,
+                                             Eigen::Vector3f& dim, float& a) {
+    const float4 r0 = p.Rp[i * 3 + 0];
+    const float4 r1 = p.Rp[i * 3 + 1];
+    const float4 r2 = p.Rp[i * 3 + 2];
+    Eigen::Matrix3f R;
+    R(0, 0) = r0.x; R(0, 1) = r0.y; R(0, 2) = r0.z;
+    R(1, 0) = r1.x; R(1, 1) = r1.y; R(1, 2) = r1.z;
+    R(2, 0) = r2.x; R(2, 1) = r2.y; R(2, 2) = r2.z;
+    q = matrixToQuat(R);
+    T = p.T[i];
+    dim = p.dim[i];
+    a = p.a[i];
+}
+
+__device__ __forceinline__ void loadNodeQuat(const NodePtrsFor<NodeLayout::Quat>& p, int i,
+                                             Quat& q, Eigen::Vector3f& T,
+                                             Eigen::Vector3f& dim, float& a) {
+    const float4 qq = p.Rq[i];
+    q = Quat{qq.x, qq.y, qq.z, qq.w};
+    T = p.T[i];
+    dim = p.dim[i];
+    a = p.a[i];
+}
+
+__device__ __forceinline__ void loadNodeQuat(const NodePtrsFor<NodeLayout::QuatTD>& p, int i,
+                                             Quat& q, Eigen::Vector3f& T,
+                                             Eigen::Vector3f& dim, float& a) {
+    const float4 qq = p.Rq[i];
+    const float4 t0 = p.TD[i * 2 + 0];
+    const float4 t1 = p.TD[i * 2 + 1];
+    q = Quat{qq.x, qq.y, qq.z, qq.w};
+    T = Eigen::Vector3f(t0.x, t0.y, t0.z);
+    dim = Eigen::Vector3f(t0.w, t1.x, t1.y);
+    a = t1.z;
 }
 
 // SoA parameter bundles for d_bvh_articulated: one struct per side plus the
 // result/queue/counter struct. Struct params are copied into the kernel
 // parameter space exactly like the equivalent flat parameter list, so this
 // costs nothing and keeps the (large) kernel call readable.
-template <typename ChildT>
+template <typename ChildT, NodeLayout L>
 struct ObstacleSoA {
-    NodePtrs nodes;                  // node data for the selected LAYOUT
+    NodePtrsFor<L> nodes;
     const ChildT* first_child;
     size_t num_nodes;
     const Eigen::Vector3f* verts;
     const Triangle* tris;
 };
 
-template <typename ChildT>
+template <typename ChildT, NodeLayout L>
 struct RobotSoA {
-    NodePtrs nodes;                  // node data for the selected LAYOUT
+    NodePtrsFor<L> nodes;
     const ChildT* first_child;
     const int* linkOffset;           // per-link partition of the concatenated BVH
     const int* linkVertOffset;
@@ -265,8 +333,8 @@ struct KernelOut {
 //   LAYOUT              selects the node-data storage layout (see NodeLayout)
 template <size_t N, typename RobChildT = int32_t, typename ObsChildT = int32_t,
           bool RESTRICT_PTRS = false, NodeLayout LAYOUT = NodeLayout::Matrix>
-__global__ void d_bvh_articulated(const ObstacleSoA<ObsChildT> obs,
-                                  const RobotSoA<RobChildT> rob,
+__global__ void d_bvh_articulated(const ObstacleSoA<ObsChildT, LAYOUT> obs,
+                                  const RobotSoA<RobChildT, LAYOUT> rob,
                                   const articulated_conf<N>* pConf, size_t num_confs,
                                   const KernelOut out);
 
