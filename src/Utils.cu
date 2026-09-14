@@ -333,13 +333,14 @@ void loadOBJFile(std::string filename, std::vector<Eigen::Vector3f>& points, std
     case 'f':
       {
         Triangle tri;
-        char* data[30];
-        int n = 0;
-        while((data[n] = strtok(NULL, "\t \r\n")) != NULL)
+        std::vector<char*> data;
+        char* tok;
+        while((tok = strtok(NULL, "\t \r\n")) != NULL)
         {
-          if(strlen(data[n]))
-            n++;
+          if(strlen(tok))
+            data.push_back(tok);
         }
+        const int n = (int)data.size();
 
         for(int t = 0; t < (n - 2); ++t)
         {
@@ -425,13 +426,14 @@ void loadOBJFile(std::string filename,  std::vector<float>& x, std::vector<float
     case 'f':
       {
         Triangle tri;
-        char* data[30];
-        int n = 0;
-        while((data[n] = strtok(NULL, "\t \r\n")) != NULL)
+        std::vector<char*> data;
+        char* tok;
+        while((tok = strtok(NULL, "\t \r\n")) != NULL)
         {
-          if(strlen(data[n]))
-            n++;
+          if(strlen(tok))
+            data.push_back(tok);
         }
+        const int n = (int)data.size();
 
         for(int t = 0; t < (n - 2); ++t)
         {
@@ -599,13 +601,14 @@ void loadOBJFileFCL(std::string filename, std::vector<fcl::Vector3f>& points, st
     case 'f':
       {
         fcl::Triangle tri;
-        char* data[30];
-        int n = 0;
-        while((data[n] = strtok(NULL, "\t \r\n")) != NULL)
+        std::vector<char*> data;
+        char* tok;
+        while((tok = strtok(NULL, "\t \r\n")) != NULL)
         {
-          if(strlen(data[n]))
-            n++;
+          if(strlen(tok))
+            data.push_back(tok);
         }
+        const int n = (int)data.size();
 
         for(int t = 0; t < (n - 2); ++t)
         {
