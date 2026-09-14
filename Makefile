@@ -35,7 +35,7 @@ all: Generate-Tests profiling
 
 profiling: BVH
 
-rtcd-bench: $(BUILD_DIR)/rtcd_bench.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/ArticulatedRobot.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/Triangle.o
+rtcd-bench: $(BUILD_DIR)/rtcd_bench.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/ArticulatedRobot.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/Triangle.o $(BUILD_DIR)/Edge.o
 	$(NVCC) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
 # ---- Build rules ----
@@ -43,7 +43,7 @@ rtcd-bench: $(BUILD_DIR)/rtcd_bench.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/Articula
 Generate-Tests: $(BUILD_DIR)/generate-tests.o $(BUILD_DIR)/Utils.o
 	$(NVCC) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
-BVH: $(BUILD_DIR)/Utils.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/OBB-single-buff.o $(BUILD_DIR)/OBB-double-buff.o $(BUILD_DIR)/OBB-naive.o $(BUILD_DIR)/Triangle.o $(BUILD_DIR)/Edge.o $(BUILD_DIR)/obb_test.o
+BVH: $(BUILD_DIR)/Utils.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/OBB-single-buff.o $(BUILD_DIR)/OBB-double-buff.o $(BUILD_DIR)/OBB-naive.o $(BUILD_DIR)/Triangle.o $(BUILD_DIR)/Edge.o $(BUILD_DIR)/ArticulatedRobot.o $(BUILD_DIR)/obb_test.o
 	$(NVCC) $(CXXFLAGS) $^ -o $@ $(LDFLAGS) $(CUFLAGS)
 
 Debug: $(BUILD_DIR)/obb_test.o $(BUILD_DIR)/Utils.o $(BUILD_DIR)/OBB-BVH-naive.o $(BUILD_DIR)/OBB-single-buff.o $(BUILD_DIR)/OBB-double-buff.o $(BUILD_DIR)/OBB-naive.o $(BUILD_DIR)/Triangle.o

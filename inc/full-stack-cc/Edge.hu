@@ -1,6 +1,7 @@
 #pragma once
 #include "Utils.h"
 #include "OBB-BVH-naive.hu"
+#include "ArticulatedRobot.hu"
 #include <vector>
 
 // ===========================================================================
@@ -247,6 +248,7 @@ struct EdgeKernelOut {
     uint32_t* pdisjoint;        // bitpacked results (1 = edge valid)
     float* pfirst_invalid_t;    // earliest colliding t (host-initialized to -1)
     uint32_t* g_next_edge;      // global edge work queue
+    unsigned long long* overflowCounter; // conservative buffer-overflow guard (must stay 0)
 };
 
 // ===========================================================================
@@ -273,6 +275,137 @@ __global__ void d_bvh_edges(const RigidObstacleSoA obs, const RigidRobotSoA rob,
 __global__ void d_bvh_edges_collab(const RigidObstacleSoA obs, const RigidRobotSoA rob,
                                    const EdgeSoA edges, size_t num_edges,
                                    const EdgeKernelOut out);
+
+
+// ===========================================================================
+// Articulated edge checking: an edge is the straight-line C-space segment
+// between two joint configurations of a serial-chain robot. nsteps =
+// ceil(max_joint_delta / longest_valid_segment); samples at t = j/nsteps are
+// FK'd and collision-checked with the same quatSAT traversal as
+// d_bvh_articulated. First-invalid-t semantics match the rigid edge module.
+// ===========================================================================
+template <size_t N>
+struct ArticulatedEdge {
+    articulated_conf<N> s, e;   // start/end joint configurations
+    uint32_t nsteps = 0;        // samples validated along the edge
+    uint32_t flags = EDGE_FLAG_NONE;
+};
+
+// SoA batch of articulated edges (move-only, like EdgeBatch).
+template <size_t N>
+struct ArticulatedEdgeBatch {
+    articulated_conf<N>* s;
+    articulated_conf<N>* e;
+    uint32_t* nsteps;
+    uint32_t* flags;
+    size_t size;
+
+    explicit ArticulatedEdgeBatch(size_t n) : size(n) {
+        s = new articulated_conf<N>[n];
+        e = new articulated_conf<N>[n];
+        nsteps = new uint32_t[n];
+        flags = new uint32_t[n];
+    }
+
+    explicit ArticulatedEdgeBatch(const std::vector<ArticulatedEdge<N>>& edges) : ArticulatedEdgeBatch(edges.size()) {
+        for (size_t i = 0; i < edges.size(); ++i) set(i, edges[i]);
+    }
+
+    ArticulatedEdgeBatch(ArticulatedEdgeBatch&& o) noexcept
+        : s(o.s), e(o.e), nsteps(o.nsteps), flags(o.flags), size(o.size) {
+        o.s = o.e = nullptr; o.nsteps = o.flags = nullptr; o.size = 0;
+    }
+
+    ArticulatedEdgeBatch& operator=(ArticulatedEdgeBatch&& o) noexcept {
+        if (this != &o) {
+            delete[] s; delete[] e; delete[] nsteps; delete[] flags;
+            s = o.s; e = o.e; nsteps = o.nsteps; flags = o.flags; size = o.size;
+            o.s = o.e = nullptr; o.nsteps = o.flags = nullptr; o.size = 0;
+        }
+        return *this;
+    }
+
+    ArticulatedEdgeBatch(const ArticulatedEdgeBatch&) = delete;
+    ArticulatedEdgeBatch& operator=(const ArticulatedEdgeBatch&) = delete;
+
+    ~ArticulatedEdgeBatch() { delete[] s; delete[] e; delete[] nsteps; delete[] flags; }
+
+    void set(size_t index, const ArticulatedEdge<N>& edge) {
+        if (index >= size) throw std::out_of_range("Index out of range");
+        s[index] = edge.s;
+        e[index] = edge.e;
+        nsteps[index] = edge.nsteps;
+        flags[index] = edge.flags;
+    }
+};
+
+// OMPL-style step count from the max per-joint angular delta.
+template <size_t N>
+__host__ __forceinline__ uint32_t articulatedEdgeNsteps(const articulated_conf<N>& s,
+                                                        const articulated_conf<N>& e,
+                                                        float longest_valid_segment) {
+    float max_dq = 0.0f;
+    for (size_t i = 0; i < N; ++i) {
+        max_dq = fmaxf(max_dq, fabsf(e[i] - s[i]));
+    }
+    const uint32_t n = (uint32_t)ceilf(max_dq / longest_valid_segment);
+    return n > 0 ? n : 1;
+}
+
+template <size_t N>
+__host__ __forceinline__ ArticulatedEdge<N> makeArticulatedEdge(const articulated_conf<N>& s,
+                                                                const articulated_conf<N>& e,
+                                                                float longest_valid_segment) {
+    ArticulatedEdge<N> edge;
+    edge.s = s;
+    edge.e = e;
+    edge.nsteps = std::max(articulatedEdgeNsteps<N>(s, e, longest_valid_segment), MIN_EDGE_NSTEPS);
+    edge.flags = EDGE_FLAG_NONE;
+    return edge;
+}
+
+// Linear joint-space interpolation (revolute joints: constant velocity per
+// joint). Sample t in [0, 1] -> joint configuration.
+template <size_t N>
+__host__ __device__ __forceinline__ void interpolateArticulatedEdge(const articulated_conf<N>& s,
+                                                                    const articulated_conf<N>& e,
+                                                                    float t,
+                                                                    articulated_conf<N>& out) {
+    for (size_t i = 0; i < N; ++i) {
+        out[i] = s[i] + (e[i] - s[i]) * t;
+    }
+}
+
+// Device-side SoA parameter bundle for the articulated edge kernel.
+template <size_t N>
+struct ArticulatedEdgeSoA {
+    const articulated_conf<N>* s;
+    const articulated_conf<N>* e;
+    const uint32_t* nsteps;
+    const uint32_t* flags;
+};
+
+// Edge-validation version of d_bvh_articulated: per-warp edge pulls (one edge
+// per lane), per-sample root checks, then warp-serial traversal per sample
+// with early exit on the first colliding sample. Reuses the articulated
+// quatSAT traversal (see d_bvh_articulated for the LAYOUT semantics).
+template <size_t N, typename RobChildT = int32_t, typename ObsChildT = int32_t,
+          NodeLayout LAYOUT = NodeLayout::Matrix>
+__global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT> obs,
+                                        const RobotSoA<RobChildT> rob,
+                                        const ArticulatedEdgeSoA<N> edges, size_t num_edges,
+                                        const EdgeKernelOut out);
+
+// Host wrapper mirroring bvh_articulated: builds the per-link robot BVHs from
+// the URDF, packs the node data per LAYOUT, uploads the edge batch, launches
+// d_bvh_edges_articulated, and decodes the results. kernel_mode uses the same
+// bits as bvh_articulated (bit 0 int16, bits 2-3 layout, bit 6 quatSAT).
+template <size_t N>
+double bvh_edges_articulated(const std::string& robot_urdf_path,
+                             const BVNode_soa<int32_t>& obs_BVH, const MeshData& obs_mesh,
+                             const ArticulatedEdgeBatch<N>& edges,
+                             std::vector<bool>& valid, std::vector<float>& first_invalid_t,
+                             bool dry_run = false, int kernel_mode = 64);
 
 // Host wrapper mirroring bvh_naive. Uploads the BVH rotations as quaternions,
 // copies the EdgeBatch to the device, launches d_bvh_edges, and decodes the

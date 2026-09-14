@@ -33,6 +33,7 @@
 #include "Triangle.hu"
 #include "OBB-BVH-naive.hu"
 #include "ArticulatedRobot.hu"
+#include "Edge.hu"
 
 // ---------------------------------------------------------------------------
 // Panda FK ground truth (matches RTCD's mask-based FK and the URDF values).
@@ -382,6 +383,9 @@ static void usage(const char* prog) {
               << "  --verify <file>              verify only the pose indices listed in <file> (one\n"
               << "                               per line) with FCL and report the false-collision\n"
               << "                               count + timing (pipeline double-check metric)\n"
+              << "  --edge-check <n>             articulated edge checking: n consecutive-pose edges,\n"
+              << "                               GPU vs FCL, FP/FN + timing, then exit\n"
+              << "  --edge-lvs <float>           longest valid joint delta per edge step (default 0.1 rad)\n"
               << "  --csv <file>                 append results as CSV\n";
 }
 
@@ -400,6 +404,9 @@ int main(int argc, char** argv) {
     std::string labelsFile;
     std::string verifyFile;
     int debugPose         = -1;
+    size_t edgeCheckN     = 0;
+    float edgeLvs         = 0.1f;
+    int edgeKmode         = 64;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -420,6 +427,9 @@ int main(int argc, char** argv) {
         else if (a == "--dump-labels") labelsFile = next();
         else if (a == "--verify") verifyFile = next();
         else if (a == "--debug-pose") debugPose = atoi(next().c_str());
+        else if (a == "--edge-check") edgeCheckN = (size_t)atoi(next().c_str());
+        else if (a == "--edge-lvs") edgeLvs = (float)atof(next().c_str());
+        else if (a == "--edge-kmode") edgeKmode = atoi(next().c_str());
         else if (a == "-h" || a == "--help") { usage(argv[0]); return 0; }
         else { std::cerr << "Unknown argument: " << a << std::endl; usage(argv[0]); return 1; }
     }
@@ -759,6 +769,84 @@ int main(int argc, char** argv) {
         std::cout << "FCL VERIFY: checked=" << vIdx.size() << " true=" << nTrue
                   << " false=" << nFalse << " time_ms=" << ms
                   << " us_per_check=" << usPerCheck << std::endl;
+        return 0;
+    }
+
+    // --- articulated edge checking (GPU vs FCL), then exit ---------------
+    if (edgeCheckN > 0) {
+        if (edgeCheckN > traj.size() - 1) edgeCheckN = traj.size() - 1;
+        buildFCLModels();
+
+        std::vector<ArticulatedEdge<7>> edges(edgeCheckN);
+        for (size_t i = 0; i < edgeCheckN; ++i) {
+            articulated_conf<7> s7, e7;
+            for (int j = 0; j < 7; ++j) {
+                s7[j] = traj[i][j];
+                e7[j] = traj[i + 1][j];
+            }
+            edges[i] = makeArticulatedEdge<7>(s7, e7, edgeLvs);
+            edges[i].flags = EDGE_FLAG_REPORT_FIRST_INVALID_T;
+        }
+        ArticulatedEdgeBatch<7> batch(edges);
+        size_t total_samples = 0;
+        for (const auto& e : edges) total_samples += (size_t)e.nsteps + 1;
+        std::cout << "Articulated edge validation: " << edgeCheckN << " edges, "
+                  << total_samples << " samples (lvs=" << edgeLvs << " rad)." << std::endl;
+
+        std::vector<bool> gpuValid;
+        std::vector<float> gpuFirstT;
+        const double kernelMs = bvh_edges_articulated<7>(urdfPath, sd.bvh, sd.mesh, batch,
+                                                         gpuValid, gpuFirstT, true, edgeKmode);
+
+        // FCL ground truth per sample (FK + per-link collide, early exit).
+        PandaFK fk;
+        std::vector<bool> cpuValid(edgeCheckN, true);
+        std::vector<float> cpuFirstT(edgeCheckN, -1.0f);
+        const auto cpuT0 = std::chrono::high_resolution_clock::now();
+        size_t cpuSamples = 0;
+        for (size_t i = 0; i < edgeCheckN; ++i) {
+            const uint32_t n = edges[i].nsteps;
+            for (uint32_t j = 0; j <= n; ++j) {
+                const float t = (n > 0) ? (float)j / (float)n : 0.0f;
+                std::array<float, 7> q;
+                for (int k = 0; k < 7; ++k) q[k] = traj[i][k] + (traj[i + 1][k] - traj[i][k]) * t;
+                std::array<Eigen::Isometry3f, 7> tfms;
+                fk.compute(q, tfms);
+                ++cpuSamples;
+                if (poseInCollisionFCL(tfms, fclLinks, fclObstacles, true)) {
+                    cpuValid[i] = false;
+                    cpuFirstT[i] = t;
+                    break;
+                }
+            }
+        }
+        const auto cpuT1 = std::chrono::high_resolution_clock::now();
+        const double cpuMs = std::chrono::duration<double, std::milli>(cpuT1 - cpuT0).count();
+
+        size_t tp = 0, tn = 0, fp = 0, fn = 0;
+        for (size_t i = 0; i < edgeCheckN; ++i) {
+            const bool g = gpuValid[i];
+            const bool c = cpuValid[i];
+            if (g && c) ++tp;
+            else if (!g && !c) ++tn;
+            else if (g && !c) ++fp;
+            else ++fn;
+            if ((g != c) && (fp + fn) <= 10) {
+                std::cout << "  MISMATCH edge " << i << ": GPU=" << (g ? "valid" : "COLLIDE")
+                          << " CPU=" << (c ? "valid" : "COLLIDE")
+                          << " firstT gpu=" << gpuFirstT[i] << " cpu=" << cpuFirstT[i] << std::endl;
+            }
+        }
+        std::cout << "EDGE CHECK (" << edgeCheckN << " edges): TP=" << tp << " TN=" << tn
+                  << " FP=" << fp << " FN=" << fn << std::endl;
+        std::cout << "EDGE TIMING: GPU kernel " << kernelMs << " ms ("
+                  << kernelMs * 1000.0 / edgeCheckN << " us/edge), CPU " << cpuMs
+                  << " ms (" << cpuMs * 1000.0 / edgeCheckN << " us/edge, "
+                  << cpuSamples << " samples)" << std::endl;
+        if (fp != 0 || fn != 0) {
+            std::cerr << "MISMATCH in articulated edge checking vs FCL" << std::endl;
+            return 1;
+        }
         return 0;
     }
 
