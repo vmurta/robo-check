@@ -272,10 +272,13 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
     typedef typename ArticQueueIdx<RobChildT>::Q QRob;
     typedef typename ArticQueueIdx<ObsChildT>::Q QObs;
 
-    // Per-warp pending-config queues and counters.
+    // Per-warp pending-config queues and counters. s_pend_mask holds one bit
+    // per link (at most N+1 <= 8 links) and s_pend_lane holds the owner lane
+    // (0-31); both are uint8_t to shrink the static shared footprint.
+    static_assert(N + 1 <= 8, "s_pend_mask is uint8_t: at most 8 links supported");
     __shared__ uint32_t s_pend_idx[NWARP][32];
-    __shared__ uint32_t s_pend_mask[NWARP][32];
-    __shared__ uint32_t s_pend_lane[NWARP][32];
+    __shared__ uint8_t s_pend_mask[NWARP][32];
+    __shared__ uint8_t s_pend_lane[NWARP][32];
     __shared__ uint32_t s_num_pend[NWARP];
     __shared__ uint32_t s_disjoint[NWARP];
 
@@ -285,7 +288,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
     __shared__ int s_num_obb_pend[NWARP];
     __shared__ QRob s_tri_rob[NWARP][MAX_TRI];
     __shared__ QObs s_tri_obs[NWARP][MAX_TRI];
-    __shared__ int s_num_tri[NWARP];
+    __shared__ uint8_t s_num_tri[NWARP];
     __shared__ bool s_collision[NWARP];
 
     const int warp = threadIdx.x >> 5;
@@ -323,7 +326,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
         // ---- parallel outermost check: one config per lane ---------------
         {
             const uint32_t index = warp_start + lane;
-            uint32_t mask = 0;
+            uint8_t mask = 0;
             if (index < num_confs) {
                 const articulated_conf<N> conf = pConf[index];
 
@@ -370,8 +373,8 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                 } else {
                     const uint32_t pos = atomicAdd(&s_num_pend[warp], 1);
                     s_pend_idx[warp][pos] = index;
-                    s_pend_mask[warp][pos] = mask;
-                    s_pend_lane[warp][pos] = (uint32_t)lane;
+                    s_pend_mask[warp][pos] = (uint8_t)mask;
+                    s_pend_lane[warp][pos] = (uint8_t)lane;
                 }
             }
             __syncwarp();
@@ -388,7 +391,9 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
             const uint32_t owner = s_pend_lane[warp][k];
             const articulated_conf<N> conf = pConf[index];
 
-            s_collision[warp] = false;
+            if (lane == 0){
+                s_collision[warp] = false;
+            }
             __syncwarp();
 
             // FK accumulators: meaningful only on the owner lane; broadcast
@@ -400,6 +405,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
             for (int l = 0; l < num_links; ++l) {
                 Eigen::Matrix3f link_R;
                 Eigen::Vector3f link_T;
+                //TODO: remove hardcoded numbers here
 #pragma unroll
                 for (int i = 0; i < 9; ++i) {
                     link_R.data()[i] = __shfl_sync(0xffffffffu, ownR.data()[i], owner, 32);
@@ -415,7 +421,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                 if (LAYOUT == NodeLayout::QuatSAT) {
                     q_link = matrixToQuat(link_R);
                 }
-
+                //TODO: what is the point of the hash mesh thing here?
                 const bool hasMesh = (rob.linkOffset[l + 1] > rob.linkOffset[l]);
                 const bool rootHit = ((mask >> l) & 1u) != 0;
 
