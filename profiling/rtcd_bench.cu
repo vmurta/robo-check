@@ -376,6 +376,7 @@ static void usage(const char* prog) {
               << "  --nposes N                   use first N poses (default: 8192)\n"
               << "  --sweep                      sweep batch sizes 1..4096 like RTCD\n"
               << "  --repeat R                   repeat timed runs R times (default: 1)\n"
+              << "  --kernel-mode N              run only kernel variant N (default: all 4 AB cells)\n"
               << "  --no-fcl                     skip FCL ground-truth comparison\n"
               << "  --dump-labels <file>         write FCL per-pose collision labels (binary uint8)\n"
               << "  --verify <file>              verify only the pose indices listed in <file> (one\n"
@@ -393,6 +394,7 @@ int main(int argc, char** argv) {
     size_t nPoses         = 8192;
     bool sweep            = false;
     int repeat            = 1;
+    int kernelModeOverride = -1;
     bool doFCL            = true;
     std::string csvFile;
     std::string labelsFile;
@@ -412,6 +414,7 @@ int main(int argc, char** argv) {
         else if (a == "--nposes") nPoses = (size_t)atoi(next().c_str());
         else if (a == "--sweep") sweep = true;
         else if (a == "--repeat") repeat = atoi(next().c_str());
+        else if (a == "--kernel-mode") kernelModeOverride = atoi(next().c_str());
         else if (a == "--no-fcl") doFCL = false;
         else if (a == "--csv") csvFile = next();
         else if (a == "--dump-labels") labelsFile = next();
@@ -770,6 +773,7 @@ int main(int argc, char** argv) {
     //   8 = vecR (padded float4 R)  12 = quat R + packed T/dim/a
     static const int kVariantMode[4] = {0, 4, 8, 12};
     static const char* kVariantName[4] = {"base", "quat", "vecR", "quat+TD"};
+    const int nCells = (kernelModeOverride >= 0) ? 1 : 4;
 
     auto runGpu = [&](size_t n, int kmode, std::vector<bool>* outValid) -> double {
         std::vector<articulated_conf<7>> sub(confs.begin(), confs.begin() + n);
@@ -845,8 +849,9 @@ int main(int argc, char** argv) {
             // Alternate the run order per repeat so clock/thermal drift does
             // not systematically favor one variant.
             const bool rev = (r & 1) != 0;
-            for (int i = 0; i < 4; ++i) {
-                const int m = rev ? kVariantMode[3 - i] : kVariantMode[i];
+            for (int i = 0; i < nCells; ++i) {
+                const int m = (kernelModeOverride >= 0) ? kernelModeOverride
+                              : (rev ? kVariantMode[3 - i] : kVariantMode[i]);
                 std::vector<bool> v;
                 const double ms = runGpu(batch, m, &v);
                 totalMs[i] += ms;
@@ -859,17 +864,21 @@ int main(int argc, char** argv) {
                 }
             }
         }
-        for (int i = 0; i < 4; ++i) {
+        for (int i = 0; i < nCells; ++i) {
             const double avgMs = totalMs[i] / repeat;
             const double usPerPose = avgMs * 1000.0 / (double)batch;
             std::cout << "BATCH " << batch << " [" << kVariantName[i] << "]: avg kernel " << avgMs
                       << " ms -> " << usPerPose << " us/pose (best " << bestMs[i] * 1000.0 / batch
                       << " us/pose)" << std::endl;
             if (csv.is_open()) {
-                csv << scene << ",robo-check-bvh-" << kVariantName[i] << "," << batch << "," << nPoses
+                const char* kName = (kVariantMode[i] == 0) ? "base" : (kVariantMode[i] == 4) ? "quat"
+                                  : (kVariantMode[i] == 8) ? "vecR" : (kVariantMode[i] == 12) ? "quat+TD"
+                                  : (kVariantMode[i] == 32) ? "1bsm" : kVariantName[i];
+                csv << scene << ",robo-check-bvh-" << kName << "," << batch << "," << nPoses
                     << "," << avgMs << "," << usPerPose << "\n";
             }
         }
+        if (nCells == 4)
         std::cout << "BATCH " << batch << " [AB/BC]: best-kernel speedup vs base: quat="
                   << bestMs[0] / bestMs[1] << "x vecR=" << bestMs[0] / bestMs[2]
                   << "x quat+TD=" << bestMs[0] / bestMs[3]
