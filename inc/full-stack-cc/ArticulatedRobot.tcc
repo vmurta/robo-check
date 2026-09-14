@@ -409,6 +409,24 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
             Eigen::Vector3f ownT = Eigen::Vector3f::Zero();
 
             for (int l = 0; l < num_links; ++l) {
+                const bool hasMesh = (rob.linkOffset[l + 1] > rob.linkOffset[l]);
+                const bool rootHit = ((root_mask >> l) & 1u) != 0;
+
+                // Links that are provably collision-free (no mesh, or the
+                // root pair missed) skip the FK broadcast + traversal, but
+                // the FK accumulators must still advance so later links see
+                // the correct parent transform.
+                if (!(hasMesh && rootHit)) {
+                    if (l + 1 < num_links) {
+                        const JointParams& jp = rob.joints[l];
+                        const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
+                        const Eigen::Matrix3f nextR = ownR * jp.origin_R * Rj;
+                        const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
+                        ownR = nextR;
+                        ownT = nextT;
+                    }
+                    continue;
+                }
                 Eigen::Matrix3f link_R;
                 Eigen::Vector3f link_T;
                 //TODO: remove hardcoded numbers here
@@ -428,20 +446,14 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                     q_link = matrixToQuat(link_R);
                 }
                 //TODO: what is the point of the hash mesh thing here?
-                const bool hasMesh = (rob.linkOffset[l + 1] > rob.linkOffset[l]);
-                
-                const bool rootHit = ((root_mask >> l) & 1u) != 0;
 
                 // Seed the frontier with the (link root, scene root) pair;
                 // root overlap was proven in the parallel phase (mask).
                 if (lane == 0) {
-                    s_num_obb_pend[warp] = 0;
                     s_num_tri[warp] = 0;
-                    if (hasMesh && rootHit) {
-                        s_rob_pend[warp][0] = (QRob)rob.linkOffset[l];
-                        s_obs_pend[warp][0] = 0;
-                        s_num_obb_pend[warp] = 1;
-                    }
+                    s_rob_pend[warp][0] = (QRob)rob.linkOffset[l];
+                    s_obs_pend[warp][0] = 0;
+                    s_num_obb_pend[warp] = 1;
                 }
                 __syncwarp();
 

@@ -1754,9 +1754,8 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT, LAYOUT> obs
                 __syncwarp();
 
                 // FK accumulators are declared inside the (duplicated)
-                // traversal body below; broadcast from lane 0.
-                const uint32_t owner = 0;
-
+                // traversal body below; the warp-uniform state needs no
+                // broadcast.
             // FK accumulators: meaningful only on the owner lane; broadcast
             // to the whole warp at each link (transform matrices are computed
             // once per config, by its owner lane).
@@ -1764,28 +1763,10 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT, LAYOUT> obs
             Eigen::Vector3f ownT = Eigen::Vector3f::Zero();
 
             for (int l = 0; l < num_links; ++l) {
-                Eigen::Matrix3f link_R;
-                Eigen::Vector3f link_T;
-                //TODO: remove hardcoded numbers here
-#pragma unroll
-                for (int i = 0; i < 9; ++i) {
-                    link_R.data()[i] = __shfl_sync(0xffffffffu, ownR.data()[i], owner, 32);
-                }
-#pragma unroll
-                for (int i = 0; i < 3; ++i) {
-                    link_T[i] = __shfl_sync(0xffffffffu, ownT[i], owner, 32);
-                }
-
-                // Pure-quat broad phase: convert the FK matrix to a unit
-                // quaternion once per link (per config), not per node pair.
-                Quat q_link;
-                if (LAYOUT == NodeLayout::QuatSAT) {
-                    q_link = matrixToQuat(link_R);
-                }
                 const bool hasMesh = (rob.linkOffset[l + 1] > rob.linkOffset[l]);
-                // Inline root test: the edge kernel has no precomputed
-                // per-link mask, so the (link root, scene root) pair is
-                // tested right here (same math as the parallel phase).
+                // The FK state is warp-uniform (the advance below runs on
+                // every lane with identical inputs), so the inline root test
+                // uses it directly -- no shuffle broadcast needed.
                 bool rootHit = false;
                 if (hasMesh) {
                     const int rob_root = rob.linkOffset[l];
@@ -1795,18 +1776,42 @@ __global__ void d_bvh_edges_articulated(const ObstacleSoA<ObsChildT, LAYOUT> obs
                     if (LAYOUT == NodeLayout::QuatSAT) {
                         Quat qRoot, qB;
                         loadNodeQuat(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
-                        const Quat qLink = matrixToQuat(link_R);
+                        const Quat qLink = matrixToQuat(ownR);
                         computeRelTransformQuat(q_obs_root, T_obs_abs_root,
                                                 qRoot, robRootT,
-                                                qLink, link_T, qB, rT);
+                                                qLink, ownT, qB, rT);
                         rootHit = obbOverlapQuat(qB, rT, a_root, robRootDim, epsilon);
                     } else {
                         loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
                         computeRelTransformNoBf(R_obs_abs_root, T_obs_abs_root,
                                                 robRootR, robRootT,
-                                                link_R, link_T, rB, rT);
+                                                ownR, ownT, rB, rT);
                         rootHit = obbOverlapAbs(a_root, robRootDim, rB, epsilon, rT);
                     }
+                }
+
+                // Links provably collision-free (no mesh, or the root pair
+                // missed) skip the traversal, but the FK accumulators must
+                // still advance so later links see the correct parent.
+                if (!(hasMesh && rootHit)) {
+                    if (l + 1 < num_links) {
+                        const JointParams& jp = rob.joints[l];
+                        const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, q[l]);
+                        const Eigen::Matrix3f nextR = ownR * jp.origin_R * Rj;
+                        const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
+                        ownR = nextR;
+                        ownT = nextT;
+                    }
+                    continue;
+                }
+                const Eigen::Matrix3f link_R = ownR;
+                const Eigen::Vector3f link_T = ownT;
+
+                // Pure-quat broad phase: convert the FK matrix to a unit
+                // quaternion once per link (per config), not per node pair.
+                Quat q_link;
+                if (LAYOUT == NodeLayout::QuatSAT) {
+                    q_link = matrixToQuat(link_R);
                 }
 
                 // Seed the frontier with the (link root, scene root) pair;
