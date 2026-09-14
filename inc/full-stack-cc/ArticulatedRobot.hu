@@ -29,6 +29,21 @@ struct JointParams {
     Eigen::Vector3f axis;     // rotation axis expressed in the child frame (URDF <axis> xyz)
 };
 
+// Matrix-free joint data for the QuatSAT layout: the fixed <origin> rotation
+// and the axis are folded into two precomputed quats (no Eigen matrix in
+// global memory). The per-link joint rotation is the shallow linear combine
+//   q_joint(theta) = origin_Q * axisAngleToQuat(axis, theta)
+//                  = cos(theta/2) * A + sin(theta/2) * B
+// with A = origin_Q and B = quatMul(origin_Q, (axis.x, axis.y, axis.z, 0)).
+// The kernel uses q_joint both as an incremental link quaternion (pure-quat
+// broad phase) and, via quatToMatrix, as the joint rotation matrix for the
+// matrix FK advance (one 3x3 product per link, no Rodrigues).
+struct JointParamsQuat {
+    Quat A;                  // unit quaternion of the fixed <origin> rotation
+    Quat B;                  // origin_Q * pure-axis quaternion
+    Eigen::Vector3f origin_T; // fixed translation from parent frame to child frame
+};
+
 // Host-side description of an articulated robot parsed from a URDF file.
 struct ArticulatedRobot {
     size_t num_joints = 0;
@@ -78,6 +93,20 @@ __host__ __device__ inline Eigen::Matrix3f axisAngleToRotation(const Eigen::Vect
     R(2, 1) = az * ay * t + ax * s;
     R(2, 2) = c + az * az * t;
     return R;
+}
+
+// Unit quaternion from an axis and an angle (half-angle form). Matches
+// axisAngleToRotation: quatToMatrix(axisAngleToQuat(a, t)) ==
+// axisAngleToRotation(a, t) up to rounding.
+__host__ __device__ inline Quat axisAngleToQuat(const Eigen::Vector3f& axis, float angle) {
+    float n = sqrtf(axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]);
+    const float s = sinf(0.5f * angle) / n;
+    Quat q;
+    q.x = axis[0] * s;
+    q.y = axis[1] * s;
+    q.z = axis[2] * s;
+    q.w = cosf(0.5f * angle);
+    return q;
 }
 
 // ---------------------------------------------------------------------------
@@ -311,7 +340,8 @@ struct RobotSoA {
     const int* linkOffset;           // per-link partition of the concatenated BVH
     const int* linkVertOffset;
     const int* linkTriOffset;
-    const JointParams* joints;
+    const JointParams* joints;       // matrix-form joint data (all layouts)
+    const JointParamsQuat* jointsQ;  // matrix-free joint data (QuatSAT only, null otherwise)
     const Eigen::Vector3f* verts;
     const Triangle* tris;
 };

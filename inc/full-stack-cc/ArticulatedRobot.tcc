@@ -172,11 +172,13 @@ static __device__ bool linkCollides(const Eigen::Matrix3f& link_R, const Eigen::
 // Narrow phase = Chang & Kim 2009 paperTriTri in rectangle-local coordinates
 // (verdict > 0 hit / 0 free / < 0 unreliable); unreliable pairs fall back to
 // the full world-frame test triangles_valid_f. Templated on the child/queue
-// index types.
+// index types. The QuatSAT layout converts the link quaternion to a matrix
+// once per flush (not per node pair); other layouts receive the FK matrix
+// directly. All layouts use the matrix narrow phase.
 template <typename RobChildT, typename ObsChildT, typename QRob, typename QObs, NodeLayout LAYOUT>
 static __device__ __noinline__ void d_articulated_tri_phase(
     const QRob* triRob, const QObs* triObs, const int numTri,
-    const Eigen::Matrix3f& link_R, const Eigen::Vector3f& link_T,
+    const Eigen::Matrix3f& link_R, const Quat& q_link, const Eigen::Vector3f& link_T,
     const int linkVertOff, const int linkTriOff,
     const ObstacleSoA<ObsChildT, LAYOUT> obs, const RobotSoA<RobChildT, LAYOUT> rob,
     bool* s_collision) {
@@ -188,33 +190,69 @@ static __device__ __noinline__ void d_articulated_tri_phase(
         const int rob_obb_idx = (int)triRob[t];
         const int obs_obb_idx = (int)triObs[t];
 
-        Eigen::Matrix3f R_obs_abs, R_rob_abs;
-        Eigen::Vector3f T_obs_abs, T_rob_abs, dimObs, dimRob;
-        float aObs, aRob;
-        loadNode(obs.nodes, obs_obb_idx, R_obs_abs, T_obs_abs, dimObs, aObs);
-        loadNode(rob.nodes, rob_obb_idx, R_rob_abs, T_rob_abs, dimRob, aRob);
+        if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+            // Narrow phase from the link matrix: the broad phase keeps the
+            // quaternion, but the narrow phase converts the link quat once
+            // per flush (not per node pair) and reuses the matrix form.
+            const Eigen::Matrix3f link_Rm = quatToMatrix(q_link);
+            Eigen::Matrix3f R_obs_abs, R_rob_abs;
+            Eigen::Vector3f T_obs_abs, T_rob_abs, dimObs, dimRob;
+            float aObs, aRob;
+            loadNode(obs.nodes, obs_obb_idx, R_obs_abs, T_obs_abs, dimObs, aObs);
+            loadNode(rob.nodes, rob_obb_idx, R_rob_abs, T_rob_abs, dimRob, aRob);
 
-        Eigen::Matrix3f B;
-        Eigen::Vector3f T;
-        computeRelTransformNoBf(R_obs_abs, T_obs_abs, R_rob_abs, T_rob_abs,
-                                link_R, link_T, B, T);
+            Eigen::Matrix3f B;
+            Eigen::Vector3f T;
+            computeRelTransformNoBf(R_obs_abs, T_obs_abs, R_rob_abs, T_rob_abs,
+                                    link_Rm, link_T, B, T);
 
-        const int rob_tri = -rob.first_child[rob_obb_idx] - 1 + linkTriOff;
-        const int obs_tri = -obs.first_child[obs_obb_idx] - 1;
-        const int verdict = paperTriTri(dimObs(0), dimObs(1), aObs,
-                                        dimRob(0), dimRob(1), aRob,
-                                        B, T);
-        if (verdict > 0) {
-            *s_collision = true;
-        } else if (verdict < 0) {
-            const Triangle& rt = rob.tris[rob_tri];
-            const Triangle& ot = obs.tris[obs_tri];
-            const Eigen::Vector3f rv0 = link_R * rob.verts[linkVertOff + rt.v1] + link_T;
-            const Eigen::Vector3f rv1 = link_R * rob.verts[linkVertOff + rt.v2] + link_T;
-            const Eigen::Vector3f rv2 = link_R * rob.verts[linkVertOff + rt.v3] + link_T;
-            if (!triangles_valid_f(rv0, rv1, rv2,
-                                   obs.verts[ot.v1], obs.verts[ot.v2], obs.verts[ot.v3])) {
+            const int rob_tri = -rob.first_child[rob_obb_idx] - 1 + linkTriOff;
+            const int obs_tri = -obs.first_child[obs_obb_idx] - 1;
+            const int verdict = paperTriTri(dimObs(0), dimObs(1), aObs,
+                                            dimRob(0), dimRob(1), aRob,
+                                            B, T);
+            if (verdict > 0) {
                 *s_collision = true;
+            } else if (verdict < 0) {
+                const Triangle& rt = rob.tris[rob_tri];
+                const Triangle& ot = obs.tris[obs_tri];
+                const Eigen::Vector3f rv0 = link_Rm * rob.verts[linkVertOff + rt.v1] + link_T;
+                const Eigen::Vector3f rv1 = link_Rm * rob.verts[linkVertOff + rt.v2] + link_T;
+                const Eigen::Vector3f rv2 = link_Rm * rob.verts[linkVertOff + rt.v3] + link_T;
+                if (!triangles_valid_f(rv0, rv1, rv2,
+                                       obs.verts[ot.v1], obs.verts[ot.v2], obs.verts[ot.v3])) {
+                    *s_collision = true;
+                }
+            }
+        } else {
+            Eigen::Matrix3f R_obs_abs, R_rob_abs;
+            Eigen::Vector3f T_obs_abs, T_rob_abs, dimObs, dimRob;
+            float aObs, aRob;
+            loadNode(obs.nodes, obs_obb_idx, R_obs_abs, T_obs_abs, dimObs, aObs);
+            loadNode(rob.nodes, rob_obb_idx, R_rob_abs, T_rob_abs, dimRob, aRob);
+
+            Eigen::Matrix3f B;
+            Eigen::Vector3f T;
+            computeRelTransformNoBf(R_obs_abs, T_obs_abs, R_rob_abs, T_rob_abs,
+                                    link_R, link_T, B, T);
+
+            const int rob_tri = -rob.first_child[rob_obb_idx] - 1 + linkTriOff;
+            const int obs_tri = -obs.first_child[obs_obb_idx] - 1;
+            const int verdict = paperTriTri(dimObs(0), dimObs(1), aObs,
+                                            dimRob(0), dimRob(1), aRob,
+                                            B, T);
+            if (verdict > 0) {
+                *s_collision = true;
+            } else if (verdict < 0) {
+                const Triangle& rt = rob.tris[rob_tri];
+                const Triangle& ot = obs.tris[obs_tri];
+                const Eigen::Vector3f rv0 = link_R * rob.verts[linkVertOff + rt.v1] + link_T;
+                const Eigen::Vector3f rv1 = link_R * rob.verts[linkVertOff + rt.v2] + link_T;
+                const Eigen::Vector3f rv2 = link_R * rob.verts[linkVertOff + rt.v3] + link_T;
+                if (!triangles_valid_f(rv0, rv1, rv2,
+                                       obs.verts[ot.v1], obs.verts[ot.v2], obs.verts[ot.v3])) {
+                    *s_collision = true;
+                }
             }
         }
     }
@@ -243,10 +281,14 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
     //     re-tests root boxes: links with a clear bit are provably
     //     collision-free (the root OBBs contain all their geometry) and are
     //     skipped; links with a set bit get the full traversal.
-    //   - the FK transform matrices are computed ONCE per config by its
-    //     owner lane (incremental accumulators held in registers) and
-    //     broadcast to the whole warp with __shfl_sync at each link; no
-    //     lane recomputes FK, and no shared memory is spent on transforms.
+    //   - the FK transform is computed ONCE per config by its owner lane
+    //     (incremental accumulators held in registers) and broadcast to the
+    //     whole warp with __shfl_sync at each link; no lane recomputes FK,
+    //     and no shared memory is spent on transforms. The QuatSAT layout
+    //     keeps a matrix accumulator for the FK advance (wide ILP, cheap
+    //     translation update) plus an incremental link quaternion for the
+    //     pure-quat broad phase (4-float broadcast, no matrixToQuat); other
+    //     layouts use the matrix form alone.
     //
     // Serial traversal per config: warp-cooperative box frontier (2 pairs x
     // 16 lanes, 4-ary children), leaf-leaf pairs deferred to a separate
@@ -336,25 +378,35 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
             if (index < num_confs) {
                 const articulated_conf<N> conf = pConf[index];
 
-                Eigen::Matrix3f link_R = Eigen::Matrix3f::Identity();
+                // FK accumulators: matrix + incremental quaternion for
+                // QuatSAT (hybrid), matrix form otherwise.
+                Eigen::Matrix3f link_R;
                 Eigen::Vector3f link_T = Eigen::Vector3f::Zero();
+                Quat link_Q;
+                if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                    link_Q = Quat{0.0f, 0.0f, 0.0f, 1.0f};
+                    link_R = Eigen::Matrix3f::Identity();
+                } else {
+                    link_R = Eigen::Matrix3f::Identity();
+                }
                 for (int l = 0; l < num_links; ++l) {
                     if (rob.linkOffset[l + 1] > rob.linkOffset[l]) {
                         const int rob_root = rob.linkOffset[l];
-                        Eigen::Matrix3f robRootR, B;
-                        Eigen::Vector3f robRootT, robRootDim, T;
-                        float robRootA;
-                        if (LAYOUT == NodeLayout::QuatSAT) {
+                        if constexpr (LAYOUT == NodeLayout::QuatSAT) {
                             Quat qRoot, qB;
+                            Eigen::Vector3f robRootT, robRootDim, T;
+                            float robRootA;
                             loadNodeQuat(rob.nodes, rob_root, qRoot, robRootT, robRootDim, robRootA);
-                            const Quat qLink = matrixToQuat(link_R);
                             computeRelTransformQuat(q_obs_root, T_obs_abs_root,
                                                     qRoot, robRootT,
-                                                    qLink, link_T, qB, T);
+                                                    link_Q, link_T, qB, T);
                             if (obbOverlapQuat(qB, T, a_root, robRootDim, epsilon)) {
                                 root_mask |= (1u << l);
                             }
                         } else {
+                            Eigen::Matrix3f robRootR, B;
+                            Eigen::Vector3f robRootT, robRootDim, T;
+                            float robRootA;
                             loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
                             computeRelTransformNoBf(R_obs_abs_root, T_obs_abs_root,
                                                     robRootR, robRootT,
@@ -365,12 +417,35 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                         }
                     }
                     if (l + 1 < num_links) {
-                        const JointParams& jp = rob.joints[l];
-                        const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
-                        const Eigen::Matrix3f nextR = link_R * jp.origin_R * Rj;
-                        const Eigen::Vector3f nextT = link_T + link_R * jp.origin_T;
-                        link_R = nextR;
-                        link_T = nextT;
+                        if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                            // Hybrid FK: matrix accumulator (wide-ILP advance
+                            // + cheap translation update) plus an incremental
+                            // link quaternion for the pure-quat broad phase.
+                            // The joint rotation matrix is built from the
+                            // folded quat (c*A + s*B), so no Rodrigues and no
+                            // origin_R matrix from global memory.
+                            const JointParamsQuat& jp = rob.jointsQ[l];
+                            const float h = 0.5f * conf[l];
+                            const float c = cosf(h);
+                            const float s = sinf(h);
+                            Quat qj;
+                            qj.x = c * jp.A.x + s * jp.B.x;
+                            qj.y = c * jp.A.y + s * jp.B.y;
+                            qj.z = c * jp.A.z + s * jp.B.z;
+                            qj.w = c * jp.A.w + s * jp.B.w;
+                            const Eigen::Matrix3f Rj = quatToMatrix(qj);
+                            const Eigen::Vector3f nextT = link_T + link_R * jp.origin_T;
+                            link_R = link_R * Rj;
+                            link_Q = quatMul(link_Q, qj);
+                            link_T = nextT;
+                        } else {
+                            const JointParams& jp = rob.joints[l];
+                            const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
+                            const Eigen::Matrix3f nextR = link_R * jp.origin_R * Rj;
+                            const Eigen::Vector3f nextT = link_T + link_R * jp.origin_T;
+                            link_R = nextR;
+                            link_T = nextT;
+                        }
                     }
                 }
 
@@ -403,10 +478,18 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
             __syncwarp();
 
             // FK accumulators: meaningful only on the owner lane; broadcast
-            // to the whole warp at each link (transform matrices are computed
-            // once per config, by its owner lane).
-            Eigen::Matrix3f ownR = Eigen::Matrix3f::Identity();
+            // to the whole warp at each link (computed once per config, by
+            // its owner lane). Quaternion form for QuatSAT (no matrix
+            // materialized, no matrixToQuat), matrix form otherwise.
+            Eigen::Matrix3f ownR;
             Eigen::Vector3f ownT = Eigen::Vector3f::Zero();
+            Quat ownQ;
+            if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                ownQ = Quat{0.0f, 0.0f, 0.0f, 1.0f};
+                ownR = Eigen::Matrix3f::Identity();
+            } else {
+                ownR = Eigen::Matrix3f::Identity();
+            }
 
             for (int l = 0; l < num_links; ++l) {
                 const bool hasMesh = (rob.linkOffset[l + 1] > rob.linkOffset[l]);
@@ -418,32 +501,56 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                 // the correct parent transform.
                 if (!(hasMesh && rootHit)) {
                     if (l + 1 < num_links) {
-                        const JointParams& jp = rob.joints[l];
-                        const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
-                        const Eigen::Matrix3f nextR = ownR * jp.origin_R * Rj;
-                        const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
-                        ownR = nextR;
-                        ownT = nextT;
+                        if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                            const JointParamsQuat& jp = rob.jointsQ[l];
+                            const float h = 0.5f * conf[l];
+                            const float c = cosf(h);
+                            const float s = sinf(h);
+                            Quat qj;
+                            qj.x = c * jp.A.x + s * jp.B.x;
+                            qj.y = c * jp.A.y + s * jp.B.y;
+                            qj.z = c * jp.A.z + s * jp.B.z;
+                            qj.w = c * jp.A.w + s * jp.B.w;
+                            const Eigen::Matrix3f Rj = quatToMatrix(qj);
+                            const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
+                            ownR = ownR * Rj;
+                            ownQ = quatMul(ownQ, qj);
+                            ownT = nextT;
+                        } else {
+                            const JointParams& jp = rob.joints[l];
+                            const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
+                            const Eigen::Matrix3f nextR = ownR * jp.origin_R * Rj;
+                            const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
+                            ownR = nextR;
+                            ownT = nextT;
+                        }
                     }
                     continue;
                 }
                 Eigen::Matrix3f link_R;
                 Eigen::Vector3f link_T;
-                //TODO: remove hardcoded numbers here
-#pragma unroll
-                for (int i = 0; i < 9; ++i) {
-                    link_R.data()[i] = __shfl_sync(0xffffffffu, ownR.data()[i], owner, 32);
-                }
-#pragma unroll
-                for (int i = 0; i < 3; ++i) {
-                    link_T[i] = __shfl_sync(0xffffffffu, ownT[i], owner, 32);
-                }
-
-                // Pure-quat broad phase: convert the FK matrix to a unit
-                // quaternion once per link (per config), not per node pair.
                 Quat q_link;
-                if (LAYOUT == NodeLayout::QuatSAT) {
-                    q_link = matrixToQuat(link_R);
+                if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                    // FK is accumulated in quaternion form; broadcast only
+                    // the quat + translation (no matrix materialization).
+#pragma unroll
+                    for (int i = 0; i < 4; ++i) {
+                        (&q_link.x)[i] = __shfl_sync(0xffffffffu, (&ownQ.x)[i], owner, 32);
+                    }
+#pragma unroll
+                    for (int i = 0; i < 3; ++i) {
+                        link_T[i] = __shfl_sync(0xffffffffu, ownT[i], owner, 32);
+                    }
+                } else {
+                    //TODO: remove hardcoded numbers here
+#pragma unroll
+                    for (int i = 0; i < 9; ++i) {
+                        link_R.data()[i] = __shfl_sync(0xffffffffu, ownR.data()[i], owner, 32);
+                    }
+#pragma unroll
+                    for (int i = 0; i < 3; ++i) {
+                        link_T[i] = __shfl_sync(0xffffffffu, ownT[i], owner, 32);
+                    }
                 }
                 //TODO: what is the point of the hash mesh thing here?
 
@@ -469,7 +576,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                         if (s_num_tri[warp] >= TRI_BATCH) {
                             d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>(
                                 s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp],
-                                link_R, link_T,
+                                link_R, q_link, link_T,
                                 rob.linkVertOffset[l], rob.linkTriOffset[l],
                                 obs, rob,
                                 &s_collision[warp]);
@@ -608,7 +715,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                     if (!s_collision[warp] && s_num_tri[warp] > 0) {
                         d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>(
                                 s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp],
-                                link_R, link_T,
+                                link_R, q_link, link_T,
                                 rob.linkVertOffset[l], rob.linkTriOffset[l],
                                 obs, rob,
                                 &s_collision[warp]);
@@ -625,12 +732,29 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
 
                 // Advance the owner lane's FK to the next link.
                 if (l + 1 < num_links) {
-                    const JointParams& jp = rob.joints[l];
-                    const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
-                    const Eigen::Matrix3f nextR = ownR * jp.origin_R * Rj;
-                    const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
-                    ownR = nextR;
-                    ownT = nextT;
+                    if constexpr (LAYOUT == NodeLayout::QuatSAT) {
+                        const JointParamsQuat& jp = rob.jointsQ[l];
+                        const float h = 0.5f * conf[l];
+                        const float c = cosf(h);
+                        const float s = sinf(h);
+                        Quat qj;
+                        qj.x = c * jp.A.x + s * jp.B.x;
+                        qj.y = c * jp.A.y + s * jp.B.y;
+                        qj.z = c * jp.A.z + s * jp.B.z;
+                        qj.w = c * jp.A.w + s * jp.B.w;
+                        const Eigen::Matrix3f Rj = quatToMatrix(qj);
+                        const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
+                        ownR = ownR * Rj;
+                        ownQ = quatMul(ownQ, qj);
+                        ownT = nextT;
+                    } else {
+                        const JointParams& jp = rob.joints[l];
+                        const Eigen::Matrix3f Rj = axisAngleToRotation(jp.axis, conf[l]);
+                        const Eigen::Matrix3f nextR = ownR * jp.origin_R * Rj;
+                        const Eigen::Vector3f nextT = ownT + ownR * jp.origin_T;
+                        ownR = nextR;
+                        ownT = nextT;
+                    }
                 }
             } // links
 
@@ -767,6 +891,10 @@ double bvh_articulated(const std::string& robot_urdf_path,
                   << " (obs=" << obs_BVH.size << ", rob=" << rob_first_child.size()
                   << "); using int16 only where it fits." << std::endl;
     }
+    // QuatTD/QuatSAT pack T/dim/a into the TD float4s: the split arrays are
+    // never read by those kernels, so they are neither allocated nor copied
+    // (memory minimization).
+    const bool needsSplitArrays = (layout != NodeLayout::QuatTD && layout != NodeLayout::QuatSAT);
     static const char* kLayoutName[5] = {"matrix", "quat", "vecR", "quat+TD", "quatSAT"};
     // 2-blocks/SM (128-reg cap) only pays off when the grid can exceed the SM
     // count; bit 4 forces it for benchmarking.
@@ -837,6 +965,20 @@ double bvh_articulated(const std::string& robot_urdf_path,
             rob_TD.push_back(make_float4(d.y(), d.z(), rob_a[i], 0.0f));
         }
     }
+    // Matrix-free joint data for QuatSAT: no Eigen matrix in global memory.
+    std::vector<JointParamsQuat> joints_q;
+    if (layout == NodeLayout::QuatSAT) {
+        joints_q.reserve(joints.size());
+        for (const auto& jp : joints) {
+            const Eigen::Quaternionf q(jp.origin_R);
+            const Quat origin_Q = Quat{q.x(), q.y(), q.z(), q.w()};
+            JointParamsQuat jq;
+            jq.A = origin_Q;
+            jq.B = quatMul(origin_Q, Quat{jp.axis.x(), jp.axis.y(), jp.axis.z(), 0.0f});
+            jq.origin_T = jp.origin_T;
+            joints_q.push_back(jq);
+        }
+    }
 
     const int blockSize = 256;
     const size_t num_words = (num_confs + 31) / 32;
@@ -895,20 +1037,20 @@ double bvh_articulated(const std::string& robot_urdf_path,
     const int gridSize = (max_blocks < persistent_blocks) ? max_blocks : persistent_blocks;
 
     Eigen::Matrix3f* d_R_obs = nullptr;
-    Eigen::Vector3f* d_T_obs;
-    Eigen::Vector3f* d_Obs_dim;
+    Eigen::Vector3f* d_T_obs = nullptr;
+    Eigen::Vector3f* d_Obs_dim = nullptr;
     int32_t* d_Obs_first_child32;
     int16_t* d_Obs_first_child16;
     Eigen::Vector3f* d_Obs_verts;
     Triangle* d_Obs_tris;
-    float* d_Obs_a;
+    float* d_Obs_a = nullptr;
 
     Eigen::Matrix3f* d_Rob_R = nullptr;
-    Eigen::Vector3f* d_Rob_T;
-    Eigen::Vector3f* d_Rob_dim;
+    Eigen::Vector3f* d_Rob_T = nullptr;
+    Eigen::Vector3f* d_Rob_dim = nullptr;
     int32_t* d_Rob_first_child32;
     int16_t* d_Rob_first_child16;
-    float* d_Rob_a;
+    float* d_Rob_a = nullptr;
     Eigen::Vector3f* d_Rob_verts;
     Triangle* d_Rob_tris;
 
@@ -922,7 +1064,8 @@ double bvh_articulated(const std::string& robot_urdf_path,
     int* d_LinkOffset;
     int* d_LinkVertOffset;
     int* d_LinkTriOffset;
-    JointParams* d_Joints;
+    JointParams* d_Joints = nullptr;
+    JointParamsQuat* d_JointsQ = nullptr;
     articulated_conf<N>* d_Conf;
     uint32_t* d_disjoint;
     uint32_t* d_next_conf;
@@ -933,8 +1076,11 @@ double bvh_articulated(const std::string& robot_urdf_path,
     if (layout == NodeLayout::Matrix) {
         cudaMalloc((void**)&d_R_obs, obs_BVH.size * sizeof(Eigen::Matrix3f));
     }
-    cudaMalloc((void**)&d_T_obs, obs_BVH.size * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Obs_dim, obs_BVH.size * sizeof(Eigen::Vector3f));
+    if (needsSplitArrays) {
+        cudaMalloc((void**)&d_T_obs, obs_BVH.size * sizeof(Eigen::Vector3f));
+        cudaMalloc((void**)&d_Obs_dim, obs_BVH.size * sizeof(Eigen::Vector3f));
+        cudaMalloc((void**)&d_Obs_a, obs_BVH.size * sizeof(float));
+    }
     if (obs16) {
         cudaMalloc((void**)&d_Obs_first_child16, obs_BVH.size * sizeof(int16_t));
     } else {
@@ -942,19 +1088,20 @@ double bvh_articulated(const std::string& robot_urdf_path,
     }
     cudaMalloc((void**)&d_Obs_verts, obs_mesh.vertices.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Obs_tris, obs_mesh.triangles.size() * sizeof(Triangle));
-    cudaMalloc((void**)&d_Obs_a, obs_BVH.size * sizeof(float));
 
     if (layout == NodeLayout::Matrix) {
         cudaMalloc((void**)&d_Rob_R, rob_R.size() * sizeof(Eigen::Matrix3f));
     }
-    cudaMalloc((void**)&d_Rob_T, rob_T.size() * sizeof(Eigen::Vector3f));
-    cudaMalloc((void**)&d_Rob_dim, rob_dim.size() * sizeof(Eigen::Vector3f));
+    if (needsSplitArrays) {
+        cudaMalloc((void**)&d_Rob_T, rob_T.size() * sizeof(Eigen::Vector3f));
+        cudaMalloc((void**)&d_Rob_dim, rob_dim.size() * sizeof(Eigen::Vector3f));
+        cudaMalloc((void**)&d_Rob_a, rob_a.size() * sizeof(float));
+    }
     if (rob16) {
         cudaMalloc((void**)&d_Rob_first_child16, rob_first_child.size() * sizeof(int16_t));
     } else {
         cudaMalloc((void**)&d_Rob_first_child32, rob_first_child.size() * sizeof(int32_t));
     }
-    cudaMalloc((void**)&d_Rob_a, rob_a.size() * sizeof(float));
     cudaMalloc((void**)&d_Rob_verts, rob_verts.size() * sizeof(Eigen::Vector3f));
     cudaMalloc((void**)&d_Rob_tris, rob_tris.size() * sizeof(Triangle));
 
@@ -976,7 +1123,11 @@ double bvh_articulated(const std::string& robot_urdf_path,
     cudaMalloc((void**)&d_LinkOffset, (num_links + 1) * sizeof(int));
     cudaMalloc((void**)&d_LinkVertOffset, (num_links + 1) * sizeof(int));
     cudaMalloc((void**)&d_LinkTriOffset, (num_links + 1) * sizeof(int));
-    cudaMalloc((void**)&d_Joints, N * sizeof(JointParams));
+    if (layout == NodeLayout::QuatSAT) {
+        cudaMalloc((void**)&d_JointsQ, N * sizeof(JointParamsQuat));
+    } else {
+        cudaMalloc((void**)&d_Joints, N * sizeof(JointParams));
+    }
     cudaMalloc((void**)&d_Conf, num_confs * sizeof(articulated_conf<N>));
     cudaMalloc((void**)&d_disjoint, num_words * sizeof(uint32_t));
     cudaMalloc((void**)&d_next_conf, sizeof(uint32_t));
@@ -985,8 +1136,11 @@ double bvh_articulated(const std::string& robot_urdf_path,
     if (layout == NodeLayout::Matrix) {
         checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
     }
-    checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    if (needsSplitArrays) {
+        checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Obs_dim, obs_BVH.pDim, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Obs_a, obs_BVH.pA, obs_BVH.size * sizeof(float), cudaMemcpyHostToDevice));
+    }
     if (obs16) {
         checkCudaMem(cudaMemcpy(d_Obs_first_child16, obs_first_child16.data(), obs_BVH.size * sizeof(int16_t), cudaMemcpyHostToDevice));
     } else {
@@ -994,19 +1148,20 @@ double bvh_articulated(const std::string& robot_urdf_path,
     }
     checkCudaMem(cudaMemcpy(d_Obs_verts, obs_mesh.vertices.data(), obs_mesh.vertices.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Obs_tris, obs_mesh.triangles.data(), obs_mesh.triangles.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Obs_a, obs_BVH.pA, obs_BVH.size * sizeof(float), cudaMemcpyHostToDevice));
 
     if (layout == NodeLayout::Matrix) {
         checkCudaMem(cudaMemcpy(d_Rob_R, rob_R.data(), rob_R.size() * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
     }
-    checkCudaMem(cudaMemcpy(d_Rob_T, rob_T.data(), rob_T.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Rob_dim, rob_dim.data(), rob_dim.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+    if (needsSplitArrays) {
+        checkCudaMem(cudaMemcpy(d_Rob_T, rob_T.data(), rob_T.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Rob_dim, rob_dim.data(), rob_dim.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
+        checkCudaMem(cudaMemcpy(d_Rob_a, rob_a.data(), rob_a.size() * sizeof(float), cudaMemcpyHostToDevice));
+    }
     if (rob16) {
         checkCudaMem(cudaMemcpy(d_Rob_first_child16, rob_first_child16.data(), rob_first_child.size() * sizeof(int16_t), cudaMemcpyHostToDevice));
     } else {
         checkCudaMem(cudaMemcpy(d_Rob_first_child32, rob_first_child.data(), rob_first_child.size() * sizeof(int32_t), cudaMemcpyHostToDevice));
     }
-    checkCudaMem(cudaMemcpy(d_Rob_a, rob_a.data(), rob_a.size() * sizeof(float), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_verts, rob_verts.data(), rob_verts.size() * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_Rob_tris, rob_tris.data(), rob_tris.size() * sizeof(Triangle), cudaMemcpyHostToDevice));
 
@@ -1026,7 +1181,11 @@ double bvh_articulated(const std::string& robot_urdf_path,
     checkCudaMem(cudaMemcpy(d_LinkOffset, link_offset.data(), (num_links + 1) * sizeof(int), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_LinkVertOffset, link_vert_offset.data(), (num_links + 1) * sizeof(int), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_LinkTriOffset, link_tri_offset.data(), (num_links + 1) * sizeof(int), cudaMemcpyHostToDevice));
-    checkCudaMem(cudaMemcpy(d_Joints, joints.data(), N * sizeof(JointParams), cudaMemcpyHostToDevice));
+    if (layout == NodeLayout::QuatSAT) {
+        checkCudaMem(cudaMemcpy(d_JointsQ, joints_q.data(), N * sizeof(JointParamsQuat), cudaMemcpyHostToDevice));
+    } else {
+        checkCudaMem(cudaMemcpy(d_Joints, joints.data(), N * sizeof(JointParams), cudaMemcpyHostToDevice));
+    }
     checkCudaMem(cudaMemcpy(d_Conf, confs.data(), num_confs * sizeof(articulated_conf<N>), cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
 
@@ -1090,6 +1249,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
         r.linkVertOffset = d_LinkVertOffset;
         r.linkTriOffset = d_LinkTriOffset;
         r.joints = d_Joints;
+        r.jointsQ = d_JointsQ;
         r.verts = d_Rob_verts;
         r.tris = d_Rob_tris;
         return r;
@@ -1186,8 +1346,11 @@ double bvh_articulated(const std::string& robot_urdf_path,
     }
 
     if (layout == NodeLayout::Matrix) cudaFree(d_R_obs);
-    cudaFree(d_T_obs);
-    cudaFree(d_Obs_dim);
+    if (needsSplitArrays) {
+        cudaFree(d_T_obs);
+        cudaFree(d_Obs_dim);
+        cudaFree(d_Obs_a);
+    }
     if (obs16) {
         cudaFree(d_Obs_first_child16);
     } else {
@@ -1195,16 +1358,17 @@ double bvh_articulated(const std::string& robot_urdf_path,
     }
     cudaFree(d_Obs_verts);
     cudaFree(d_Obs_tris);
-    cudaFree(d_Obs_a);
     if (layout == NodeLayout::Matrix) cudaFree(d_Rob_R);
-    cudaFree(d_Rob_T);
-    cudaFree(d_Rob_dim);
+    if (needsSplitArrays) {
+        cudaFree(d_Rob_T);
+        cudaFree(d_Rob_dim);
+        cudaFree(d_Rob_a);
+    }
     if (rob16) {
         cudaFree(d_Rob_first_child16);
     } else {
         cudaFree(d_Rob_first_child32);
     }
-    cudaFree(d_Rob_a);
     cudaFree(d_Rob_verts);
     cudaFree(d_Rob_tris);
     if (d_Obs_Rq) cudaFree(d_Obs_Rq);
@@ -1216,7 +1380,8 @@ double bvh_articulated(const std::string& robot_urdf_path,
     cudaFree(d_LinkOffset);
     cudaFree(d_LinkVertOffset);
     cudaFree(d_LinkTriOffset);
-    cudaFree(d_Joints);
+    if (d_Joints) cudaFree(d_Joints);
+    if (d_JointsQ) cudaFree(d_JointsQ);
     cudaFree(d_Conf);
     cudaFree(d_disjoint);
     cudaFree(d_next_conf);
