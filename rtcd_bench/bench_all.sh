@@ -22,11 +22,14 @@ if [ ! -x "$REPO/rtcd-bench" ]; then
 fi
 
 # ---- 1. robo-check (GPU) + FCL ground truth + per-pose labels ---------------
+# quatSAT single cell (--kernel-mode 64): the production layout, one CSV row
+# per scene (the default 4-cell AB loop writes one row per variant).
 echo "===== robo-check (GPU) + FCL ground truth ====="
 : > results/robocheck.csv
 : > results/fcl.csv
 for s in $SCENES; do
     out=$((cd "$REPO" && ./rtcd-bench --scene "$s" --nposes "$NPOSES" --repeat 3 \
+        --kernel-mode 64 \
         --csv "$HERE/results/robocheck.csv" \
         --dump-labels "$HERE/results/labels_${s}.bin") 2>&1)
     echo "$out" | grep -E "Wrote|FP/FN check|BATCH ${NPOSES}" || echo "$out" | tail -5

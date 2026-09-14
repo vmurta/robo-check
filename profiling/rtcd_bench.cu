@@ -1080,14 +1080,19 @@ int main(int argc, char** argv) {
         for (int i = 0; i < nCells; ++i) {
             const double avgMs = totalMs[i] / repeat;
             const double usPerPose = avgMs * 1000.0 / (double)batch;
-            std::cout << "BATCH " << batch << " [" << kVariantName[i] << "]: avg kernel " << avgMs
+            // Name the cell after the mode it actually ran (with --kernel-mode
+            // the cell mode differs from the default variant list).
+            const int cellMode = (kernelModeOverride >= 0) ? kernelModeOverride : kVariantMode[i];
+            const char* kName = (cellMode == 0) ? "base" : (cellMode == 4) ? "quat"
+                              : (cellMode == 8) ? "vecR" : (cellMode == 12) ? "quat+TD"
+                              : (cellMode == 32) ? "1bsm" : (cellMode == 16) ? "2bsm"
+                              : (cellMode == 64) ? "quatSAT" : (cellMode == 192) ? "quatSAT-G1"
+                              : (cellMode == 320) ? "quatSAT-G2" : (cellMode == 448) ? "quatSAT-Gobs"
+                              : kVariantName[i];
+            std::cout << "BATCH " << batch << " [" << kName << "]: avg kernel " << avgMs
                       << " ms -> " << usPerPose << " us/pose (best " << bestMs[i] * 1000.0 / batch
                       << " us/pose)" << std::endl;
             if (csv.is_open()) {
-                const char* kName = (kVariantMode[i] == 0) ? "base" : (kVariantMode[i] == 4) ? "quat"
-                                  : (kVariantMode[i] == 8) ? "vecR" : (kVariantMode[i] == 12) ? "quat+TD"
-                                  : (kVariantMode[i] == 32) ? "1bsm" : (kVariantMode[i] == 16) ? "2bsm"
-                                  : (kVariantMode[i] == 64) ? "quatSAT" : kVariantName[i];
                 csv << scene << ",robo-check-bvh-" << kName << "," << batch << "," << nPoses
                     << "," << avgMs << "," << usPerPose << "\n";
             }

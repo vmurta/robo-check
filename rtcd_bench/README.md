@@ -49,26 +49,29 @@ python3 merge_results.py
 ## Results (8192 poses, RTX 5070 Ti; FCL ground truth: 0 FP/FN baseline)
 
 cuRobo is run with `collision_activation_distance=0.02` (2 cm sphere
-inflation), its intended safety margin, which makes it conservative (FN=0):
+inflation), its intended safety margin, which makes it conservative (FN=0).
+Timing is scene-only (FK + scene collision distance; self-collision is not
+computed at all) to match robo-check/FCL, which check the world only — an A/B
+with the combined scene+self kernel showed no measurable difference.
 
-| scene  | method          | us/pose | +verify | FP  | FN  |
-|--------|-----------------|--------:|--------:|----:|----:|
-| simple | robo-check-bvh  |   3.04  |    -    |  0  |  0  |
-| simple | curobo-default  |   0.73  |  14.62  | 569 |  0  |
-| simple | curobo-links17  |   0.55  |  16.54  | 359 |  0  |
-| simple | fcl-cpu         |  19.40  |    -    |  -  |  -  |
-| shelf  | robo-check-bvh  |   3.51  |    -    |  0  |  0  |
-| shelf  | curobo-default  |   1.58  |  17.68  | 534 |  0  |
-| shelf  | curobo-links17  |   1.03  |  16.68  | 345 |  0  |
-| shelf  | fcl-cpu         |  21.37  |    -    |  -  |  -  |
-| dense  | robo-check-bvh  |   6.17  |    -    |  0  |  0  |
-| dense  | curobo-default  |   1.72  |  20.58  | 533 |  0  |
-| dense  | curobo-links17  |   1.13  |  17.85  | 346 |  0  |
-| dense  | fcl-cpu         |  22.66  |    -    |  -  |  -  |
-| rtcc   | robo-check-bvh  |   4.80  |    -    |  0  |  0  |
-| rtcc   | curobo-default  |   1.64  |  21.77  | 533 |  0  |
-| rtcc   | curobo-links17  |   1.18  |  17.09  | 346 |  0  |
-| rtcc   | fcl-cpu         |  23.43  |    -    |  -  |  -  |
+| scene  | method            | us/pose | +verify | FP  | FN  |
+|--------|-------------------|--------:|--------:|----:|----:|
+| simple | robo-check (quatSAT) |   3.07  |    -    |  0  |  0  |
+| simple | curobo-default    |   0.76  |  15.23  | 569 |  0  |
+| simple | curobo-links17    |   0.53  |  14.39  | 359 |  0  |
+| simple | fcl-cpu           |  17.02  |    -    |  -  |  -  |
+| shelf  | robo-check (quatSAT) |   4.52  |    -    |  0  |  0  |
+| shelf  | curobo-default    |   1.67  |  17.84  | 534 |  0  |
+| shelf  | curobo-links17    |   1.10  |  17.51  | 345 |  0  |
+| shelf  | fcl-cpu           |  20.83  |    -    |  -  |  -  |
+| dense  | robo-check (quatSAT) |   6.53  |    -    |  0  |  0  |
+| dense  | curobo-default    |   1.70  |  17.80  | 533 |  0  |
+| dense  | curobo-links17    |   1.17  |  17.74  | 346 |  0  |
+| dense  | fcl-cpu           |  22.28  |    -    |  -  |  -  |
+| rtcc   | robo-check (quatSAT) |   5.29  |    -    |  0  |  0  |
+| rtcc   | curobo-default    |   1.68  |  18.27  | 533 |  0  |
+| rtcc   | curobo-links17    |   1.14  |  17.71  | 346 |  0  |
+| rtcc   | fcl-cpu           |  22.96  |    -    |  -  |  -  |
 
 Columns:
 - **us/pose** — framework kernel time per pose (full GPU pipeline for

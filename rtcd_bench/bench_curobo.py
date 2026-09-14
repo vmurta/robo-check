@@ -9,6 +9,8 @@ Same setup as robo-check's rtcd_bench.cu:
     rtcd_bench.cu makeScene(), meshes merged with world translation baked in)
   - ground truth: FCL per-pose labels dumped by
     `./rtcd-bench --scene <scene> --nposes N --dump-labels <file>`
+  - fair timing: scene collision distance ONLY (robo-check and FCL do not
+    check self-collision; the self distance is never computed).
 
 Usage:
   python bench_curobo.py --scene shelf --poses data/rtcd/panda8192.bin \
@@ -223,10 +225,17 @@ def main():
     device = torch.device("cuda:0")
     q_all = torch.as_tensor(poses, dtype=torch.float32, device=device)
 
+    # Fair comparison: robo-check and the FCL ground truth check scene
+    # collisions only, so the timed cuRobo call is scene-only (FK + scene
+    # distance; no self-collision distance is computed at all).
+    def run_checker(q):
+        state = checker.get_kinematics(q)
+        return checker.get_collision_distance(state)
+
     # warmup + calibrate collision threshold (distance convention)
     warm_q = q_all[: min(256, q_all.shape[0])].view(-1, 1, 7)
     for _ in range(3):
-        d_w, d_s = checker.get_scene_self_collision_distance_from_joints(warm_q)
+        run_checker(warm_q)
     torch.cuda.synchronize()
 
     rows = []
@@ -241,7 +250,7 @@ def main():
         times = []
         for _ in range(args.repeat):
             t0 = time.perf_counter()
-            d_w, d_s = checker.get_scene_self_collision_distance_from_joints(q)
+            d_w = run_checker(q)
             torch.cuda.synchronize()
             times.append((time.perf_counter() - t0) * 1e3)
         avg_ms = float(np.mean(times))
