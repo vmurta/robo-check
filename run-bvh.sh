@@ -96,6 +96,7 @@ for model_dir in data/configurations/alpha data/configurations/octahedron data/c
 
         # Run BVH ITERATIONS times with taskset
         for iter in $(seq 1 "$ITERATIONS"); do
+            echo "iter: $iter"
             # Use taskset to bind to CPU 0 (you can modify the mask as needed)
             # taskset -c 0 binds to the first CPU core
             # command="taskset -c 2 ./BVH --algo \"$ALGO\" --dry-run --cpu-check \"$ROBOT\" \"$OBSTACLE\" \"$conf_file\""
