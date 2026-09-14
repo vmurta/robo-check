@@ -237,8 +237,12 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
     //     warp-local queue
     //
     // Caching:
-    //   - s_pend_mask: root-check verdicts; the serial phase never re-tests
-    //     root boxes and skips disjoint links.
+    //   - s_pend_root_mask: per-link root-overlap verdicts from the parallel
+    //     phase (bit l = link l's root OBB overlaps the scene root OBB -- a
+    //     prefilter, NOT a collision verdict). The serial phase never
+    //     re-tests root boxes: links with a clear bit are provably
+    //     collision-free (the root OBBs contain all their geometry) and are
+    //     skipped; links with a set bit get the full traversal.
     //   - the FK transform matrices are computed ONCE per config by its
     //     owner lane (incremental accumulators held in registers) and
     //     broadcast to the whole warp with __shfl_sync at each link; no
@@ -272,12 +276,14 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
     typedef typename ArticQueueIdx<RobChildT>::Q QRob;
     typedef typename ArticQueueIdx<ObsChildT>::Q QObs;
 
-    // Per-warp pending-config queues and counters. s_pend_mask holds one bit
-    // per link (at most N+1 <= 8 links) and s_pend_lane holds the owner lane
-    // (0-31); both are uint8_t to shrink the static shared footprint.
-    static_assert(N + 1 <= 8, "s_pend_mask is uint8_t: at most 8 links supported");
+    // Per-warp pending-config queues and counters. s_pend_root_mask holds one
+    // bit per link (at most N+1 <= 8 links): bit l = link l's root OBB
+    // overlaps the scene root OBB (parallel-phase prefilter, NOT a collision
+    // verdict). s_pend_lane holds the owner lane (0-31); both are uint8_t to
+    // shrink the static shared footprint.
+    static_assert(N + 1 <= 8, "s_pend_root_mask is uint8_t: at most 8 links supported");
     __shared__ uint32_t s_pend_idx[NWARP][32];
-    __shared__ uint8_t s_pend_mask[NWARP][32];
+    __shared__ uint8_t s_pend_root_mask[NWARP][32];
     __shared__ uint8_t s_pend_lane[NWARP][32];
     __shared__ uint32_t s_num_pend[NWARP];
     __shared__ uint32_t s_disjoint[NWARP];
@@ -326,7 +332,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
         // ---- parallel outermost check: one config per lane ---------------
         {
             const uint32_t index = warp_start + lane;
-            uint8_t mask = 0;
+            uint8_t root_mask = 0;
             if (index < num_confs) {
                 const articulated_conf<N> conf = pConf[index];
 
@@ -346,7 +352,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                                                     qRoot, robRootT,
                                                     qLink, link_T, qB, T);
                             if (obbOverlapQuat(qB, T, a_root, robRootDim, epsilon)) {
-                                mask |= (1u << l);
+                                root_mask |= (1u << l);
                             }
                         } else {
                             loadNode(rob.nodes, rob_root, robRootR, robRootT, robRootDim, robRootA);
@@ -354,7 +360,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                                                     robRootR, robRootT,
                                                     link_R, link_T, B, T);
                             if (obbOverlapAbs(a_root, robRootDim, B, epsilon, T)) {
-                                mask |= (1u << l);
+                                root_mask |= (1u << l);
                             }
                         }
                     }
@@ -368,12 +374,12 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                     }
                 }
 
-                if (mask == 0) {
+                if (root_mask == 0) {
                     atomicOr(&s_disjoint[warp], 1u << lane);
                 } else {
                     const uint32_t pos = atomicAdd(&s_num_pend[warp], 1);
                     s_pend_idx[warp][pos] = index;
-                    s_pend_mask[warp][pos] = (uint8_t)mask;
+                    s_pend_root_mask[warp][pos] = (uint8_t)root_mask;
                     s_pend_lane[warp][pos] = (uint8_t)lane;
                 }
             }
@@ -387,7 +393,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
         // ---- per-warp serial phase: each warp traverses its pending configs
         for (uint32_t k = 0; k < s_num_pend[warp]; ++k) {
             const uint32_t index = s_pend_idx[warp][k];
-            const uint32_t mask = s_pend_mask[warp][k];
+            const uint32_t root_mask = s_pend_root_mask[warp][k];
             const uint32_t owner = s_pend_lane[warp][k];
             const articulated_conf<N> conf = pConf[index];
 
@@ -423,7 +429,8 @@ __device__ __forceinline__ void d_bvh_articulated_body(const ObstacleSoA<ObsChil
                 }
                 //TODO: what is the point of the hash mesh thing here?
                 const bool hasMesh = (rob.linkOffset[l + 1] > rob.linkOffset[l]);
-                const bool rootHit = ((mask >> l) & 1u) != 0;
+                
+                const bool rootHit = ((root_mask >> l) & 1u) != 0;
 
                 // Seed the frontier with the (link root, scene root) pair;
                 // root overlap was proven in the parallel phase (mask).
