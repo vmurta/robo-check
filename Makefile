@@ -1,6 +1,8 @@
 NVCC := nvcc
 
-COMMON_FLAGS := -lineinfo -Wno-deprecated-declarations --expt-relaxed-constexpr -diag-suppress 20012 -lfcl -lccd
+# -arch=native: CUDA 13 moved some intrinsics behind __CUDA_ARCH__ >= 800
+# guards, so a default-arch build fails; native also avoids runtime PTX-JIT.
+COMMON_FLAGS := -arch=native -lineinfo -Wno-deprecated-declarations --expt-relaxed-constexpr -diag-suppress 20012 -lfcl -lccd
 OPT_FLAGS := -O3
 DEBUG_FLAGS := -G -g -O0 -DLOCAL_TESTING=1
 

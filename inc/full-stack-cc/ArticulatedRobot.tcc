@@ -171,9 +171,8 @@ static __device__ bool linkCollides(const Eigen::Matrix3f& link_R, const Eigen::
 //
 // Narrow phase = Chang & Kim 2009 paperTriTri in rectangle-local coordinates
 // (verdict > 0 hit / 0 free / < 0 unreliable); unreliable pairs fall back to
-// the full world-frame test triangles_valid_f. d_tri_stats counts
-// [pairs, hits, fallbacks] per run so the harness can verify paperTriTri is
-// the primary test. Templated on the child/queue index types.
+// the full world-frame test triangles_valid_f. Templated on the child/queue
+// index types.
 template <typename RobChildT, typename ObsChildT, typename QRob, typename QObs, int LAYOUT>
 static __device__ __noinline__ void d_articulated_tri_phase(
     const QRob* triRob, const QObs* triObs, const int numTri,
@@ -183,9 +182,8 @@ static __device__ __noinline__ void d_articulated_tri_phase(
     const Eigen::Vector3f* pObs_verts, const Triangle* pObs_tris,
     const NodePtrs robN, const RobChildT* pRob_first_child,
     const Eigen::Vector3f* pRob_verts, const Triangle* pRob_tris,
-    bool* s_collision, unsigned long long* d_tri_stats) {
+    bool* s_collision) {
     const int lane = threadIdx.x & 31;
-    unsigned int cnt_pairs = 0, cnt_hit = 0, cnt_fallback = 0;
     for (int t = lane; t < numTri; t += 32) {
         if (*s_collision) {
             break;
@@ -209,12 +207,9 @@ static __device__ __noinline__ void d_articulated_tri_phase(
         const int verdict = paperTriTri(dimObs(0), dimObs(1), aObs,
                                         dimRob(0), dimRob(1), aRob,
                                         B, T);
-        ++cnt_pairs;
         if (verdict > 0) {
             *s_collision = true;
-            ++cnt_hit;
         } else if (verdict < 0) {
-            ++cnt_fallback;
             const Triangle& rt = pRob_tris[rob_tri];
             const Triangle& ot = pObs_tris[obs_tri];
             const Eigen::Vector3f rv0 = link_R * pRob_verts[linkVertOff + rt.v1] + link_T;
@@ -225,17 +220,6 @@ static __device__ __noinline__ void d_articulated_tri_phase(
                 *s_collision = true;
             }
         }
-    }
-    // Warp-reduce the per-lane counters (all lanes converged after the loop;
-    // the early break is warp-uniform since s_collision is shared) and flush
-    // once per phase call.
-    const unsigned int total = __reduce_add_sync(0xffffffffu, cnt_pairs);
-    const unsigned int hits  = __reduce_add_sync(0xffffffffu, cnt_hit);
-    const unsigned int falls = __reduce_add_sync(0xffffffffu, cnt_fallback);
-    if (lane == 0) {
-        atomicAdd(&d_tri_stats[0], (unsigned long long)total);
-        atomicAdd(&d_tri_stats[1], (unsigned long long)hits);
-        atomicAdd(&d_tri_stats[2], (unsigned long long)falls);
     }
 }
 
@@ -252,8 +236,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                                   const JointParams* pJoints,
                                   const articulated_conf<N>* pConf, size_t num_confs,
                                   uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* d_phase, unsigned long long* overflowCounter,
-                                  unsigned long long* d_tri_stats) {
+                                  unsigned long long* overflowCounter) {
     // Config-per-warp design: 256-thread blocks, one configuration per lane
     // per batch pull. Each warp owns its 32 configurations and runs its
     // serial phases independently with __syncwarp (no block-wide barrier
@@ -292,7 +275,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
     }
 
     constexpr int BLOCK_SIZE = 256;
-    constexpr int BATCH = BLOCK_SIZE; // configs per batch pull (one per lane)
+    constexpr int WARP_BATCH = 32;   // configs per warp pull (one per lane)
     constexpr int NWARP = 8;
     constexpr int MAX_BUFFER = 256;  // per-warp box-pair frontier entries
     constexpr int MAX_TRI = 96;      // per-warp deferred candidates
@@ -301,8 +284,6 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 
     typedef typename ArticQueueIdx<RobChildT>::Q QRob;
     typedef typename ArticQueueIdx<ObsChildT>::Q QObs;
-
-    __shared__ uint32_t s_batch_start;
 
     // Per-warp pending-config queues and counters.
     __shared__ uint32_t s_pend_idx[NWARP][32];
@@ -333,23 +314,23 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
     const int16_t obs_child_idx = lane & 0x3;
 
     while (true) {
-        __syncthreads();
-        const unsigned long long t_phase0 = (lane == 0) ? globaltimer() : 0;
-        if (threadIdx.x == 0) {
-            s_batch_start = atomicAdd(g_next_conf, BATCH);
+        // Per-warp batch pull: each warp grabs one 32-config word straight
+        // from the global queue and broadcasts it within the warp. No
+        // block-wide shared state, so no __syncthreads anywhere in the
+        // kernel: warps run fully independently (fine-grained pulling also
+        // balances the work, since a warp never waits for siblings).
+        uint32_t warp_start = 0;
+        if (lane == 0) {
+            warp_start = atomicAdd(g_next_conf, WARP_BATCH);
         }
-        __syncthreads();
-        const uint32_t batch_start = s_batch_start;
-        if (batch_start >= num_confs) {
-            if (lane == 0) {
-                atomicAdd(&d_phase[3], 1);
-            }
+        warp_start = __shfl_sync(0xffffffffu, warp_start, 0);
+        if (warp_start >= num_confs) {
             return;
         }
 
         // ---- parallel outermost check: one config per lane ---------------
         {
-            const uint32_t index = batch_start + threadIdx.x;
+            const uint32_t index = warp_start + lane;
             uint32_t mask = 0;
             if (index < num_confs) {
                 const articulated_conf<N> conf = pConf[index];
@@ -391,20 +372,17 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
             }
             __syncwarp();
             if (lane == 0) {
-                pdisjoint[(batch_start >> 5) + warp] |= s_disjoint[warp];
+                pdisjoint[warp_start >> 5] |= s_disjoint[warp];
                 s_disjoint[warp] = 0;
-                atomicAdd(&d_phase[0], globaltimer() - t_phase0);
             }
         }
 
         // ---- per-warp serial phase: each warp traverses its pending configs
         for (uint32_t k = 0; k < s_num_pend[warp]; ++k) {
-            const unsigned long long t_cfg = (lane == 0) ? globaltimer() : 0;
             const uint32_t index = s_pend_idx[warp][k];
             const uint32_t mask = s_pend_mask[warp][k];
             const uint32_t owner = s_pend_lane[warp][k];
             const articulated_conf<N> conf = pConf[index];
-            unsigned long long tri_ns = 0;
 
             s_collision[warp] = false;
             __syncwarp();
@@ -453,26 +431,8 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
                         // TRI_BATCH accumulate (bounds the buffer, gives
                         // early exit at this granularity).
                         if (s_num_tri[warp] >= TRI_BATCH) {
-                            const unsigned long long t_tri0 = (lane == 0) ? globaltimer() : 0;
-                            d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>(
-
-                                s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp],
-
-                                link_R, link_T,
-
-                                pLinkVertOffset[l], pLinkTriOffset[l],
-
-                                obsN, pObs_first_child,
-
-                                pObs_verts, pObs_tris,
-
-                                robN, pRob_first_child,
-
-                                pRob_verts, pRob_tris,
-
-                                &s_collision[warp], d_tri_stats);
+                            d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>( s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp], link_R, link_T, pLinkVertOffset[l], pLinkTriOffset[l], obsN, pObs_first_child, pObs_verts, pObs_tris, robN, pRob_first_child, pRob_verts, pRob_tris, &s_collision[warp]);
                             if (lane == 0) {
-                                tri_ns += globaltimer() - t_tri0;
                                 s_num_tri[warp] = 0;
                             }
                             continue;
@@ -590,27 +550,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 
                     // Final triangle phase for the leftover candidates.
                     if (!s_collision[warp] && s_num_tri[warp] > 0) {
-                        const unsigned long long t_tri0 = (lane == 0) ? globaltimer() : 0;
-                        d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>(
-
-                            s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp],
-
-                            link_R, link_T,
-
-                            pLinkVertOffset[l], pLinkTriOffset[l],
-
-                            obsN, pObs_first_child,
-
-                            pObs_verts, pObs_tris,
-
-                            robN, pRob_first_child,
-
-                            pRob_verts, pRob_tris,
-
-                            &s_collision[warp], d_tri_stats);
-                        if (lane == 0) {
-                            tri_ns += globaltimer() - t_tri0;
-                        }
+                        d_articulated_tri_phase<RobChildT, ObsChildT, QRob, QObs, LAYOUT>( s_tri_rob[warp], s_tri_obs[warp], s_num_tri[warp], link_R, link_T, pLinkVertOffset[l], pLinkTriOffset[l], obsN, pObs_first_child, pObs_verts, pObs_tris, robN, pRob_first_child, pRob_verts, pRob_tris, &s_collision[warp]);
                     }
                     __syncwarp();
                     if (lane == 0) {
@@ -634,11 +574,6 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
             } // links
 
             __syncwarp();
-            const unsigned long long t_end = (lane == 0) ? globaltimer() : 0;
-            if (lane == 0) {
-                atomicAdd(&d_phase[1], (t_end - t_cfg) - tri_ns);
-                atomicAdd(&d_phase[2], tri_ns);
-            }
             if (!s_collision[warp]) {
                 if (lane == 0) {
                     s_disjoint[warp] |= 1u << (index & 31);
@@ -649,7 +584,7 @@ __device__ __forceinline__ void d_bvh_articulated_body(const NodePtrs obsN,
 
         __syncwarp();
         if (lane == 0) {
-            pdisjoint[(batch_start >> 5) + warp] |= s_disjoint[warp];
+            pdisjoint[warp_start >> 5] |= s_disjoint[warp];
             s_disjoint[warp] = 0;
             s_num_pend[warp] = 0;
         }
@@ -675,13 +610,12 @@ __global__ void d_bvh_articulated(const NodePtrs obsN,
                                   const JointParams* pJoints,
                                   const articulated_conf<N>* pConf, size_t num_confs,
                                   uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* d_phase, unsigned long long* overflowCounter,
-                                  unsigned long long* d_tri_stats) {
+                                  unsigned long long* overflowCounter) {
     d_bvh_articulated_body<N, RobChildT, ObsChildT, RESTRICT_PTRS, LAYOUT>(
         obsN, pObs_first_child, num_obs_nodes, pObs_verts, pObs_tris,
         robN, pRob_first_child, pRob_verts, pRob_tris,
         pLinkOffset, pLinkVertOffset, pLinkTriOffset, num_links,
-        pJoints, pConf, num_confs, pdisjoint, g_next_conf, d_phase, overflowCounter, d_tri_stats);
+        pJoints, pConf, num_confs, pdisjoint, g_next_conf, overflowCounter);
 }
 
 template <size_t N, typename RobChildT, typename ObsChildT, bool RESTRICT_PTRS, int LAYOUT>
@@ -697,13 +631,12 @@ __global__ void __launch_bounds__(256, 2) d_bvh_articulated_2bsm(const NodePtrs 
                                   const JointParams* pJoints,
                                   const articulated_conf<N>* pConf, size_t num_confs,
                                   uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* d_phase, unsigned long long* overflowCounter,
-                                  unsigned long long* d_tri_stats) {
+                                  unsigned long long* overflowCounter) {
     d_bvh_articulated_body<N, RobChildT, ObsChildT, RESTRICT_PTRS, LAYOUT>(
         obsN, pObs_first_child, num_obs_nodes, pObs_verts, pObs_tris,
         robN, pRob_first_child, pRob_verts, pRob_tris,
         pLinkOffset, pLinkVertOffset, pLinkTriOffset, num_links,
-        pJoints, pConf, num_confs, pdisjoint, g_next_conf, d_phase, overflowCounter, d_tri_stats);
+        pJoints, pConf, num_confs, pdisjoint, g_next_conf, overflowCounter);
 }
 
 
@@ -950,9 +883,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
     articulated_conf<N>* d_Conf;
     uint32_t* d_disjoint;
     uint32_t* d_next_conf;
-    unsigned long long* d_phase;
     unsigned long long* d_overflow;
-    unsigned long long* d_tri_stats;
 
     cudaEventRecord(start, 0);
 
@@ -1002,9 +933,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
     cudaMalloc((void**)&d_Conf, num_confs * sizeof(articulated_conf<N>));
     cudaMalloc((void**)&d_disjoint, num_words * sizeof(uint32_t));
     cudaMalloc((void**)&d_next_conf, sizeof(uint32_t));
-    cudaMalloc((void**)&d_phase, 4 * sizeof(unsigned long long));
     cudaMalloc((void**)&d_overflow, sizeof(unsigned long long));
-    cudaMalloc((void**)&d_tri_stats, 3 * sizeof(unsigned long long));
 
     checkCudaMem(cudaMemcpy(d_R_obs, obs_BVH.pR, obs_BVH.size * sizeof(Eigen::Matrix3f), cudaMemcpyHostToDevice));
     checkCudaMem(cudaMemcpy(d_T_obs, obs_BVH.pT, obs_BVH.size * sizeof(Eigen::Vector3f), cudaMemcpyHostToDevice));
@@ -1087,7 +1016,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
                 d_LinkOffset, d_LinkVertOffset, d_LinkTriOffset,
                 num_links,
                 d_Joints, d_Conf, launchConfs,
-                d_disjoint, d_next_conf, d_phase, d_overflow, d_tri_stats);
+                d_disjoint, d_next_conf, d_overflow);
         };
         const int16_t* obsFc16 = obs16 ? d_Obs_first_child16 : nullptr;
         const int32_t* obsFc32 = obs16 ? nullptr : d_Obs_first_child32;
@@ -1127,10 +1056,8 @@ double bvh_articulated(const std::string& robot_urdf_path,
 
     if (dry_run) {
         checkCudaMem(cudaMemset(d_next_conf, 0, sizeof(uint32_t)));
-        checkCudaMem(cudaMemset(d_phase, 0, 4 * sizeof(unsigned long long)));
         checkCudaMem(cudaMemset(d_disjoint, 0, num_words * sizeof(uint32_t)));
         checkCudaMem(cudaMemset(d_overflow, 0, sizeof(unsigned long long)));
-        checkCudaMem(cudaMemset(d_tri_stats, 0, 3 * sizeof(unsigned long long)));
         // Dry run: warm the kernel with a single batch (256 configs) like
         // bvh_naive, instead of letting one block drain the whole queue.
         const size_t dryConfs = (num_confs < 256) ? num_confs : 256;
@@ -1141,10 +1068,8 @@ double bvh_articulated(const std::string& robot_urdf_path,
     }
 
     checkCudaMem(cudaMemset(d_next_conf, 0, sizeof(uint32_t)));
-    checkCudaMem(cudaMemset(d_phase, 0, 4 * sizeof(unsigned long long)));
     checkCudaMem(cudaMemset(d_disjoint, 0, num_words * sizeof(uint32_t)));
     checkCudaMem(cudaMemset(d_overflow, 0, sizeof(unsigned long long)));
-    checkCudaMem(cudaMemset(d_tri_stats, 0, 3 * sizeof(unsigned long long)));
     cudaEventRecord(start, 0);
     launch(gridSize, num_confs);
     cudaEventRecord(stop, 0);
@@ -1153,31 +1078,12 @@ double bvh_articulated(const std::string& robot_urdf_path,
     std::cout << "Articulated BVH GPU kernel took " << duration << " ms for "
               << num_confs << " configurations." << std::endl;
 
-    uint64_t h_phase[4];
-    checkCudaMem(cudaMemcpy(h_phase, d_phase, 4 * sizeof(uint64_t), cudaMemcpyDeviceToHost));
-    const double ns_per_ms = 1e6;
-    const double nblocks = (h_phase[3] > 0) ? (double)h_phase[3] : 1.0;
-    std::cout << "PHASES ms (avg per block, " << h_phase[3] << " blocks, block-serial, not wall-clock): init="
-              << (double)h_phase[0] / ns_per_ms / nblocks
-              << " traversal=" << (double)h_phase[1] / ns_per_ms / nblocks
-              << " triangles=" << (double)h_phase[2] / ns_per_ms / nblocks << std::endl;
-
     unsigned long long h_overflow = 0;
     checkCudaMem(cudaMemcpy(&h_overflow, d_overflow, sizeof(unsigned long long), cudaMemcpyDeviceToHost));
     if (h_overflow != 0) {
         std::cerr << "WARNING: " << h_overflow
                   << " conservative pending-list overflows (potential false positives)"
                   << std::endl;
-    }
-
-    unsigned long long h_tri_stats[3] = {0, 0, 0};
-    checkCudaMem(cudaMemcpy(h_tri_stats, d_tri_stats, 3 * sizeof(unsigned long long), cudaMemcpyDeviceToHost));
-    if (h_tri_stats[0] > 0) {
-        std::cout << "TRI STATS (paperTriTri): pairs=" << h_tri_stats[0]
-                  << " hit=" << h_tri_stats[1]
-                  << " fallback=" << h_tri_stats[2]
-                  << " (" << 100.0 * (double)h_tri_stats[2] / (double)h_tri_stats[0]
-                  << "% fallback to triangles_valid_f)" << std::endl;
     }
 
     std::unique_ptr<uint32_t[]> disjoint(new uint32_t[num_words]);
@@ -1224,9 +1130,7 @@ double bvh_articulated(const std::string& robot_urdf_path,
     cudaFree(d_Conf);
     cudaFree(d_disjoint);
     cudaFree(d_next_conf);
-    cudaFree(d_phase);
     cudaFree(d_overflow);
-    cudaFree(d_tri_stats);
 
     return duration;
 }

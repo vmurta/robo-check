@@ -228,8 +228,7 @@ __device__ __forceinline__ void loadNode(const NodePtrs& p, int i,
 // d_bvh_articulated: articulated version of d_bvh_naive with the same
 // persistent-block / block-serial traversal strategy. Results are bit-packed
 // in pdisjoint (1 = disjoint/free). overflowCounter counts conservative
-// pending-list overflows (must stay 0). d_tri_stats counts the narrow-phase
-// verdicts ([pairs, hits, fallbacks]; see d_articulated_tri_phase).
+// pending-list overflows (must stay 0).
 //
 // Variants:
 //   RobChildT/ObsChildT = int16_t shrinks child loads/queues per side
@@ -249,8 +248,7 @@ __global__ void d_bvh_articulated(const NodePtrs obsN,
                                   const JointParams* pJoints,
                                   const articulated_conf<N>* pConf, size_t num_confs,
                                   uint32_t* pdisjoint, uint32_t* g_next_conf,
-                                  unsigned long long* d_phase, unsigned long long* overflowCounter,
-                                  unsigned long long* d_tri_stats);
+                                  unsigned long long* overflowCounter);
 
 // Host wrapper mirroring bvh_naive. Builds per-link BVHs from the URDF,
 // allocates device memory, launches d_bvh_articulated<N>, and copies results.
