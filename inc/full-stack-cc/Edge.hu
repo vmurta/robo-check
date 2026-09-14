@@ -1,0 +1,299 @@
+#pragma once
+#include "Utils.h"
+#include "OBB-BVH-naive.hu"
+#include <vector>
+
+// ===========================================================================
+// OMPL-style discrete edge validation types.
+//
+// An edge is a motion from a start state s1 to an end state s2. It is
+// validated by checking nsteps samples along the path for collision, where
+//
+//     nsteps = ceil(distance / longest_valid_segment)
+//
+// and the samples are taken at t = j / nsteps for j in [0, nsteps]. State
+// interpolation is parameterized by EdgeType:
+//
+//   EDGE_TYPE_LINEAR_6D : all six config dims (x, y, z, pitch, yaw, roll)
+//                         interpolated linearly; the Euler triple is
+//                         converted to a unit quaternion per sample.
+//   EDGE_TYPE_SE3_SLERP  : translation lerp + quaternion slerp along the
+//                         shortest arc (constant angular velocity).
+//
+// Rotations are carried both ways: Euler triples for linear-6D and unit
+// quaternions (float4 x, y, z, w, matching the quatSAT storage) for slerp.
+// ===========================================================================
+
+enum EdgeType : uint8_t {
+    EDGE_TYPE_LINEAR_6D = 0,
+    EDGE_TYPE_SE3_SLERP = 1,
+};
+
+// Edge flags (bitmask).
+enum EdgeFlags : uint32_t {
+    EDGE_FLAG_NONE = 0,
+    // Record the parameter t of the first colliding sample (OMPL-style
+    // "first invalid t" motion detail), not just the valid/invalid verdict.
+    EDGE_FLAG_REPORT_FIRST_INVALID_T = 1u << 0,
+};
+
+// Single edge (AoS, host-side build entry; batched into EdgeBatch for the
+// device). Euler angles follow the .conf file order: (pitch, yaw, roll).
+struct Edge {
+    Eigen::Vector3f s_trans, e_trans;   // start/end positions
+    Eigen::Vector3f s_euler, e_euler;   // start/end (pitch, yaw, roll)
+    float4 s_quat, e_quat;              // start/end unit quaternions
+    uint32_t nsteps = 0;                // samples validated along the edge
+    EdgeType type = EDGE_TYPE_LINEAR_6D;
+    uint32_t flags = EDGE_FLAG_NONE;
+};
+
+// SoA batch of edges, ready for H2D upload. Owns its arrays: movable but not
+// copyable (same pattern as OBB_soa/BVNode_soa).
+struct EdgeBatch {
+    Eigen::Vector3f* s_trans;
+    Eigen::Vector3f* e_trans;
+    Eigen::Vector3f* s_euler;
+    Eigen::Vector3f* e_euler;
+    float4* s_quat;
+    float4* e_quat;
+    uint32_t* nsteps;
+    EdgeType* type;
+    uint32_t* flags;
+    size_t size;
+
+    explicit EdgeBatch(size_t n) : size(n) {
+        s_trans = new Eigen::Vector3f[n];
+        e_trans = new Eigen::Vector3f[n];
+        s_euler = new Eigen::Vector3f[n];
+        e_euler = new Eigen::Vector3f[n];
+        s_quat = new float4[n];
+        e_quat = new float4[n];
+        nsteps = new uint32_t[n];
+        type = new EdgeType[n];
+        flags = new uint32_t[n];
+    }
+
+    explicit EdgeBatch(const std::vector<Edge>& edges) : EdgeBatch(edges.size()) {
+        for (size_t i = 0; i < edges.size(); ++i) {
+            set(i, edges[i]);
+        }
+    }
+
+    EdgeBatch(EdgeBatch&& o) noexcept
+        : s_trans(o.s_trans), e_trans(o.e_trans), s_euler(o.s_euler), e_euler(o.e_euler),
+          s_quat(o.s_quat), e_quat(o.e_quat), nsteps(o.nsteps), type(o.type),
+          flags(o.flags), size(o.size) {
+        o.s_trans = o.e_trans = o.s_euler = o.e_euler = nullptr;
+        o.s_quat = o.e_quat = nullptr;
+        o.nsteps = nullptr;
+        o.type = nullptr;
+        o.flags = nullptr;
+        o.size = 0;
+    }
+
+    EdgeBatch& operator=(EdgeBatch&& o) noexcept {
+        if (this != &o) {
+            delete[] s_trans; delete[] e_trans; delete[] s_euler; delete[] e_euler;
+            delete[] s_quat; delete[] e_quat; delete[] nsteps; delete[] type; delete[] flags;
+            s_trans = o.s_trans; e_trans = o.e_trans; s_euler = o.s_euler; e_euler = o.e_euler;
+            s_quat = o.s_quat; e_quat = o.e_quat; nsteps = o.nsteps; type = o.type;
+            flags = o.flags; size = o.size;
+            o.s_trans = o.e_trans = o.s_euler = o.e_euler = nullptr;
+            o.s_quat = o.e_quat = nullptr;
+            o.nsteps = nullptr;
+            o.type = nullptr;
+            o.flags = nullptr;
+            o.size = 0;
+        }
+        return *this;
+    }
+
+    EdgeBatch(const EdgeBatch&) = delete;
+    EdgeBatch& operator=(const EdgeBatch&) = delete;
+
+    ~EdgeBatch() {
+        delete[] s_trans; delete[] e_trans; delete[] s_euler; delete[] e_euler;
+        delete[] s_quat; delete[] e_quat; delete[] nsteps; delete[] type; delete[] flags;
+    }
+
+    void set(size_t index, const Edge& e) {
+        if (index >= size) {
+            throw std::out_of_range("Index out of range");
+        }
+        s_trans[index] = e.s_trans;
+        e_trans[index] = e.e_trans;
+        s_euler[index] = e.s_euler;
+        e_euler[index] = e.e_euler;
+        s_quat[index] = e.s_quat;
+        e_quat[index] = e.e_quat;
+        nsteps[index] = e.nsteps;
+        type[index] = e.type;
+        flags[index] = e.flags;
+    }
+};
+
+// OMPL-style step count from the translation distance and the planner's
+// longest valid segment length (at least one sample interval).
+__host__ __device__ __forceinline__ uint32_t edgeNsteps(const Eigen::Vector3f& s_trans,
+                                                        const Eigen::Vector3f& e_trans,
+                                                        float longest_valid_segment) {
+    const float dist = (e_trans - s_trans).norm();
+    const uint32_t n = (uint32_t)ceilf(dist / longest_valid_segment);
+    return n > 0 ? n : 1;
+}
+
+// Minimum samples per edge (nsteps >= MIN_EDGE_NSTEPS means MIN_EDGE_NSTEPS+1
+// samples). With at least 8 samples, the pooled root-check rounds of
+// d_bvh_edges_collab keep all 32 lanes populated for 8 rounds even on very
+// short edges.
+constexpr uint32_t MIN_EDGE_NSTEPS = 7;
+
+// Normalized lerp between unit quaternions along the shortest arc.
+__host__ __device__ __forceinline__ float4 quatNlerp(const float4& a, const float4& b, float t) {
+    float4 qb = b;
+    if (a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w < 0.0f) {
+        qb.x = -qb.x; qb.y = -qb.y; qb.z = -qb.z; qb.w = -qb.w;
+    }
+    float4 out;
+    out.x = a.x + (qb.x - a.x) * t;
+    out.y = a.y + (qb.y - a.y) * t;
+    out.z = a.z + (qb.z - a.z) * t;
+    out.w = a.w + (qb.w - a.w) * t;
+    const float n = sqrtf(out.x * out.x + out.y * out.y + out.z * out.z + out.w * out.w);
+    out.x /= n; out.y /= n; out.z /= n; out.w /= n;
+    return out;
+}
+
+// Spherical linear interpolation between unit quaternions (shortest arc).
+__host__ __device__ __forceinline__ float4 quatSlerp(const float4& a, const float4& b, float t) {
+    float4 qb = b;
+    float dot = a.x * b.x + a.y * b.y + a.z * b.z + a.w * b.w;
+    if (dot < 0.0f) {
+        qb.x = -qb.x; qb.y = -qb.y; qb.z = -qb.z; qb.w = -qb.w;
+        dot = -dot;
+    }
+    dot = fminf(fmaxf(dot, -1.0f), 1.0f);
+    const float theta = acosf(dot);
+    float4 out;
+    if (theta < 1e-6f) {
+        return quatNlerp(a, b, t);
+    }
+    const float st = sinf(theta);
+    const float wa = sinf((1.0f - t) * theta) / st;
+    const float wb = sinf(t * theta) / st;
+    out.x = wa * a.x + wb * qb.x;
+    out.y = wa * a.y + wb * qb.y;
+    out.z = wa * a.z + wb * qb.z;
+    out.w = wa * a.w + wb * qb.w;
+    return out;
+}
+
+// Sample the edge state at parameter t in [0, 1] as (quat, trans), picking
+// the interpolation scheme the edge type requires. Euler angles are stored
+// in the .conf order (pitch, yaw, roll).
+__host__ __device__ __forceinline__ void interpolateEdgeState(const float4& s_quat, const Eigen::Vector3f& s_trans,
+                                                              const float4& e_quat, const Eigen::Vector3f& e_trans,
+                                                              const Eigen::Vector3f& s_euler, const Eigen::Vector3f& e_euler,
+                                                              EdgeType type, float t,
+                                                              float4& q_out, Eigen::Vector3f& t_out) {
+    t_out = s_trans + (e_trans - s_trans) * t;
+    if (type == EDGE_TYPE_SE3_SLERP) {
+        q_out = quatSlerp(s_quat, e_quat, t);
+    } else {
+        Configuration c;
+        c.x = 0.0f; c.y = 0.0f; c.z = 0.0f;
+        c.pitch = s_euler(0) + (e_euler(0) - s_euler(0)) * t;
+        c.yaw = s_euler(1) + (e_euler(1) - s_euler(1)) * t;
+        c.roll = s_euler(2) + (e_euler(2) - s_euler(2)) * t;
+        q_out = configurationToQuat(c);
+    }
+}
+
+// Host-side edge construction from two configurations. nsteps is derived
+// from the translation distance (OMPL: per-dimension refinement can extend
+// this with an angular term later if needed).
+__host__ __forceinline__ Edge makeEdge(const Configuration& s, const Configuration& e,
+                                       EdgeType type, float longest_valid_segment) {
+    Edge edge;
+    edge.s_trans = Eigen::Vector3f(s.x, s.y, s.z);
+    edge.e_trans = Eigen::Vector3f(e.x, e.y, e.z);
+    edge.s_euler = Eigen::Vector3f(s.pitch, s.yaw, s.roll);
+    edge.e_euler = Eigen::Vector3f(e.pitch, e.yaw, e.roll);
+    edge.s_quat = configurationToQuat(s);
+    edge.e_quat = configurationToQuat(e);
+    edge.nsteps = std::max(edgeNsteps(edge.s_trans, edge.e_trans, longest_valid_segment), MIN_EDGE_NSTEPS);
+    edge.type = type;
+    edge.flags = EDGE_FLAG_NONE;
+    return edge;
+}
+
+// Device-side SoA parameter bundles for the edge kernels (modernized: the
+// kernels take structs instead of a flat parameter list; no device-side
+// profiling counters).
+struct EdgeSoA {
+    const float4* s_quat;
+    const float4* e_quat;
+    const Eigen::Vector3f* s_trans;
+    const Eigen::Vector3f* e_trans;
+    const Eigen::Vector3f* s_euler;
+    const Eigen::Vector3f* e_euler;
+    const uint32_t* nsteps;
+    const EdgeType* type;
+    const uint32_t* flags;
+};
+
+struct EdgeKernelOut {
+    uint32_t* pdisjoint;        // bitpacked results (1 = edge valid)
+    float* pfirst_invalid_t;    // earliest colliding t (host-initialized to -1)
+    uint32_t* g_next_edge;      // global edge work queue
+};
+
+// ===========================================================================
+// d_bvh_edges: edge-validation version of d_bvh_naive (modernized: one warp
+// per block, per-warp work-queue pulls, warp-autonomous, quatSAT math, no
+// device-side profiling). The batch's outermost check runs in parallel (one
+// edge per lane, root-checked at every sample t = j/nsteps); then the warp
+// traverses the pending edges serially, breaking on the first colliding
+// sample.
+//
+// Results are bit-packed in out.pdisjoint (1 = edge valid / all samples
+// free). When EDGE_FLAG_REPORT_FIRST_INVALID_T is set, the t of the first
+// colliding sample is stored in out.pfirst_invalid_t.
+// ===========================================================================
+__global__ void d_bvh_edges(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+                            const EdgeSoA edges, size_t num_edges,
+                            const EdgeKernelOut out);
+
+// Collaborative version of d_bvh_edges (same interface, same results): the
+// batch's samples are root-checked in pooled rounds (one sample per lane),
+// only root-overlapping samples enter a shared candidate ring, and the ring
+// is drained by two lockstep 16-lane traversal engines with a sticky per-edge
+// dead mask for early exits. Modernized the same way as d_bvh_edges.
+__global__ void d_bvh_edges_collab(const RigidObstacleSoA obs, const RigidRobotSoA rob,
+                                   const EdgeSoA edges, size_t num_edges,
+                                   const EdgeKernelOut out);
+
+// Host wrapper mirroring bvh_naive. Uploads the BVH rotations as quaternions,
+// copies the EdgeBatch to the device, launches d_bvh_edges, and decodes the
+// bit-packed results into valid. first_invalid_t is sized num_edges and
+// initialized to -1; entries are only written for edges that carry
+// EDGE_FLAG_REPORT_FIRST_INVALID_T and collide.
+double bvh_edges(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
+                 const MeshData& rob_mesh, const MeshData& obs_mesh,
+                 const EdgeBatch& edges,
+                 std::vector<bool>& valid, std::vector<float>& first_invalid_t, bool dry_run = false);
+
+// Host wrapper for d_bvh_edges_collab, mirroring bvh_edges.
+double bvh_edges_collab(const BVNode_soa<>& rob_BVH, const BVNode_soa<>& obs_BVH,
+                        const MeshData& rob_mesh, const MeshData& obs_mesh,
+                        const EdgeBatch& edges,
+                        std::vector<bool>& valid, std::vector<float>& first_invalid_t, bool dry_run = false);
+
+// CPU reference edge validation (FCL): for each EDGE_TYPE_LINEAR_6D edge,
+// the samples t = j/nsteps are checked in order with early-out on the first
+// collision, mirroring d_bvh_edges. Timed; prints a labeled timing line like
+// checkConfsCPU and returns the elapsed milliseconds.
+double checkEdgesCPU(const std::vector<Edge>& edges,
+                     std::vector<bool>& valid, std::vector<float>& first_invalid_t,
+                     const std::string& robot_filename, const std::string& obstacle_filename);
