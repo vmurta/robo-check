@@ -243,7 +243,7 @@ def main():
         state = checker.get_kinematics(q)
         return checker.get_collision_distance(state)
 
-    # warmup + calibrate collision threshold (distance convention)
+    # Warmup: load/cache the kernels before any timing (256 poses, 3 calls).
     warm_q = q_all[: min(256, q_all.shape[0])].view(-1, 1, 7)
     for _ in range(3):
         run_checker(warm_q)
@@ -260,6 +260,12 @@ def main():
     last_pred_idx = None
     for batch in batch_sizes:
         q = q_all[:batch].view(batch, 1, 7)
+        # Warm THIS batch size once before timing: the kernel module is
+        # already warm from above, but batch-size-dependent buffer setup
+        # (allocator + setup_batch_tensors) is lazy per size and would
+        # otherwise land inside the first timed iteration.
+        run_checker(q)
+        torch.cuda.synchronize()
         times = []
         for _ in range(args.repeat):
             t0 = time.perf_counter()

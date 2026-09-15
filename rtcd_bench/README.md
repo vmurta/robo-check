@@ -57,20 +57,20 @@ with the combined scene+self kernel showed no measurable difference.
 | scene  | method            | us/pose | +verify | FP  | FN  |
 |--------|-------------------|--------:|--------:|----:|----:|
 | simple | robo-check (quatSAT) |   3.07  |    -    |  0  |  0  |
-| simple | curobo-default    |   0.76  |  15.23  | 569 |  0  |
-| simple | curobo-links17    |   0.53  |  14.39  | 359 |  0  |
+| simple | curobo-default    |   0.71  |  16.21  | 569 |  0  |
+| simple | curobo-links17    |   0.53  |  13.39  | 359 |  0  |
 | simple | fcl-cpu           |  17.02  |    -    |  -  |  -  |
 | shelf  | robo-check (quatSAT) |   4.52  |    -    |  0  |  0  |
-| shelf  | curobo-default    |   1.67  |  17.84  | 534 |  0  |
-| shelf  | curobo-links17    |   1.10  |  17.51  | 345 |  0  |
+| shelf  | curobo-default    |   1.59  |  18.48  | 534 |  0  |
+| shelf  | curobo-links17    |   1.02  |  16.54  | 345 |  0  |
 | shelf  | fcl-cpu           |  20.83  |    -    |  -  |  -  |
 | dense  | robo-check (quatSAT) |   6.53  |    -    |  0  |  0  |
-| dense  | curobo-default    |   1.70  |  17.80  | 533 |  0  |
-| dense  | curobo-links17    |   1.17  |  17.74  | 346 |  0  |
+| dense  | curobo-default    |   1.72  |  17.69  | 533 |  0  |
+| dense  | curobo-links17    |   1.15  |  16.67  | 346 |  0  |
 | dense  | fcl-cpu           |  22.28  |    -    |  -  |  -  |
 | rtcc   | robo-check (quatSAT) |   5.29  |    -    |  0  |  0  |
-| rtcc   | curobo-default    |   1.68  |  18.27  | 533 |  0  |
-| rtcc   | curobo-links17    |   1.14  |  17.71  | 346 |  0  |
+| rtcc   | curobo-default    |   1.69  |  18.41  | 533 |  0  |
+| rtcc   | curobo-links17    |   1.12  |  17.25  | 346 |  0  |
 | rtcc   | fcl-cpu           |  22.96  |    -    |  -  |  -  |
 
 Columns:
@@ -87,6 +87,11 @@ Notes:
 - robo-check numbers include the full pipeline (FK + BVH traversal + narrow
   phase) on GPU; cuRobo includes sphere FK + distance query (CUDA graph off,
   eager mode). Timings vary with hardware — rerun for your GPU.
+- Both sides are warmed before timing: robo-check's `bvh_articulated` dry-run
+  launches a 256-config batch (allocations live outside the timed region),
+  and `bench_curobo.py` warms each batch size once (3 extra calls at 256
+  poses to cache the kernels, plus one call per timed batch size so lazy
+  buffer setup is excluded).
 - **Accuracy**: cuRobo's sphere model is designed to over-approximate, but the
   shipped `franka.yml` spheres do not strictly cover the meshes (the FCL
   ground truth uses the larger visual meshes; e.g. link6 protrudes up to 9 cm
