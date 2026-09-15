@@ -128,7 +128,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO_ROOT = os.path.dirname(HERE)
 
 
-def run_fcl_verify(indices, scene, nposes):
+def run_fcl_verify(indices, scene, nposes, poses_file):
     """Double-check pose indices with FCL via rtcd-bench --verify.
 
     Returns (checked, true_collisions, false_collisions, time_ms, us_per_check).
@@ -142,7 +142,8 @@ def run_fcl_verify(indices, scene, nposes):
             for i in indices:
                 f.write(f"{i}\n")
         r = subprocess.run(
-            [rtcd_bin, "--scene", scene, "--nposes", str(nposes), "--verify", path],
+            [rtcd_bin, "--scene", scene, "--poses", poses_file,
+             "--nposes", str(nposes), "--verify", path],
             capture_output=True,
             text=True,
             timeout=3600,
@@ -172,11 +173,15 @@ def main():
     ap.add_argument("--labels", default=None, help="FCL labels file from rtcd-bench --dump-labels")
     ap.add_argument("--repeat", type=int, default=3)
     ap.add_argument("--csv", default=None)
-    ap.add_argument("--sweep", action="store_true", help="batch sizes 1..4096")
+    ap.add_argument("--sweep", action="store_true",
+                    help="batch-size sweep: 1 pose doubling up to nposes")
     ap.add_argument(
         "--robot-config",
-        default="franka.yml",
-        help="cuRobo robot config name or path to yaml (default: franka.yml)",
+        default="franka_links17.yml",
+        help="cuRobo robot config name or path to yaml "
+        "(default: franka_links17.yml, links 1..7 to match RTCD SKIP_BASE; "
+        "the stock franka.yml adds base/hand/finger spheres that are not "
+        "part of the FCL ground truth)",
     )
     ap.add_argument(
         "--activation-distance",
@@ -202,6 +207,12 @@ def main():
     scene_cfg = build_scene_cfg(args.scene_dir, args.scene)
 
     robot_cfg = args.robot_config
+    # resolve repo-local configs relative to this script, so standalone runs
+    # work from any cwd
+    if not os.path.isabs(robot_cfg) and not os.path.exists(robot_cfg):
+        local = os.path.join(HERE, robot_cfg)
+        if os.path.exists(local):
+            robot_cfg = local
     if os.path.isabs(robot_cfg) or os.path.exists(robot_cfg):
         import yaml
 
@@ -240,10 +251,12 @@ def main():
 
     rows = []
     batch_sizes = (
-        [2 ** k for k in range(13) if 2 ** k <= q_all.shape[0]] + [q_all.shape[0]]
+        [2 ** k for k in range(13) if 2 ** k <= q_all.shape[0]]
         if args.sweep
         else [q_all.shape[0]]
     )
+    if args.sweep and batch_sizes[-1] != q_all.shape[0]:
+        batch_sizes.append(q_all.shape[0])
     last_pred_idx = None
     for batch in batch_sizes:
         q = q_all[:batch].view(batch, 1, 7)
@@ -298,6 +311,7 @@ def main():
             last_pred_idx if last_pred_idx is not None else np.array([], dtype=int),
             args.scene,
             args.nposes,
+            args.poses,
         )
         kernel_ms = float(last[4])
         total_ms = kernel_ms + verify_ms

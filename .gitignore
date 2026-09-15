@@ -27,6 +27,7 @@ PickleAudit.md
 # Python files
 python/env/*
 python/__pycache__/*
+rtcd_bench/__pycache__/*
 
 build/
 results/

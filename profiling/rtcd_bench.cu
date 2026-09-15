@@ -1047,8 +1047,9 @@ int main(int argc, char** argv) {
     double best = 1e30;
     std::vector<size_t> batchSizes;
     if (sweep) {
-        for (size_t n = 1; n <= 4096; n <<= 1) batchSizes.push_back(n);
-        batchSizes.push_back(nPoses);
+        // 1 pose doubling up to nPoses (capped: never time more poses than exist)
+        for (size_t n = 1; n <= 4096 && n <= nPoses; n <<= 1) batchSizes.push_back(n);
+        if (batchSizes.back() != nPoses) batchSizes.push_back(nPoses);
     } else {
         batchSizes.push_back(nPoses);
     }
